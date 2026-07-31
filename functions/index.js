@@ -74,4 +74,42 @@ const setAdminCenterPermission = onCall(async (request) => {
   return { ok: true };
 });
 
-module.exports = { getAdminCenterState, setAdminCenterPermission };
+// 통합 관리 센터 — 인증 스트리머 관리 1단계: 배팅시장(bettingMarket/verifyRequests)·
+// 주식시장(streamerVerificationRequests)의 대기 신청과 공유 streamerVerifications을
+// 한 화면에서 보기 위한 조회 전용 함수. 승인/거절/해제 자체는 여기서 새로 구현하지
+// 않는다 - 각 게임의 기존 함수(배팅시장 approveVerification 등, 주식시장 adminAction의
+// approveStreamerVerification 등 액션)를 클라이언트가 source 태그를 보고 그대로
+// 호출한다. 이 함수는 흩어진 데이터를 한 번에 모아서 보여주는 역할만 한다.
+// 승인/거절/해제는 두 스트리머를 저울질하는 민감한 권한이라 당분간 관리자 전용으로
+// 유지하기로 했고, 조회도 같은 화면의 일부라 우선 관리자 전용으로 시작한다.
+const listStreamerVerificationOverview = onCall(async (request) => {
+  requireAdmin(request);
+  const db = getDatabase();
+  const [bmReqSnap, smReqSnap, verifiedSnap] = await Promise.all([
+    db.ref('bettingMarket/verifyRequests').get(),
+    db.ref('streamerVerificationRequests').get(),
+    db.ref('streamerVerifications').get(),
+  ]);
+
+  const bmReq = bmReqSnap.val() || {};
+  const smReq = smReqSnap.val() || {};
+  const verified = verifiedSnap.val() || {};
+
+  const pending = [];
+  Object.keys(bmReq).forEach(function (id) {
+    pending.push(Object.assign({ id: id, source: 'bettingMarket' }, bmReq[id]));
+  });
+  Object.keys(smReq).forEach(function (id) {
+    // 주식시장 쪽 노드는 승인/거절된 뒤에도 이력이 남아있는 구조라 pending만 걸러낸다.
+    if (smReq[id].status !== 'pending') return;
+    pending.push(Object.assign({ id: id, source: 'stockMarket' }, smReq[id]));
+  });
+
+  const verifiedList = Object.keys(verified).map(function (id) {
+    return Object.assign({ id: id }, verified[id]);
+  });
+
+  return { pending: pending, verified: verifiedList };
+});
+
+module.exports = { getAdminCenterState, setAdminCenterPermission, listStreamerVerificationOverview };
