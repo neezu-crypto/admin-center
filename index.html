@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>통합 관리 센터</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: #0b0d10; color: #eef0f2;
+    font-family: "Pretendard", "Apple SD Gothic Neo", -apple-system, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; border-bottom: 1px solid #262b33; background: #15181d;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; }
+  header .sub { font-size: 11px; color: #8b93a1; margin-top: 2px; }
+  #authArea { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+  #authArea button {
+    background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
+    padding: 7px 13px; border-radius: 6px; font-size: 12.5px; cursor: pointer;
+  }
+  #authArea button:hover { border-color: #d9a441; }
+  main { max-width: 960px; margin: 0 auto; padding: 40px 22px; }
+  .card {
+    background: #15181d; border: 1px solid #262b33; border-radius: 10px;
+    padding: 22px; margin-bottom: 20px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 6px; }
+  .card p.hint { font-size: 12.5px; color: #8b93a1; margin: 0 0 16px; line-height: 1.6; }
+  .role-badge {
+    display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
+    padding: 3px 9px; border-radius: 20px; margin-left: 8px; vertical-align: middle;
+  }
+  .role-badge.admin { background: rgba(217,164,65,0.14); color: #d9a441; border: 1px solid rgba(217,164,65,0.35); }
+  .role-badge.streamer { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
+  #gate { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; text-align: center; }
+  #gate p { color: #8b93a1; font-size: 13.5px; max-width: 380px; line-height: 1.7; }
+  #gate button {
+    margin-top: 18px; background: #d9a441; color: #1a1200; border: none;
+    padding: 11px 22px; border-radius: 7px; font-weight: 700; font-size: 13.5px; cursor: pointer;
+  }
+  #gate button:hover { background: #e6b453; }
+  .empty-state { font-size: 12.5px; color: #5f6672; text-align: center; padding: 24px 0; }
+  .perm-row {
+    display: flex; align-items: center; gap: 10px; padding: 10px 0;
+    border-bottom: 1px solid #1c2027; font-size: 13px;
+  }
+  .perm-row:last-child { border-bottom: none; }
+  .perm-row label { flex: 1; cursor: pointer; }
+  .perm-row .perm-desc { display: block; font-size: 11.5px; color: #5f6672; margin-top: 2px; }
+  .perm-granted-tag {
+    font-size: 10.5px; font-weight: 700; color: #3fb689;
+    background: rgba(63,182,137,0.14); border: 1px solid rgba(63,182,137,0.35);
+    padding: 2px 8px; border-radius: 20px;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>통합 관리 센터<span class="role-badge admin" id="roleBadge" hidden></span></h1>
+    <div class="sub">시리즈 전체 관리 세션 통합 (준비 중)</div>
+  </div>
+  <div id="authArea">
+    <span id="authStatus">확인 중...</span>
+    <button id="authBtn" type="button" disabled>Google 로그인</button>
+  </div>
+</header>
+
+<main>
+  <!-- 로그인 안 했거나(또는 익명), 관리자도 인증 스트리머도 아닌 경우 -->
+  <div id="gate" hidden>
+    <h2>접근 권한이 없습니다</h2>
+    <p id="gateMessage">이 페이지는 관리자 계정 또는 인증된 스트리머 계정으로만 입장할 수 있습니다.</p>
+    <button id="gateLoginBtn" type="button">Google 로그인</button>
+  </div>
+
+  <!-- 관리자 전용 화면 -->
+  <div id="adminShell" hidden>
+    <div class="card">
+      <h2>게임별 관리 기능</h2>
+      <p class="hint">기존 스트리머 주식시장·스트리머 배팅시장의 관리 세션에서 어떤 기능을 이곳으로 옮길지 다음 단계에서 결정합니다.</p>
+      <div class="empty-state">아직 통합된 관리 기능이 없습니다.</div>
+    </div>
+
+    <div class="card">
+      <h2>인증 스트리머 권한 위임</h2>
+      <p class="hint">
+        여기서 체크한 권한은 <b>인증된 스트리머 전원에게 동일하게</b> 부여됩니다(스트리머별 개별 설정이 아님).
+        관리자는 이 목록과 무관하게 항상 모든 권한을 가집니다.
+      </p>
+      <div id="permissionEditList"></div>
+    </div>
+  </div>
+
+  <!-- 인증 스트리머 화면 -->
+  <div id="streamerShell" hidden>
+    <div class="card">
+      <h2>부여받은 권한</h2>
+      <p class="hint">관리자가 인증 스트리머 전체에게 부여한 권한만 여기서 사용할 수 있습니다.</p>
+      <div id="permissionViewList"></div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
+  import {
+    getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
+  } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
+  import {
+    getFunctions, httpsCallable,
+  } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js';
+
+  // 07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
+  // (Auth·인증 스트리머 판별 전부 이 프로젝트 기준). 이 페이지 전용 Web App을 새로
+  // 등록하지 않고 기존 config를 재사용해도 기능상 문제 없음(analytics 식별용 appId만
+  // 다르면 되는데, 이 페이지는 내부 운영툴이라 굳이 분리하지 않았다).
+  // RTDB는 클라이언트에서 직접 읽고 쓰지 않는다 - 역할 판별(관리자/인증 스트리머)과
+  // 위임 권한 조회/변경 전부 functions/index.js(admincenter 코드베이스)의 Cloud
+  // Functions를 통해서만 이루어진다.
+  const firebaseConfig = {
+    apiKey: 'AIzaSyAZcjQPHphENs-Bb7IfdL2qTtOMhJrRP54',
+    authDomain: 'soop-stock-market.firebaseapp.com',
+    databaseURL: 'https://soop-stock-market-default-rtdb.firebaseio.com',
+    projectId: 'soop-stock-market',
+    storageBucket: 'soop-stock-market.firebasestorage.app',
+    messagingSenderId: '997788925900',
+    appId: '1:997788925900:web:cdddfe20075aa199a3a769',
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const functions = getFunctions(app, 'us-central1');
+  const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
+  const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
+
+  // 다음 단계에서 기존 관리 세션 기능을 하나씩 여기 추가하고, 그 key를 실제 기능
+  // 노출/활성화 조건(권한 있는 스트리머에게만 보이기 등)으로 사용한다.
+  // 예: { key: 'viewAuditLog', label: '감사 로그 조회', desc: '전체 게임의 관리 처리 내역을 볼 수 있습니다.' }
+  const PERMISSION_CATALOG = [];
+
+  const authStatusEl = document.getElementById('authStatus');
+  const authBtnEl = document.getElementById('authBtn');
+  const roleBadgeEl = document.getElementById('roleBadge');
+  const gateEl = document.getElementById('gate');
+  const gateMessageEl = document.getElementById('gateMessage');
+  const gateLoginBtn = document.getElementById('gateLoginBtn');
+  const adminShellEl = document.getElementById('adminShell');
+  const streamerShellEl = document.getElementById('streamerShell');
+  const permissionEditListEl = document.getElementById('permissionEditList');
+  const permissionViewListEl = document.getElementById('permissionViewList');
+
+  let currentUser = null;
+  let role = 'none'; // 'admin' | 'streamer' | 'none'
+  let grantedPermissions = {};
+
+  function signIn() {
+    signInWithPopup(auth, new GoogleAuthProvider()).catch(function (err) {
+      if (err && (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request')) return;
+      console.error('Google 로그인 실패:', err);
+      window.alert('Google 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    });
+  }
+  authBtnEl.addEventListener('click', function () {
+    if (currentUser) { signOut(auth); return; }
+    signIn();
+  });
+  gateLoginBtn.addEventListener('click', signIn);
+
+  function renderPermissionEditList() {
+    if (!PERMISSION_CATALOG.length) {
+      permissionEditListEl.innerHTML = '<div class="empty-state">아직 위임 가능한 권한이 없습니다.</div>';
+      return;
+    }
+    permissionEditListEl.innerHTML = '';
+    PERMISSION_CATALOG.forEach(function (perm) {
+      const row = document.createElement('div');
+      row.className = 'perm-row';
+      const checkboxId = 'perm-' + perm.key;
+      row.innerHTML =
+        '<input type="checkbox" id="' + checkboxId + '"' + (grantedPermissions[perm.key] ? ' checked' : '') + '>' +
+        '<label for="' + checkboxId + '">' + perm.label +
+        (perm.desc ? '<span class="perm-desc">' + perm.desc + '</span>' : '') + '</label>';
+      row.querySelector('input').addEventListener('change', function (e) {
+        setPermission(perm.key, e.target.checked);
+      });
+      permissionEditListEl.appendChild(row);
+    });
+  }
+
+  function renderPermissionViewList() {
+    const grantedKeys = PERMISSION_CATALOG.filter(function (p) { return grantedPermissions[p.key]; });
+    if (!grantedKeys.length) {
+      permissionViewListEl.innerHTML = '<div class="empty-state">관리자가 아직 부여한 권한이 없습니다.</div>';
+      return;
+    }
+    permissionViewListEl.innerHTML = '';
+    grantedKeys.forEach(function (perm) {
+      const row = document.createElement('div');
+      row.className = 'perm-row';
+      row.innerHTML =
+        '<label>' + perm.label + (perm.desc ? '<span class="perm-desc">' + perm.desc + '</span>' : '') + '</label>' +
+        '<span class="perm-granted-tag">사용 가능</span>';
+      permissionViewListEl.appendChild(row);
+    });
+  }
+
+  // 역할 판별(관리자/인증 스트리머)과 위임 권한 조회를 한 번의 서버 함수 호출로 처리한다
+  // (getAdminCenterState가 role까지 함께 반환 - 클라이언트는 streamerVerifications를
+  // 직접 조회하지 않는다). 실시간 구독(onValue) 대신 단발성 호출 방식이라, 권한을
+  // 바꾼 뒤에는 다시 이 함수를 불러 최신 상태를 반영한다(의도된 트레이드오프 - 이
+  // 페이지는 실시간 동기화가 꼭 필요하진 않다).
+  async function refreshAdminCenterState() {
+    try {
+      const result = await getAdminCenterStateFn();
+      role = result.data.role;
+      grantedPermissions = result.data.permissions || {};
+    } catch (e) {
+      console.error('통합 관리 센터 상태 조회 실패:', e);
+      role = 'none';
+      grantedPermissions = {};
+    }
+    render();
+  }
+
+  // 권한 부여/해제는 관리자만 - 서버(setAdminCenterPermission Cloud Function)가
+  // requireAdmin으로 검증한다. 클라이언트는 UI 판단(체크박스 표시)만 한다.
+  function setPermission(key, granted) {
+    setAdminCenterPermissionFn({ key: key, granted: granted }).then(function () {
+      refreshAdminCenterState(); // 실시간 구독이 없으므로 성공 후 직접 다시 조회
+    }).catch(function (err) {
+      console.error('권한 변경 실패:', err);
+      window.alert('권한 변경에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      renderPermissionEditList(); // 실패 시 체크박스를 실제 저장된 상태로 되돌림
+    });
+  }
+
+  function render() {
+    gateEl.hidden = role !== 'none';
+    adminShellEl.hidden = role !== 'admin';
+    streamerShellEl.hidden = role !== 'streamer';
+    roleBadgeEl.hidden = role === 'none';
+    if (role === 'admin') {
+      roleBadgeEl.textContent = '관리자';
+      roleBadgeEl.className = 'role-badge admin';
+      renderPermissionEditList();
+    } else if (role === 'streamer') {
+      roleBadgeEl.textContent = '인증 스트리머';
+      roleBadgeEl.className = 'role-badge streamer';
+      renderPermissionViewList();
+    } else if (currentUser) {
+      gateMessageEl.textContent = '이 계정(' + (currentUser.email || '익명') + ')은 관리자도 인증된 스트리머도 아닙니다.';
+    } else {
+      gateMessageEl.textContent = '이 페이지는 관리자 계정 또는 인증된 스트리머 계정으로만 입장할 수 있습니다.';
+    }
+  }
+
+  // 이 페이지는 공개 서비스가 아니라 내부 운영툴이므로, 다른 게임들과 달리 익명
+  // 자동 로그인을 하지 않는다 - 실제 Google 계정 로그인 전에는 아무것도 보여주지 않는다.
+  onAuthStateChanged(auth, async function (user) {
+    currentUser = (user && !user.isAnonymous) ? user : null;
+    authBtnEl.disabled = false;
+
+    if (!currentUser) {
+      authStatusEl.textContent = '로그인이 필요합니다';
+      authBtnEl.textContent = 'Google 로그인';
+      role = 'none';
+      render();
+      return;
+    }
+
+    authStatusEl.textContent = currentUser.email || '로그인됨';
+    authBtnEl.textContent = '로그아웃';
+    await refreshAdminCenterState();
+  });
+</script>
+</body>
+</html>
