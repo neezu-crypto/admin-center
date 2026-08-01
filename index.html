@@ -93,13 +93,24 @@
   .verif-actions button.reject { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button.revoke { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button:disabled { opacity: .4; cursor: not-allowed; }
-  .audit-row {
-    padding: 10px 0; border-bottom: 1px solid #1c2027; font-size: 12.5px;
+  /* 1줄당 2건씩, 스크롤 한 화면엔 6줄(=12건)까지만 보이는 스크롤박스 */
+  #auditLogList {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+    max-height: 460px; overflow-y: auto; padding-right: 4px;
   }
-  .audit-row:last-child { border-bottom: none; }
+  @media (max-width: 720px) {
+    #auditLogList { grid-template-columns: 1fr; }
+  }
+  .audit-row {
+    padding: 10px 12px; border: 1px solid #262b33; border-radius: 8px;
+    background: #191d24; font-size: 12.5px; min-width: 0;
+  }
   .audit-row .audit-main { color: #eef0f2; }
   .audit-row .audit-main b { font-weight: 700; }
-  .audit-row .audit-detail { display: block; color: #8b93a1; margin-top: 2px; }
+  .audit-row .audit-detail {
+    display: block; color: #8b93a1; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: ui-monospace, monospace; }
 
   .game-row {
