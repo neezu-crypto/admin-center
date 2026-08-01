@@ -368,6 +368,21 @@
       <td>devbar 구성을 통합 관리 센터에서 관리</td>
       <td>지금은 각 페이지에 하드코딩된 정적 링크 목록. 08번에서 상세 설계</td>
     </tr>
+    <tr>
+      <td><strong>높음</strong></td>
+      <td>관리자 이메일 중복 하드코딩 정리</td>
+      <td>동일한 이메일 문자열이 4개 저장소·Functions/클라이언트/RTDB 규칙 3개 계층에 걸쳐 반복됨. 09번에서 상세 설계 — devbar보다 조용히 사고 날 확률이 높아 우선순위를 높게 잡음</td>
+    </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>통합 관리 센터 — 페이지별 접속자 분석</td>
+      <td>시간당 최고 동시 접속자 수 + 페이지별/합산 스파크라인 차트. 10번에서 상세 설계</td>
+    </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>통합 관리 센터 — 전체 통계 요약·이상 거래 모니터링</td>
+      <td>오늘/누적/재무 건전성/일간·주간·월간 통계 + 이상 거래 모니터링. 11번에서 상세 설계</td>
+    </tr>
   </table>
   <div class="callout"><b>권장 순서</b> — 킬스위치 → 권한 카탈로그 채우기 순으로 가는 게 안전하다. 위임 메커니즘이 이미 있다고 해서 카탈로그부터 채우면, 되돌릴 방법 없이 실제 권한이 스트리머 전원에게 뿌려지는 상태가 먼저 생긴다.</div>
 </section>
@@ -406,6 +421,144 @@
     <li><span class="chip">soop-stock-market/index.html</span> — <code>&lt;nav class="topnav"&gt;</code>/<code>.topnav-btn</code> 마크업이 devbar와 이름부터 다르므로, 공통 로직을 적용하려면 클래스명 통일 또는 별도 어댑터가 필요</li>
   </ul>
   <div class="callout"><b>권한 위임 후보로도 적합</b> — 링크 목록 수정은 신원·재화에 영향이 없는 낮은 리스크 작업이라, 07번 "위임 권한 카탈로그 채우기"의 첫 후보 항목으로 검토할 만하다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">09</span><h2>관리자 이메일 중복 하드코딩</h2></div>
+  <p>"누가 관리자인가"를 판단하는 기준이 <strong>하나의 공유 값이 아니라, 같은 이메일 문자열이 여러 저장소·여러 계층에 걸쳐 그대로 반복 입력</strong>된 것이다. devbar(08번)와 같은 계열의 "single source of truth 없음" 문제이지만, 영향 범위가 훨씬 넓고 조용히 사고 날 가능성도 더 크다.</p>
+  <h3>어디에 몇 겹으로 박혀있나</h3>
+  <table>
+    <tr><th>계층</th><th>위치</th><th>비고</th></tr>
+    <tr>
+      <td>Functions 상수</td>
+      <td><span class="chip">StreamBet-Market/functions/src/constants.js</span> · <span class="chip">soop-stock-market/functions/common.js</span> · <span class="chip">interior-3d-viewer/functions/index.js</span> · <span class="chip">admin-center/functions/index.js</span></td>
+      <td>저장소 4곳이 각자 <code>ADMIN_EMAIL</code>이라는 같은 이름의 상수를 독립적으로 선언</td>
+    </tr>
+    <tr>
+      <td>클라이언트 JS (접근 제어용)</td>
+      <td><span class="chip">StreamBet-Market/js/firebase-init.js</span> · <span class="chip">soop-stock-market/index.html</span> · <span class="chip">interior-3d-viewer/index.html</span></td>
+      <td>로그인한 이메일과 문자열을 직접 비교해서 관리자 UI를 보여줄지 결정</td>
+    </tr>
+    <tr>
+      <td>RTDB 규칙 (접근 제어용)</td>
+      <td><span class="chip">StreamBet-Market/database.rules.json</span> · <span class="chip">interior-3d-viewer/database.rules.json</span></td>
+      <td>각 파일 안에서만도 <code>auth.token.email === '...'</code> 형태로 <strong>10곳 넘게</strong> 반복 — 05번의 "원본은 StreamBet-Market, 나머지에 복사" 관례로 파일 간에는 동기화되지만, 파일 안의 반복 자체는 그대로 남아있음</td>
+    </tr>
+    <tr>
+      <td>단순 문의처 표시</td>
+      <td><span class="chip">soop-stock-market</span>의 이용약관·개인정보처리방침·안내 문구 등</td>
+      <td>접근 제어가 아니라 "문의: skftodwocks2@gmail.com" 식 안내 텍스트라 <strong>이 문제와 무관</strong> — 아래 개선 논의에서 건드릴 대상이 아님</td>
+    </tr>
+  </table>
+  <div class="callout warn"><b>왜 devbar보다 더 위험한가</b> — devbar 링크가 하나 어긋나면 사용자가 바로 눈치채고 알려주지만(실제로 이번 시리즈에서 그렇게 발견됨), 관리자 이메일 하드코딩은 <strong>계정을 바꿔야 하는 순간에만</strong> 문제가 드러난다. 만약 관리자 계정 교체·탈취 대응 등으로 이메일을 바꿔야 한다면, 위 목록 중 한 곳이라도 빠뜨리면 <strong>그 저장소만 옛 계정을 계속 관리자로 인식</strong>하거나(Functions/클라이언트), <strong>RTDB 규칙에서 옛 계정이 여전히 민감한 노드에 접근 가능한 상태로 남는다</strong>(규칙 파일). 후자는 발견이 훨씬 늦다 — 아무도 안 건드리면 영원히 안 드러날 수도 있다.</div>
+  <h3>개선 방향</h3>
+  <div class="flow">지금: 이메일 문자열을 4개 저장소가 각자 소스에 박아넣고 비교
+
+제안: "관리자 uid 목록"을 공유 노드 하나로 두고 전부 그걸 참조
+   → 예: <b>adminCenter/adminUids/{uid}</b> = true (이메일이 아니라 uid 기준 — 이메일 변경에도 안전)
+   → Functions: 각자 상수 비교 대신 이 노드를 조회
+   → RTDB 규칙: auth.token.email === '...' 리터럴 대신
+              root.child('adminCenter/adminUids').child(auth.uid).exists() 로 교체
+   → 클라이언트 UI 판단: getAdminCenterState 같은 기존 호출 결과의 role 필드 재사용</div>
+  <div class="callout"><b>규모가 있는 작업</b> — RTDB 규칙 리터럴을 걷어내는 것만 해도 파일당 10곳 넘게 고쳐야 하고, 3곳(StreamBet-Market/interior-3d-viewer 규칙 + 4개 Functions 코드베이스)을 동시에 정합성 있게 배포해야 해서 실수 여지가 크다. 07번 작업 표에 "높음" 우선순위로 등록했지만, 실제 착수 전에 변경 범위를 다시 한번 파일 단위로 전수 점검하는 게 안전하다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">10</span><h2>통합 관리 센터 — 페이지별 접속자 분석 (설계)</h2></div>
+  <p>목표: 통합 관리 센터에서 <strong>페이지(게임)별 시간당 최고 동시 접속자 수</strong>를 보여주고, <strong>페이지 개별 / 전체 합산 접속자 수를 스파크라인 차트</strong>로 확인할 수 있게 한다.</p>
+  <h3>현재 상태</h3>
+  <table>
+    <tr><th>저장소</th><th>있는 것</th><th>비고</th></tr>
+    <tr>
+      <td><span class="chip">soop-stock-market</span></td>
+      <td>실시간 "현재 접속자" 수 표시</td>
+      <td><code>presence/users/{uid}</code>에 5분 주기로 <code>lastSeen</code> 하트비트를 쓰고, 클라이언트가 60분 유예를 두고 활성 uid 수를 세어 그 순간의 숫자만 보여준다. <strong>이력을 저장하지 않아</strong> "지금 몇 명"만 알 수 있고, 시간대별 추이나 최고치는 알 수 없다</td>
+    </tr>
+    <tr>
+      <td><span class="chip">StreamBet-Market</span></td>
+      <td>규칙만 존재, 기능 없음</td>
+      <td><code>database.rules.json</code>에 <code>presence/users/{uid}</code> 노드 규칙이 정의돼 있지만, 이 노드를 실제로 읽거나 쓰는 코드가 저장소 어디에도 없다 — 예비로 만들어두고 아직 안 쓴 스키마로 보임</td>
+    </tr>
+    <tr>
+      <td><span class="chip">interior-3d-viewer</span> · <span class="chip">admin-center</span></td>
+      <td>없음</td>
+      <td>presence 관련 노드/코드 전무</td>
+    </tr>
+  </table>
+  <div class="callout warn"><b>설계상 반드시 짚어야 할 함정</b> — 03번에서 다뤘듯 <strong>uid는 로그인 세션 공유로 여러 페이지에서 동일하다</strong>. 그런데 soop-stock-market의 현재 스키마(<code>presence/users/{uid}</code>)와 StreamBet-Market 규칙의 스키마 둘 다 <strong>앱 구분 없이 uid만으로</strong> 기록하는 구조다. 이 스키마를 그대로 다른 페이지에도 적용하면, 한 사람이 배팅시장 탭과 주식시장 탭을 동시에 열어놔도 <strong>같은 uid라서 presence 노드가 하나로 겹쳐 쓰기 경합이 나고, "어느 페이지에 접속 중인지" 자체를 구분할 수 없다</strong>. 페이지별 접속자 수를 세려면 반드시 <strong>앱 단위로 네임스페이스된 경로</strong>(<code>presence/{appId}/{uid}</code>)로 먼저 정리해야 하고, 이 과정에서 soop-stock-market의 기존 경로도 함께 옮겨야 한다.</div>
+  <h3>제안하는 파이프라인</h3>
+  <div class="flow">1) 각 페이지가 하트비트 기록 (soop-stock-market의 기존 방식을 앱별로 네임스페이스만 바꿔 재사용)
+   → <b>presence/{appId}/{uid}</b>: { lastSeen }   (appId는 06번 GAME_CATALOG의 id와 동일하게)
+
+2) 주기 실행되는 Cloud Scheduler 함수(onSchedule, 예: 5분마다)가
+   각 appId의 presence 노드를 훑어 유예시간 이내 활성 uid 수를 센다
+
+3) 그 값이 현재 시간대(hour bucket)에 이미 기록된 최고치보다 크면 갱신
+   → <b>analytics/presenceHourly/{appId}/{yyyyMMddHH}</b>: { peak }
+
+4) 오래된 버킷은 주기적으로 정리(예: 30일 이상 지난 데이터 삭제)
+   → adminAuditLog의 200개 캡 정리와 같은 개념, 기준만 "개수"가 아니라 "기간"</div>
+  <h3>통합 관리 센터 쪽 작업</h3>
+  <ul>
+    <li>새 카드 "접속자 분석" — 게임별 스파크라인 + "오늘 시간당 최고 접속자 수" 라벨, 그리고 같은 시간 버킷끼리 합산한 전체 스파크라인</li>
+    <li>새 조회 함수 <code>getVisitorAnalytics</code>(onCall, 관리자 전용) — 요청 범위(예: 최근 24시간/7일)의 시간별 peak을 앱별 + 합산으로 반환</li>
+    <li>차트 렌더링은 soop-stock-market이 이미 쓰고 있는 Chart.js를 그대로 재사용 — 스파크라인은 축·범례 없는 미니 line chart로 충분</li>
+  </ul>
+  <h3>영향 범위</h3>
+  <ul>
+    <li><span class="chip">soop-stock-market</span> — 기존 <code>presence/users/{uid}</code> 하트비트·현재 접속자 표시 로직을 <code>presence/stockMarket/{uid}</code>로 이전</li>
+    <li><span class="chip">StreamBet-Market</span> · <span class="chip">interior-3d-viewer</span>(3개 페이지) — presence 하트비트를 새로 붙여야 함(지금은 없거나 죽은 규칙뿐)</li>
+    <li>05번의 RTDB 규칙 동기화 관례에 따라, presence 스키마 변경과 <span class="chip">analytics/presenceHourly</span> 신설 모두 StreamBet-Market 원본에서 고치고 3곳에 동기화 후 배포</li>
+  </ul>
+  <div class="callout"><b>과금/부하 고려</b> — presence 하트비트는 활성 사용자당 주기적 쓰기라 사용자가 늘수록 RTDB 쓰기 횟수가 비례해서 늘어난다. 이미 soop-stock-market이 5분 주기로 검증한 값이라 그대로 재사용하되, 페이지 수가 늘어날수록(3→5개 이상) 총 쓰기량을 한 번 더 점검할 것.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">11</span><h2>통합 관리 센터 — 전체 통계 요약·이상 거래 모니터링 (설계)</h2></div>
+  <p>목표: <strong>오늘 / 누적(전체 기간) / 재무 건전성 / 일간·주간·월간 통계</strong>와 <strong>이상 거래 모니터링</strong>을 게임마다 따로 들어가지 않고 통합 관리 센터 한 화면에서 확인한다.</p>
+  <h3>현재 상태 — 이미 있는 것 / 없는 것</h3>
+  <table>
+    <tr><th>저장소</th><th>있는 것</th><th>비고</th></tr>
+    <tr>
+      <td><span class="chip">StreamBet-Market</span></td>
+      <td>
+        <code>getAdminDashboardStats</code> — 오늘 신규 지갑/베팅, 회원 구성(익명/실계정/인증 스트리머), 누적 베팅액·페이아웃·환전량·레이크, 잭팟 당첨, <strong>재무 건전성(총 유통량·준비금 잔고·잭팟 잔고)</strong><br>
+        <code>getStatsTimeseries</code> — 일/주/월 버킷(14/8/6개)의 베팅액·건수·신규 지갑<br>
+        <code>getAnomalyMonitor</code> — 최근 1시간 신규 지갑, 잔액 상위 10, 24시간 환전량<br>
+        <code>getExchangeLog</code> — 최근 100건 환전 내역
+      </td>
+      <td>3개 게임 중 통계 레이어가 가장 발전돼 있음. <strong>단, 전부 호출 시점에 원본 레코드를 스캔해서 계산</strong> — 사전 집계·저장된 값이 아니다. <code>getAnomalyMonitor</code>도 "이상 거래를 탐지"하는 게 아니라 최근/상위 항목을 나열해 사람이 판단하게 하는 수준(점수화·자동 플래깅 없음)</td>
+    </tr>
+    <tr>
+      <td><span class="chip">soop-stock-market</span></td>
+      <td><code>actionGetOverviewStats</code> — 오늘/누적 출석 보상, 오늘/누적 실결제 매출(배너·고정·릴레이·플레이타임), 유저 수, 복권 통계</td>
+      <td>이쪽도 매 호출마다 원본 스캔. <strong>주식 거래량 통계, 재화 발행량/준비금 같은 "재무 건전성" 개념 자체가 없음</strong>. <code>stockFreeze.js</code>의 자동 동결(1분봉 5개 연속 100만원 이상 시 동결)은 가격 급등에 대한 서킷브레이커일 뿐 이상 거래 탐지가 아님</td>
+    </tr>
+    <tr>
+      <td><span class="chip">interior-3d-viewer</span></td>
+      <td>없음</td>
+      <td>통계/대시보드/이상탐지 관련 기능 전무 — 프리셋 CRUD/병합 충돌 처리만 존재</td>
+    </tr>
+    <tr>
+      <td><span class="chip">admin-center</span></td>
+      <td>없음</td>
+      <td>현재 4개 카드(인증 스트리머 관리·감사 로그·콘텐츠 동결·권한 위임) 중 통계/재무 집계는 아직 없음</td>
+    </tr>
+  </table>
+  <div class="callout"><b>이 작업의 성격</b> — 06번에서 세운 원칙("기존 관리 함수를 대체하지 않고 그대로 호출해서 한 화면에 모은다")을 그대로 따를 수 있다. StreamBet-Market·soop-stock-market 모두 이미 쓸만한 통계 함수를 갖고 있으므로, 통합 관리 센터는 <strong>새 계산 로직을 만드는 게 아니라 이 함수들을 감싸는 조회 전용 aggregator</strong>만 추가하면 된다(06번 <code>listStreamerVerificationOverview</code>/<code>listAuditLogOverview</code>와 같은 패턴).</div>
+  <h3>통합 시 먼저 정리해야 할 개념 차이</h3>
+  <ul>
+    <li><strong>"재무 건전성"의 정의가 게임마다 다르다</strong> — StreamBet-Market은 이미 총 유통량/준비금/잭팟 잔고를 추적하지만, soop-stock-market엔 상응하는 개념(가상 화폐 발행량·준비금) 자체가 없다. 한 화면에 나란히 보여주려면 soop-stock-market 쪽에 먼저 이 개념을 만들지, 아니면 "해당 없음"으로 표시하고 넘어갈지 정해야 한다</li>
+    <li><strong>"이상 거래 모니터링"이라는 이름에 비해 실제로 있는 건 원시 리스트뿐</strong> — 지금 있는 <code>getAnomalyMonitor</code>는 "최근 가입/상위 잔액/환전량 상위" 나열이지 규칙 기반 탐지가 아니다. 통합 관리 센터에 이 이름을 그대로 쓰면 실제보다 더 많은 걸 하는 것처럼 보일 위험 — 1단계(기존 리스트 통합 표시)와 2단계(실제 스코어링/자동 플래깅 규칙 설계)를 분리해서 표기하는 게 정확하다</li>
+  </ul>
+  <h3>제안하는 구조</h3>
+  <ul>
+    <li>새 카드 "전체 통계 요약" — 게임별 섹션으로 오늘 / 누적 / 재무 건전성 세 블록 표시(재무 건전성 없는 게임은 "해당 없음")</li>
+    <li>새 카드 "일간·주간·월간 통계" — 10번에서 설계한 스파크라인/Chart.js 패턴 재사용, 게임별 미니 차트</li>
+    <li>새 카드 "이상 거래 모니터링 (1단계: 리스트 통합)" — StreamBet-Market의 <code>getAnomalyMonitor</code>/<code>getExchangeLog</code> 등 이미 있는 원시 리스트를 그대로 모아 보여줌. soop-stock-market엔 상응 리스트가 없으므로 우선 StreamBet-Market 데이터만 표시하고, soop-stock-market 쪽에 상응 리스트를 만드는 건 별도 후속 작업으로 분리</li>
+    <li>새 조회 함수 <code>getSeriesStatsOverview</code>(onCall, 관리자 전용) — 각 게임의 기존 함수를 <code>Promise.all</code>로 호출해 하나의 응답으로 합치는 조회 전용 함수(06번 패턴 재사용, 새 집계 로직 없음)</li>
+  </ul>
+  <div class="callout warn"><b>사전 집계가 필요해지는 시점</b> — 지금은 게임 3개, 데이터 규모가 크지 않아 "호출할 때마다 원본 스캔"이 버틸 만하지만, 통합 관리 센터가 여러 게임의 이런 스캔 함수를 동시에 호출하는 화면이 되면 부하가 배로 늘어난다. 데이터가 쌓이거나 게임이 늘어나면 10번에서 설계한 "Cloud Scheduler 주기 실행 + 시간 버킷 저장(<span class="chip">analytics/*</span>)" 패턴을 통계 쪽에도 확장 적용하는 걸 고려할 것 — 접속자 분석과 같은 <span class="chip">analytics</span> 네임스페이스를 공유하면 자연스럽게 이어진다.</div>
 </section>
 
 </div>
