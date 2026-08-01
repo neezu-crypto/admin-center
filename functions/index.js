@@ -112,4 +112,45 @@ const listStreamerVerificationOverview = onCall(async (request) => {
   return { pending: pending, verified: verifiedList };
 });
 
-module.exports = { getAdminCenterState, setAdminCenterPermission, listStreamerVerificationOverview };
+// 통합 관리 센터 — 감사 로그 통합: 배팅시장의 기존 bettingMarket/auditLog와
+// 주식시장의 새 adminAuditLog(이번에 처음 만든 것 - 스트리머 인증 관련 액션만
+// 우선 기록 중, 다른 관리 액션 전체로 넓히는 건 별도 작업)를 합쳐서 시간순으로
+// 보여준다. 관리자 전용.
+const AUDIT_OVERVIEW_LIMIT = 100;
+const listAuditLogOverview = onCall(async (request) => {
+  requireAdmin(request);
+  const db = getDatabase();
+  const [bmLogSnap, smLogSnap] = await Promise.all([
+    db.ref('bettingMarket/auditLog').get(),
+    db.ref('adminAuditLog').get(),
+  ]);
+
+  const bmLog = bmLogSnap.val() || {};
+  const smLog = smLogSnap.val() || {};
+
+  const entries = [];
+  Object.keys(bmLog).forEach(function (id) {
+    const e = bmLog[id];
+    entries.push({
+      id: id, source: 'bettingMarket', at: e.at,
+      actorName: e.actorName, action: e.action, detail: e.detail,
+    });
+  });
+  Object.keys(smLog).forEach(function (id) {
+    const e = smLog[id];
+    entries.push({
+      id: id, source: 'stockMarket', at: e.at,
+      actorName: e.actorName, action: e.action, detail: e.detail,
+    });
+  });
+
+  entries.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+  return { entries: entries.slice(0, AUDIT_OVERVIEW_LIMIT) };
+});
+
+module.exports = {
+  getAdminCenterState,
+  setAdminCenterPermission,
+  listStreamerVerificationOverview,
+  listAuditLogOverview,
+};

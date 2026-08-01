@@ -93,6 +93,14 @@
   .verif-actions button.reject { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button.revoke { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button:disabled { opacity: .4; cursor: not-allowed; }
+  .audit-row {
+    padding: 10px 0; border-bottom: 1px solid #1c2027; font-size: 12.5px;
+  }
+  .audit-row:last-child { border-bottom: none; }
+  .audit-row .audit-main { color: #eef0f2; }
+  .audit-row .audit-main b { font-weight: 700; }
+  .audit-row .audit-detail { display: block; color: #8b93a1; margin-top: 2px; }
+  .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: ui-monospace, monospace; }
 </style>
 </head>
 <body>
@@ -129,6 +137,16 @@
       <div id="verificationPendingList"></div>
       <h3 class="subhead">인증된 스트리머</h3>
       <div id="verificationVerifiedList"></div>
+    </div>
+
+    <div class="card">
+      <h2>감사 로그</h2>
+      <p class="hint">
+        배팅시장의 기존 처리 내역과 주식시장의 관리 처리 내역(현재는 스트리머 인증 관련
+        액션만 기록 중)을 합쳐서 시간순으로 보여줍니다. 최근 100건.
+      </p>
+      <button id="auditRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="auditLogList"></div>
     </div>
 
     <div class="card">
@@ -183,6 +201,7 @@
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
   const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
+  const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
 
   // 인증 스트리머 관리 1단계 — 새 승인/거절/해제 로직을 만들지 않고, 같은 프로젝트에
   // 이미 배포돼 있는 각 게임의 기존 Cloud Functions를 그대로 호출한다(같은
@@ -211,6 +230,8 @@
   const verificationRefreshBtn = document.getElementById('verificationRefreshBtn');
   const verificationPendingListEl = document.getElementById('verificationPendingList');
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
+  const auditRefreshBtn = document.getElementById('auditRefreshBtn');
+  const auditLogListEl = document.getElementById('auditLogList');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
@@ -424,6 +445,42 @@
     });
   }
 
+  // 감사 로그 통합 — 배팅시장 bettingMarket/auditLog + 주식시장 adminAuditLog(이번에
+  // 처음 만든 것, 아직 스트리머 인증 관련 액션만 기록)를 서버에서 합쳐 받아 그대로
+  // 표시한다. 실시간 구독이 아니라 새로고침 버튼으로 다시 불러오는 방식(다른 카드와
+  // 동일한 트레이드오프).
+  async function refreshAuditLog() {
+    auditLogListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await listAuditLogOverviewFn();
+      renderAuditLog(result.data.entries || []);
+    } catch (e) {
+      console.error('감사 로그 조회 실패:', e);
+      auditLogListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+  auditRefreshBtn.addEventListener('click', refreshAuditLog);
+
+  function renderAuditLog(entries) {
+    if (!entries.length) {
+      auditLogListEl.innerHTML = '<div class="empty-state">기록이 없습니다.</div>';
+      return;
+    }
+    auditLogListEl.innerHTML = '';
+    entries.forEach(function (e) {
+      const row = document.createElement('div');
+      row.className = 'audit-row';
+      const sourceLabel = SOURCE_LABEL[e.source] || e.source;
+      const timeText = e.at ? new Date(e.at).toLocaleString('ko-KR') : '';
+      row.innerHTML =
+        '<div class="audit-main"><b>' + escapeHtml(e.actorName || e.source) + '</b> · ' + escapeHtml(e.action) +
+        '<span class="source-tag ' + e.source + '">' + sourceLabel + '</span></div>' +
+        (e.detail ? '<span class="audit-detail">' + escapeHtml(e.detail) + '</span>' : '') +
+        '<span class="audit-time">' + timeText + '</span>';
+      auditLogListEl.appendChild(row);
+    });
+  }
+
   function render() {
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
@@ -461,7 +518,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') refreshVerificationOverview();
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); }
   });
 </script>
 </body>
