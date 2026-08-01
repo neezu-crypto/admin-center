@@ -101,6 +101,43 @@
   .audit-row .audit-main b { font-weight: 700; }
   .audit-row .audit-detail { display: block; color: #8b93a1; margin-top: 2px; }
   .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: ui-monospace, monospace; }
+
+  .game-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 2px; border-bottom: 1px solid #1c2027;
+  }
+  .game-row:last-child { border-bottom: none; }
+  .game-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .game-info b { font-size: 13.5px; font-weight: 600; color: #eef0f2; }
+  .game-status-tag {
+    font-size: 10px; font-weight: 700; letter-spacing: .02em; padding: 3px 9px;
+    border-radius: 20px; white-space: nowrap; transition: background .15s ease, color .15s ease, border-color .15s ease;
+  }
+  .game-status-tag.active { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
+  .game-status-tag.frozen { background: rgba(226,85,79,0.14); color: #e2554f; border: 1px solid rgba(226,85,79,0.4); }
+
+  /* 토글 스위치 - 체크박스를 시각적으로 슬라이딩 필 모양으로 감싼다 */
+  .toggle-switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .toggle-slider {
+    position: absolute; inset: 0; cursor: pointer; border-radius: 24px;
+    background: #2a2f38; border: 1px solid #3a4049;
+    transition: background .18s ease, border-color .18s ease;
+  }
+  .toggle-slider::before {
+    content: ""; position: absolute; height: 16px; width: 16px; left: 3px; top: 2px;
+    background: #cfd4db; border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    transition: transform .18s cubic-bezier(.4,0,.2,1), background .18s ease;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: rgba(226,85,79,0.5); border-color: #e2554f;
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(18px); background: #fff;
+  }
+  .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid #d9a441; outline-offset: 2px; }
+  .toggle-switch input:disabled + .toggle-slider { opacity: .5; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -147,6 +184,15 @@
       </p>
       <button id="auditRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <div id="auditLogList"></div>
+    </div>
+
+    <div class="card">
+      <h2>게임 콘텐츠 동결 상태</h2>
+      <p class="hint">
+        "동결"은 서비스 점검(다운)이 아니라, 그 게임의 신규 콘텐츠 개발을 잠시 멈추고
+        버그 수정 위주로 운영 중임을 알리는 라벨입니다. 게임 자체는 평소처럼 정상 작동합니다.
+      </p>
+      <div id="seriesConfigList"></div>
     </div>
 
     <div class="card">
@@ -202,6 +248,8 @@
   const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
+  const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
+  const setSeriesConfigFn = httpsCallable(functions, 'setSeriesConfig');
 
   // 인증 스트리머 관리 1단계 — 새 승인/거절/해제 로직을 만들지 않고, 같은 프로젝트에
   // 이미 배포돼 있는 각 게임의 기존 Cloud Functions를 그대로 호출한다(같은
@@ -232,6 +280,7 @@
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
   const auditRefreshBtn = document.getElementById('auditRefreshBtn');
   const auditLogListEl = document.getElementById('auditLogList');
+  const seriesConfigListEl = document.getElementById('seriesConfigList');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
@@ -481,6 +530,54 @@
     });
   }
 
+  // 게임 콘텐츠 동결 상태 — 서비스 점검(다운)이 아니라 "신규 콘텐츠 개발을 잠시
+  // 멈췄다"는 라벨. 토글 변경도 조회처럼 단발성 호출 방식(실시간 구독 없음)이라
+  // 성공 후 다시 조회해서 최신 상태를 반영한다.
+  async function refreshSeriesConfig() {
+    seriesConfigListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await getSeriesConfigFn();
+      renderSeriesConfig(result.data.games || []);
+    } catch (e) {
+      console.error('게임 설정 조회 실패:', e);
+      seriesConfigListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+
+  function renderSeriesConfig(games) {
+    if (!games.length) {
+      seriesConfigListEl.innerHTML = '<div class="empty-state">등록된 게임이 없습니다.</div>';
+      return;
+    }
+    seriesConfigListEl.innerHTML = '';
+    games.forEach(function (g) {
+      const row = document.createElement('div');
+      row.className = 'game-row';
+      const toggleId = 'freeze-' + g.id;
+      row.innerHTML =
+        '<div class="game-info"><b>' + escapeHtml(g.name) + '</b>' +
+        '<span class="game-status-tag ' + (g.contentFreeze ? 'frozen' : 'active') + '">' +
+        (g.contentFreeze ? '동결됨' : '정상 운영') + '</span></div>' +
+        '<label class="toggle-switch" title="' + (g.contentFreeze ? '동결 해제하기' : '동결하기') + '">' +
+        '<input type="checkbox" id="' + toggleId + '"' + (g.contentFreeze ? ' checked' : '') + '>' +
+        '<span class="toggle-slider"></span></label>';
+      const input = row.querySelector('input');
+      input.addEventListener('change', function (e) {
+        const nextValue = e.target.checked;
+        input.disabled = true;
+        setSeriesConfigFn({ gameId: g.id, contentFreeze: nextValue }).then(function () {
+          refreshSeriesConfig();
+        }).catch(function (err) {
+          console.error('게임 설정 변경 실패:', err);
+          window.alert('변경에 실패했습니다: ' + (err && err.message ? err.message : err));
+          e.target.checked = !nextValue; // 실패 시 되돌림
+          input.disabled = false;
+        });
+      });
+      seriesConfigListEl.appendChild(row);
+    });
+  }
+
   function render() {
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
@@ -518,7 +615,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); }
   });
 </script>
 </body>

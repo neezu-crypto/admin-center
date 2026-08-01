@@ -148,9 +148,71 @@ const listAuditLogOverview = onCall(async (request) => {
   return { entries: entries.slice(0, AUDIT_OVERVIEW_LIMIT) };
 });
 
+// 시리즈 게임 목록 — 새 게임이 생기면 여기에 한 줄만 추가하면 된다(신규 게임
+// 온보딩 체크리스트의 "통합 관리 센터에 등록" 항목이 사실상 이 배열 하나).
+const GAME_CATALOG = [
+  { id: 'bettingMarket', name: '스트리머 배팅시장' },
+  { id: 'stockMarket', name: '스트리머 주식시장' },
+  { id: 'backgroundMarket', name: '스트리머 배경시장' },
+  { id: 'midnightMartRun', name: '미드나잇 마트런' },
+  { id: 'dontClickAds', name: '절대 광고를 클릭하지 마' },
+];
+
+const AUDIT_LOG_CAP = 200;
+async function trimAdminAuditLog(db) {
+  const ref = db.ref('adminAuditLog');
+  const snap = await ref.orderByKey().get();
+  const keys = Object.keys(snap.val() || {});
+  if (keys.length <= AUDIT_LOG_CAP) return;
+  const updates = {};
+  keys.slice(0, keys.length - AUDIT_LOG_CAP).forEach(function (key) { updates[key] = null; });
+  await ref.update(updates);
+}
+// listAuditLogOverview가 이미 adminAuditLog를 읽어서 보여주고 있으므로, 통합
+// 관리 센터 자체 조작(콘텐츠 동결 토글 등)도 같은 노드에 기록하면 별도 UI 없이
+// 그 감사 로그 카드에 자동으로 같이 나타난다.
+async function logToAdminAuditLog(db, request, action, detail) {
+  const email = request.auth.token && request.auth.token.email;
+  const name = (request.auth.token && request.auth.token.name) || email || request.auth.uid;
+  const ref = db.ref('adminAuditLog').push();
+  await ref.set({ actorUid: request.auth.uid, actorName: name, action: action, detail: detail || '', at: Date.now() });
+  await trimAdminAuditLog(db);
+}
+
+// 콘텐츠 동결(유지보수 모드와는 다른 개념) — 서비스 점검(다운)이 아니라, 특정
+// 게임의 신규 콘텐츠 개발을 잠시 멈추고 버그 수정 위주로 운영 중임을 유저에게
+// 알리는 라벨. 관리자만 조회·변경 가능(게임 운영 방침 결정이라 위임 대상 아님).
+const getSeriesConfig = onCall(async (request) => {
+  requireAdmin(request);
+  const db = getDatabase();
+  const snap = await db.ref('seriesConfig').get();
+  const config = snap.val() || {};
+  return {
+    games: GAME_CATALOG.map(function (g) {
+      return { id: g.id, name: g.name, contentFreeze: !!(config[g.id] && config[g.id].contentFreeze) };
+    }),
+  };
+});
+
+const setSeriesConfig = onCall(async (request) => {
+  requireAdmin(request);
+  const { gameId, contentFreeze } = request.data || {};
+  const game = GAME_CATALOG.find(function (g) { return g.id === gameId; });
+  if (!game) throw new HttpsError('invalid-argument', '알 수 없는 게임입니다.');
+  if (typeof contentFreeze !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'contentFreeze 값은 true/false여야 합니다.');
+  }
+  const db = getDatabase();
+  await db.ref('seriesConfig/' + gameId + '/contentFreeze').set(contentFreeze);
+  await logToAdminAuditLog(db, request, contentFreeze ? '콘텐츠 동결 모드 켬' : '콘텐츠 동결 모드 끔', game.name);
+  return { ok: true };
+});
+
 module.exports = {
   getAdminCenterState,
   setAdminCenterPermission,
   listStreamerVerificationOverview,
   listAuditLogOverview,
+  getSeriesConfig,
+  setSeriesConfig,
 };
