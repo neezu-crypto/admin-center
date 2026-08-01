@@ -365,18 +365,19 @@
     verifiedStreamers.forEach(function (v) {
       const row = document.createElement('div');
       row.className = 'verif-row';
-      // 주식시장 쪽에서 인증된 레코드는 soopId 필드 자체가 없다 - 해제(revoke)는
-      // 배팅시장 함수(soopId 기준 조회)만 있어서 지금은 이 레코드들을 해제할 방법이
-      // 없다(알려진 공백, 2단계에서 다룰 사항).
+      // 해제는 이제 두 경로를 전부 시도한다: soopId가 있으면 배팅시장 함수(공유
+      // streamerVerifications + 배팅시장 미러 인덱스 정리)도 같이 부르고,
+      // 주식시장 쪽 자체 플래그(users/{uid}/streamerVerified)는 soopId 유무와
+      // 무관하게 항상 정리한다 - 배팅시장에서만 해제하면 주식시장 쪽 플래그가
+      // 남아 "보호된 계정" 대우가 계속되던 문제를 여기서 같이 해결한다.
       const soopIdText = v.soopId ? 'SOOP: ' + escapeHtml(v.soopId) : 'SOOP 아이디 미기재(주식시장 쪽 인증)';
       row.innerHTML =
         '<div class="verif-info"><b>' + escapeHtml(v.nickname) + '</b>' +
         '<span>uid: ' + escapeHtml(String(v.uid || '').slice(0, 10)) + ' · ' + soopIdText + '</span></div>' +
         '<div class="verif-actions">' +
-        '<button class="revoke" type="button"' + (v.soopId ? '' : ' disabled title="주식시장 쪽 인증은 아직 해제 기능이 없습니다"') + '>인증 해제</button>' +
+        '<button class="revoke" type="button">인증 해제</button>' +
         '</div>';
-      const revokeBtn = row.querySelector('.revoke');
-      if (v.soopId) revokeBtn.addEventListener('click', function () { revokeStreamer(v); });
+      row.querySelector('.revoke').addEventListener('click', function () { revokeStreamer(v); });
       verificationVerifiedListEl.appendChild(row);
     });
   }
@@ -401,13 +402,25 @@
     });
   }
 
+  // 해제는 두 시스템에 걸쳐 있을 수 있는 상태를 전부 정리해야 한다: soopId가 있으면
+  // 배팅시장 함수(공유 streamerVerifications + 배팅시장 미러 인덱스)를 부르고,
+  // 주식시장 자체 플래그(users/{uid}/streamerVerified)는 항상 별도로 정리한다.
+  // 한쪽이 실패해도(예: 그 uid가 주식시장 계정이 아예 없는 경우) 나머지 정리는
+  // 계속 진행하고, 둘 다 실패했을 때만 사용자에게 에러를 보여준다.
   function revokeStreamer(v) {
     if (!window.confirm('"' + v.nickname + '" 인증을 해제할까요?')) return;
-    bmRevokeVerificationFn({ soopId: v.soopId }).then(function () {
+    const calls = [
+      smAdminActionFn({ action: 'revokeStreamerVerification', payload: { uid: v.uid } }),
+    ];
+    if (v.soopId) calls.push(bmRevokeVerificationFn({ soopId: v.soopId }));
+    Promise.allSettled(calls).then(function (results) {
+      const allFailed = results.every(function (r) { return r.status === 'rejected'; });
+      if (allFailed) {
+        const firstErr = results[0].reason;
+        console.error('인증 해제 실패:', results);
+        window.alert('인증 해제에 실패했습니다: ' + (firstErr && firstErr.message ? firstErr.message : firstErr));
+      }
       refreshVerificationOverview();
-    }).catch(function (err) {
-      console.error('인증 해제 실패:', err);
-      window.alert('인증 해제에 실패했습니다: ' + (err && err.message ? err.message : err));
     });
   }
 
