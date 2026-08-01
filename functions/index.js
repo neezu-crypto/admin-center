@@ -8,7 +8,13 @@ initializeApp();
 
 // 07번 — 주식시장·배팅시장과 같은 관리자 이메일. uid 위변조 검증 원칙(그 두 저장소와 동일):
 // 대상 uid는 항상 request.auth.uid에서만 가져오고, 클라이언트가 보낸 값은 신뢰하지 않는다.
-const ADMIN_EMAIL = 'skftodwocks2@gmail.com';
+//
+// 09번 마이그레이션 — 관리자 판별을 이메일 문자열 비교에서 adminCenter/adminUids
+// uid 조회로 옮긴다. 다만 한 번에 완전히 스위치를 끊지 않고(그러면 아직 uid가
+// 안 등록된 상태에서 실수로 배포될 경우 관리자 본인이 잠길 위험이 있다),
+// uid 등록을 우선 확인하고 없으면 기존 이메일 비교로 폴백한다. 폴백이 실제로
+// 쓰이면 로그를 남겨, 이후 이 폴백을 완전히 제거해도 안전한 시점을 판단한다.
+const ADMIN_EMAIL = 'skftodwocks2@gmail.com'; // 폴백 전용으로만 유지 — 새 코드에서 직접 비교하지 말 것
 
 function requireAuth(request) {
   if (!request.auth || !request.auth.uid) {
@@ -17,27 +23,33 @@ function requireAuth(request) {
   return request.auth.uid;
 }
 
+async function isAdminUid(uid) {
+  const db = getDatabase();
+  const snap = await db.ref('adminCenter/adminUids/' + uid).get();
+  return snap.val() === true;
+}
+
 function isAdminEmail(email) {
   return !!email && email === ADMIN_EMAIL;
 }
 
-function requireAdmin(request) {
+async function requireAdmin(request) {
   const uid = requireAuth(request);
+  if (await isAdminUid(uid)) return uid;
   const email = request.auth.token && request.auth.token.email;
-  if (!isAdminEmail(email)) {
-    throw new HttpsError('permission-denied', '관리자만 수행할 수 있습니다.');
+  if (isAdminEmail(email)) {
+    console.warn('관리자 판별 이메일 폴백 사용됨(uid 미등록):', uid);
+    return uid;
   }
-  return uid;
+  throw new HttpsError('permission-denied', '관리자만 수행할 수 있습니다.');
 }
 
-// 09번 — 관리자 이메일 하드코딩 정리의 1회성 부트스트랩. 이메일 문자열 비교
-// (isAdminEmail)는 이 함수에서 마지막으로 한 번 더 쓰이고, 그 결과로 호출한
-// 사람의 uid를 adminCenter/adminUids에 등록한다. 이후 모든 관리자 판별은
-// 이 uid 노드만 보게 되므로, 관리자 이메일을 바꿔야 할 때도 이 노드 하나만
-// 고치면 된다(전체 조사는 09번 문서 참고). request.auth.uid만 신뢰하고
-// 클라이언트가 보낸 값은 쓰지 않는다 — 위조 불가능한 자기 등록.
+// 09번 — 관리자 이메일 하드코딩 정리의 1회성 부트스트랩. requireAdmin(uid 우선,
+// 이메일 폴백)으로 신원을 확인한 뒤, 호출한 사람의 uid를 adminCenter/adminUids에
+// 등록한다. 이미 등록된 uid로 다시 호출해도 안전(멱등). request.auth.uid만
+// 신뢰하고 클라이언트가 보낸 값은 쓰지 않는다 — 위조 불가능한 자기 등록.
 const bootstrapAdminUid = onCall(async (request) => {
-  const uid = requireAdmin(request); // 기존 이메일 비교 방식으로 마지막 검증
+  const uid = await requireAdmin(request);
   const db = getDatabase();
   await db.ref('adminCenter/adminUids/' + uid).set(true);
   return { ok: true, uid };
@@ -58,8 +70,12 @@ async function isVerifiedStreamerUid(uid) {
 
 async function requireAdminOrVerifiedStreamer(request) {
   const uid = requireAuth(request);
+  if (await isAdminUid(uid)) return { uid, role: 'admin' };
   const email = request.auth.token && request.auth.token.email;
-  if (isAdminEmail(email)) return { uid, role: 'admin' };
+  if (isAdminEmail(email)) {
+    console.warn('관리자 판별 이메일 폴백 사용됨(uid 미등록):', uid);
+    return { uid, role: 'admin' };
+  }
   if (await isVerifiedStreamerUid(uid)) return { uid, role: 'streamer' };
   throw new HttpsError('permission-denied', '관리자 또는 인증된 스트리머만 이용할 수 있습니다.');
 }
@@ -76,7 +92,7 @@ const getAdminCenterState = onCall(async (request) => {
 // 통합 관리 센터 — 위임 권한 하나를 켜고/끈다. 관리자만 가능하고, 인증 스트리머 전원에게
 // 동일하게 적용된다(스트리머별 개별 권한이 아니라 하나의 공용 스위치 목록).
 const setAdminCenterPermission = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   const { key, granted } = request.data || {};
   if (typeof key !== 'string' || !key.trim() || key.length > 60) {
     throw new HttpsError('invalid-argument', '권한 key가 올바르지 않습니다.');
@@ -98,7 +114,7 @@ const setAdminCenterPermission = onCall(async (request) => {
 // 승인/거절/해제는 두 스트리머를 저울질하는 민감한 권한이라 당분간 관리자 전용으로
 // 유지하기로 했고, 조회도 같은 화면의 일부라 우선 관리자 전용으로 시작한다.
 const listStreamerVerificationOverview = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   const db = getDatabase();
   const [bmReqSnap, smReqSnap, verifiedSnap] = await Promise.all([
     db.ref('bettingMarket/verifyRequests').get(),
@@ -133,7 +149,7 @@ const listStreamerVerificationOverview = onCall(async (request) => {
 // 보여준다. 관리자 전용.
 const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   const db = getDatabase();
   const [bmLogSnap, smLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').get(),
@@ -198,7 +214,7 @@ async function logToAdminAuditLog(db, request, action, detail) {
 // 게임의 신규 콘텐츠 개발을 잠시 멈추고 버그 수정 위주로 운영 중임을 유저에게
 // 알리는 라벨. 관리자만 조회·변경 가능(게임 운영 방침 결정이라 위임 대상 아님).
 const getSeriesConfig = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   const db = getDatabase();
   const snap = await db.ref('seriesConfig').get();
   const config = snap.val() || {};
@@ -210,7 +226,7 @@ const getSeriesConfig = onCall(async (request) => {
 });
 
 const setSeriesConfig = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   const { gameId, contentFreeze } = request.data || {};
   const game = GAME_CATALOG.find(function (g) { return g.id === gameId; });
   if (!game) throw new HttpsError('invalid-argument', '알 수 없는 게임입니다.');
@@ -240,7 +256,7 @@ function discordSecretParent() {
 // Secret Manager에 새 버전으로 기록한다. 입력값을 그대로 돌려주지 않는다
 // (쓰기 전용) — UI는 getDiscordWebhookStatus로 "설정됨/설정 안 됨"만 표시한다.
 const setDiscordWebhookUrl = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   const url = String((request.data || {}).url || '').trim();
   if (!/^https:\/\/discord(app)?\.com\/api\/webhooks\//.test(url)) {
     throw new HttpsError('invalid-argument', '올바른 디스코드 웹훅 URL이 아닙니다.');
@@ -257,7 +273,7 @@ const setDiscordWebhookUrl = onCall(async (request) => {
 // 시크릿의 값(payload)은 절대 조회하지 않고, 활성화된 버전이 있는지만
 // 확인한다 — 값을 화면에 다시 보여줄 방법 자체를 만들지 않기 위함.
 const getDiscordWebhookStatus = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   try {
     const [versions] = await secretClient.listSecretVersions({
       parent: discordSecretParent(),
@@ -309,7 +325,7 @@ async function sendDiscordNotification(text) {
 // 만들지 않고, 지금 설정된 웹훅으로 실제 메시지 한 건만 즉시 보내서 연결을
 // 검증한다. 성공/실패를 그대로 반환해 UI가 사람이 읽을 결과를 보여줄 수 있다.
 const sendTestDiscordNotification = onCall(async (request) => {
-  requireAdmin(request);
+  await requireAdmin(request);
   const result = await sendDiscordNotification(
     '✅ **테스트 알림** — 통합 관리 센터 디스코드 웹훅 연결이 정상입니다.'
   );
