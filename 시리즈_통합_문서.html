@@ -438,6 +438,11 @@
       <td>통합 관리 센터 — 게시글 홍보 현황</td>
       <td>StreamBet-Market 전용 개념을 게임 공통 기능으로 확장(GAME_CATALOG 기반) — 앞으로 나올 게임도 자동 지원. 기존 데이터 이전 필요. 22번에서 상세 설계</td>
     </tr>
+    <tr>
+      <td><strong>낮음</strong> (18번 3단계 실행판)</td>
+      <td>통합 관리 센터 — 디스코드 웹훅 검수 알림</td>
+      <td>탭을 안 보고 있어도 알림. interior-3d-viewer의 프리셋 병합 실패(13번 사각지대)가 가장 절실한 대상. 24번에서 상세 설계</td>
+    </tr>
   </table>
   <h3>권장 작업 순서</h3>
   <p>표의 우선순위(높음/중간/낮음)는 항목 하나하나의 중요도지, 그대로 착수 순서는 아니다. 실제로는 <strong>뒤 단계가 앞 단계 위에 얹히는 구조</strong>라 순서가 어긋나면 나중에 다시 손대야 한다. 아래는 그 의존관계를 반영한 단계별 순서다.</p>
@@ -892,6 +897,7 @@
     </tr>
   </table>
   <div class="callout"><b>권장</b> — 1단계는 지금 바로 붙일 수 있다. 2단계로 갈지는 admin-center를 관리자가 얼마나 상시로 켜두는지에 달려있고, 3단계는 실제로 검수가 늦어져서 문제가 된 사례가 쌓인 뒤에 판단해도 늦지 않다.</div>
+  <div class="callout"><b>3단계 구체화</b> — 디스코드 웹훅으로 3단계를 실제로 설계한 내용은 24번에서 다룬다.</div>
 </section>
 
 <section>
@@ -1027,6 +1033,36 @@
     <li>스크롤박스가 필요한 카드(10·11번의 스파크라인, 로그성 목록)는 05번 감사 로그 카드가 이미 쓴 "실제 렌더링 높이를 측정해서 N줄 기준으로 <code>max-height</code>를 정한다" 방식을 그대로 따른다 — 대충 추측한 값을 쓰지 않는다</li>
     <li>모바일 대응은 기존 720px 브레이크포인트를 그대로 쓴다(그리드 열 수 축소, 19번 목차는 아예 숨김 — soop-stock-market과 동일한 처리)</li>
   </ul>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">24</span><h2>통합 관리 센터 — 디스코드 웹훅 검수 알림 (설계)</h2></div>
+  <p>목표: 18번의 3단계("탭을 안 보고 있어도 알림")를 디스코드 웹훅으로 구체화한다. 관리자가 admin-center를 켜두지 않아도, 검수 대기 항목이 생기는 순간 지정된 디스코드 채널에 메시지가 온다.</p>
+  <h3>디스코드 웹훅이 하는 일</h3>
+  <p>디스코드 채널마다 발급할 수 있는 URL 하나에 정해진 형식의 JSON을 <code>POST</code>하면, 그 채널에 메시지가 즉시 게시된다. 로그인이나 별도 인증이 필요 없다 — 즉 <strong>이 URL 자체가 비밀번호와 같은 민감정보</strong>다. 유출되면 누구나 그 채널에 메시지를 보낼 수 있게 된다.</p>
+  <h3>핵심 설계 통찰 — admin-center가 다른 저장소를 건드리지 않고도 걸 수 있다</h3>
+  <p>17번에서 확인했듯 codebase는 배포 단위 구분일 뿐, 같은 Firebase 프로젝트 안에서는 어느 codebase가 배포했든 실행 범위에 제약이 없다. RTDB 트리거(<code>onValueCreated</code> 등)도 마찬가지다 — <strong>트리거는 "이 경로에 새 데이터가 생기면"을 감시할 뿐, 그 경로에 누가(어느 codebase가) 썼는지는 안 가린다.</strong> 그래서 admin-center의 <code>functions/index.js</code>에 새 트리거 함수들을 추가하는 것만으로, StreamBet-Market·soop-stock-market의 기존 신청 함수는 <strong>한 줄도 고치지 않고</strong> 그 함수들이 쓰는 RTDB 경로를 감시할 수 있다 — 06번 원칙("기존 로직 재사용, 새로 안 만든다")의 또 다른 적용이다.</p>
+  <h3>알림 대상</h3>
+  <table>
+    <tr><th>경로</th><th>발생 조건</th><th>대응 섹션</th></tr>
+    <tr><td><code>bettingMarket/marketReports</code> · <code>bettingMarket/nicknameReports</code></td><td>새 신고 접수</td><td>13</td></tr>
+    <tr><td><code>presetMergeFailures</code></td><td>프리셋 소유권 자동 이전 실패</td><td>13</td></tr>
+    <tr><td><code>bettingMarket/verifyRequests</code> · <code>streamerVerificationRequests</code></td><td>새 인증 신청</td><td>06</td></tr>
+    <tr><td><code>bettingMarket/chestPurchaseRequests</code> · <code>bannerRequests</code> · <code>chartBannerRequests</code> · <code>pinRequests</code> · <code>relayRoomRequests</code> · <code>treasureChestRequests</code> · <code>cashChargeRequests</code> · <code>unfreezeDonationRequests</code></td><td>새 구매 승인 신청</td><td>14</td></tr>
+    <tr><td><code>listingRequests</code></td><td>새 상장 신청</td><td>15</td></tr>
+  </table>
+  <div class="callout warn"><b>가장 절실한 대상은 프리셋 병합 실패</b> — 13번에서 확인했듯 <code>presetMergeFailures</code>는 이 시리즈에서 유일하게 <strong>관리자가 CLI로 직접 RTDB를 만져야 처리되는</strong> 항목이다. admin-center에 관리 화면이 생겨도(13번), 관리자가 그 화면을 열어보기 전까진 존재조차 모른다 — 디스코드 알림이 붙어야 비로소 "생기자마자 안다"가 실현된다. 우선순위를 매긴다면 이 경로부터 연결하는 게 맞다.</div>
+  <h3>메시지 설계</h3>
+  <ul>
+    <li>어떤 큐인지(예: "🔔 새 마켓 신고"), 핵심 정보 1~2줄(신청자/사유 등 최소한만 — 민감정보 과다 노출 방지), <strong>admin-center로 바로 가는 링크</strong>를 포함한다</li>
+    <li>딥링크는 19번(세션 빠른 이동)의 앵커 id를 URL 프래그먼트로 재사용하면 별도 라우팅 없이 바로 만들어진다(예: <code>https://neezu-crypto.github.io/admin-center/?section=review#section-report</code>) — 19번을 먼저 설계해둔 게 여기서 그대로 이어진다</li>
+  </ul>
+  <h3>보안·운영</h3>
+  <ul>
+    <li>웹훅 URL은 Firebase Functions v2의 <code>defineSecret</code>으로 관리 — 코드·저장소 어디에도 평문으로 커밋하지 않는다(09번에서 다룬 "민감정보를 코드에 박아두지 않는다"는 원칙과 같은 결)</li>
+    <li>RTDB 규칙과는 무관 — 알림은 서버(Cloud Functions)에서만 발송되므로 클라이언트 권한 설정을 바꿀 필요가 없다</li>
+  </ul>
+  <div class="callout"><b>스팸 위험</b> — 알림이 너무 잦으면 오히려 무시하게 된다. 특히 위 표의 구매 승인 신청 8종은 빈도가 높을 수 있어, 개별 알림 대신 일정 주기로 모아 보내는 다이제스트 방식이 나을 수도 있다 — 실제 신청 빈도를 보고 나서 판단할 열린 문제로 남겨둔다.</div>
 </section>
 
 </div>
