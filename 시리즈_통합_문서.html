@@ -423,8 +423,55 @@
       <td>통합 관리 센터 — 세션 빠른 이동</td>
       <td>soop-stock-market 관리자 페이지의 우측 고정 목차 패널을 이식. 08~18번 카드가 다 쌓이면 admin-center도 같은 문제(카드 과다)를 겪게 됨. 19번에서 상세 설계</td>
     </tr>
+    <tr>
+      <td><strong>높음</strong></td>
+      <td>통합 관리 센터 — 정지계정 관리</td>
+      <td>StreamBet-Market에서 정지된 uid가 같은 로그인 세션(03번)으로 soop-stock-market에선 그대로 활동 가능 — 제재가 새는 보안 문제. soop-stock-market엔 계정 정지 개념 자체가 없음. 20번에서 상세 설계</td>
+    </tr>
+    <tr>
+      <td><strong>낮음</strong> (이미 잘 되는 걸 넓히는 작업)</td>
+      <td>통합 관리 센터 — 배팅시장 진행중인 마켓 관리</td>
+      <td>제안 검토·조기종료·판정·취소환불까지 StreamBet-Market에 이미 완결된 UI가 있음. admin-center로 옮길 실익부터 따져볼 것. 21번에서 상세 설계</td>
+    </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>통합 관리 센터 — 게시글 홍보 현황</td>
+      <td>StreamBet-Market 전용 개념을 게임 공통 기능으로 확장(GAME_CATALOG 기반) — 앞으로 나올 게임도 자동 지원. 기존 데이터 이전 필요. 22번에서 상세 설계</td>
+    </tr>
   </table>
-  <div class="callout"><b>권장 순서</b> — 킬스위치 → 권한 카탈로그 채우기 순으로 가는 게 안전하다. 위임 메커니즘이 이미 있다고 해서 카탈로그부터 채우면, 되돌릴 방법 없이 실제 권한이 스트리머 전원에게 뿌려지는 상태가 먼저 생긴다.</div>
+  <h3>권장 작업 순서</h3>
+  <p>표의 우선순위(높음/중간/낮음)는 항목 하나하나의 중요도지, 그대로 착수 순서는 아니다. 실제로는 <strong>뒤 단계가 앞 단계 위에 얹히는 구조</strong>라 순서가 어긋나면 나중에 다시 손대야 한다. 아래는 그 의존관계를 반영한 단계별 순서다.</p>
+  <div class="flow">0단계 — 기반 다지기
+   23 페이지 디자인 기획   → 카드를 쌓기 전에 시각 언어부터 정해야, 08번 이후
+                            카드마다 스타일이 제각각이 되는 걸 막는다
+   09 관리자 이메일 정리   → 지금 정리해야 이후 새로 짜는 함수들이 이메일 문자열
+                            비교를 또 반복해서 넣지 않는다(먼저 안 하면 나중에 더 넓게 퍼짐)
+
+1단계 — 신원 허브
+   16 유저 검색/상세 조회  → 04·05·12·20번이 기대는 진입점, 먼저 있어야
+                            나머지가 실제로 쓸모 있어진다
+   20-1단계 정지계정 관리  → 16번 화면에 정지/해제 버튼만 얹으면 되는 수준이라 바로 이어붙임
+
+2단계 — 모니터링 (읽기 전용이라 상대적으로 안전)
+   주식시장 감사 로그 확장, 10 접속자 분석, 11 전체 통계, 12 구매 현황
+
+3단계 — 검수·승인 큐
+   13 페이지별 검수, 14 구매 승인 검수, 15 종목 상장 관리
+   18 검수 알람            → 13·14·15가 먼저 있어야 알람으로 지켜볼 대상이 생긴다
+
+4단계 — 권한 위임 준비
+   즉시 회수 킬스위치 → 위임 권한 카탈로그 채우기
+   (되돌릴 방법 없이 권한부터 뿌리지 않도록 이 순서 고정)
+
+5단계 — 이미 잘 되는 것 넓히기 / 편의 기능
+   08 devbar 구성, 17 채팅, 22 게시글 홍보 현황,
+   19 세션 빠른 이동        → 카드가 어느 정도 쌓인 뒤라야 목차의 진가가 생긴다
+   21 배팅시장 마켓 관리    → 이 목록에서 실익이 가장 낮다고 21번에서 이미 밝힘
+
+6단계 — 보류·미정 (사용자가 명시적으로 미룬 것 포함)
+   콘텐츠 동결 실제 연동(보류 지시됨), 미드나잇 마트런/절대광고 온보딩(미정),
+   grantAchievement 비대칭 수정(사소함), 20-2단계 soop-stock-market 신규 정지 가드(큰 작업)</div>
+  <div class="callout"><b>이 순서를 뒤집어도 되는 예외</b> — 0·1단계는 다른 모든 걸 뒷받침하는 기반이라 순서를 지키는 게 안전하지만, 2·3·5단계 안에서의 항목 순서는 실제로 어떤 사고가 먼저 터지느냐·어떤 카드가 더 급하게 필요해지느냐에 따라 바뀌어도 무방하다. 4단계(킬스위치→카탈로그)만은 순서를 바꾸면 안 된다 — 되돌릴 방법 없이 권한이 먼저 풀리는 상태가 생기기 때문이다.</div>
 </section>
 
 <section>
@@ -783,7 +830,7 @@
 3) 화면 구성: 상단에 식별 정보(닉네임·uid·인증 상태),
    그 아래 게임별 섹션(배팅시장 잔액/베팅내역, 주식시장 현금/보유종목),
    맨 아래 구매 이력(12번)</div>
-  <div class="callout"><b>정지·잔액조정 같은 액션은 그대로 각 게임 함수로</b> — StreamBet-Market의 <code>banAccount</code>/<code>adminAdjustBalance</code> 등 실제 조치는 새로 만들지 않고 기존 함수를 그대로 호출한다(06번 원칙). soop-stock-market 쪽에 상응하는 조치 함수가 있는지는 이 문서에서 아직 확인하지 않았으므로, 실제 구현 전에 해당 저장소의 <code>adminAction</code> 액션 목록을 다시 확인할 것.</div>
+  <div class="callout"><b>정지·잔액조정 같은 액션은 그대로 각 게임 함수로</b> — StreamBet-Market의 <code>banAccount</code>/<code>adminAdjustBalance</code> 등 실제 조치는 새로 만들지 않고 기존 함수를 그대로 호출한다(06번 원칙). soop-stock-market 쪽엔 정지 자체가 없다는 게 20번에서 확인됨 — 그쪽 uid 정지는 20번의 설계가 먼저 필요하다.</div>
 </section>
 
 <section>
@@ -860,6 +907,126 @@
     <li>모바일에서 숨기는 처리도 동일하게 적용 — 좁은 화면에서 고정 패널이 콘텐츠를 가리지 않게</li>
   </ul>
   <div class="callout warn"><b>수동 관리 포인트</b> — 08번의 <code>GAME_CATALOG</code>처럼, 이 목차 배열도 <strong>카드가 추가/제거될 때마다 사람이 같이 고쳐야</strong> 자동으로 늘어나지 않는다. 새 카드를 붙이면서 이 배열에 항목 추가하는 걸 빠뜨리면, 그 카드만 목차에서 빠진 채로 조용히 방치될 수 있다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">20</span><h2>통합 관리 센터 — 정지계정 관리 (설계)</h2></div>
+  <p>목표: 악성 유저를 정지시키는 기능을 통합 관리 센터에서 다루고, 게임 간에 정지 효력이 새는 지점을 막는다. 이 문서의 다른 항목들과 달리 <strong>편의 문제가 아니라 제재 회피가 가능한 보안 문제</strong>라 우선순위를 높게 잡는다.</p>
+  <h3>현재 상태</h3>
+  <table>
+    <tr><th>저장소</th><th>있는 것</th><th>비고</th></tr>
+    <tr>
+      <td><span class="chip">StreamBet-Market</span></td>
+      <td>
+        <code>banAccount({ uid, reason })</code>/<code>unbanAccount({ uid })</code>(<code>functions/src/admin-tools.js</code>) — <code>bettingMarket/bannedAccounts/{uid}</code>에 사유·정지시각·정지한 관리자를 기록<br>
+        <code>assertNotBanned(uid)</code> 가드 — 베팅·환전·상자구매·스킨구매·인증신청·신고·마켓액션·보상·프로필수정 등 <strong>거의 모든 가치가 오가는 액션</strong>의 진입부에서 호출되는 하드 블록
+      </td>
+      <td>사유 입력 필수, <strong>만료일 없는 영구 정지</strong>(관리자가 직접 해제해야만 풀림). 정지당한 유저에겐 <code>js/ban-banner.js</code>가 배너로 안내. 관리 탭에 정지 목록·해제 버튼·인라인 정지(사유 입력) UI가 이미 있어 <strong>완성도 높음</strong></td>
+    </tr>
+    <tr>
+      <td><span class="chip">soop-stock-market</span></td>
+      <td>없음</td>
+      <td><code>functions/common.js</code>엔 <code>requireAdmin</code>·<code>requireLinkedUser</code>·<code>requireNotInMaintenance</code>뿐, <code>assertNotBanned</code>에 상응하는 계정 단위 제재 가드가 <strong>전혀 없다</strong>. 종목 동결(가격이 이상한 특정 종목을 막는 것)이나 점검모드(전체 유저를 막는 것)는 있지만 둘 다 "특정 유저 하나를 막는" 것과는 다른 개념</td>
+    </tr>
+    <tr>
+      <td><span class="chip">interior-3d-viewer</span></td>
+      <td>없음</td>
+      <td>계정 정지 개념 자체가 없음</td>
+    </tr>
+  </table>
+  <div class="callout warn"><b>정지가 새는 지점</b> — 03번에서 다뤘듯 로그인 세션(uid)은 앱 간에 공유된다. 그런데 정지는 StreamBet-Market 혼자만의 판단(<code>bettingMarket/bannedAccounts</code>)이고 soop-stock-market엔 이걸 검사하는 코드 자체가 없으므로, <strong>배팅시장에서 정지된 유저가 같은 계정으로 로그인한 채 주식시장에서는 아무 제약 없이 계속 활동할 수 있다</strong>. 04번에서 다룬 "인증 상태가 한쪽에만 반영되는" 문제와 같은 패턴이지만, 이번엔 <strong>허용해야 할 걸 놓치는 게 아니라 막아야 할 걸 놓치는 방향</strong>이라 더 심각하다.</div>
+  <h3>제안하는 구조</h3>
+  <div class="flow">1단계 (바로 가능) — 통합 관리 센터에 "정지계정 관리" 카드 신설
+   → StreamBet-Market의 bettingMarket/bannedAccounts를 그대로 조회하고
+     banAccount/unbanAccount를 그대로 라우팅 (06번 원칙, 새 로직 없음)
+   → 16번의 유저 상세 조회 화면에도 정지/해제 버튼을 바로 노출
+
+2단계 (더 큰 작업) — soop-stock-market에도 실제 차단 효력을 만든다
+   → 04번에서 배운 교훈 재사용: 처음부터 앱별로 각자 정지 노드를 두지 말고
+     uid 기준 공유 원장 하나로 설계 (05번의 admin-only 규칙 패턴)
+   → soop-stock-market의 거래·구매 관련 함수 진입부에도
+     StreamBet-Market의 assertNotBanned와 동등한 가드를 새로 추가해야 함
+     (기존에 없던 코드라 이건 정말 새로 만드는 부분)</div>
+  <div class="callout"><b>왜 공유 원장 하나로 시작해야 하는가</b> — 04번에서 인증 상태를 앱마다 따로 캐싱해서 세 번이나 동기화 사고가 났던 걸 이미 겪었다. 정지 기능을 지금 StreamBet-Market 것을 미러링하는 방식으로 soop-stock-market에 새로 붙이면 같은 실수를 반복하게 된다. 처음부터 <strong>정지 여부를 판단하는 원장을 하나로 두고 두 게임이 같은 곳을 보게</strong> 만드는 게, 이 시리즈가 이미 두 번 배운 교훈을 실제로 적용하는 지점이다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">21</span><h2>통합 관리 센터 — 배팅시장 진행중인 마켓 관리 (설계)</h2></div>
+  <p>목표: StreamBet-Market의 마켓(배팅 주제) 생명주기 관리를 통합 관리 센터에서도 다룰 수 있게 한다. 이 문서의 다른 항목과 달리 <strong>이미 상당히 잘 만들어진 기능</strong>이라, "빈틈을 채우는" 게 아니라 "잘 되는 걸 어디서든 쓸 수 있게" 하는 성격이다(17번 채팅과 같은 부류).</p>
+  <h3>현재 상태 — 이미 완결된 생명주기</h3>
+  <div class="flow">pendingValidation ─(검토)→ open ─(마감)→ closed ─(판정)→ pendingSettlement ─(자동정산)→ settled
+      │                                                      │
+      └─(거절)→ rejected                                      └─(취소)→ void (전액 환불)</div>
+  <table>
+    <tr><th>단계</th><th>함수</th><th>내용</th></tr>
+    <tr><td>제안</td><td><code>submitMarketProposal</code></td><td>누구나 제안 가능. 제안자가 관리자·인증 스트리머면 검토 없이 즉시 <code>open</code>, 아니면 <code>pendingValidation</code>으로 대기</td></tr>
+    <tr><td>제안 검토</td><td><code>reviewProposal</code></td><td>관리자·인증 스트리머가 승인/거절 — <code>js/review-modal.js</code></td></tr>
+    <tr><td>마감</td><td><code>closeBettingScheduled</code>(1분마다 자동) / <code>closeMarketEarly</code>(수동, 사유 필수)</td><td>보통은 예정 시각에 자동 마감, 필요하면 관리자가 조기 종료 가능</td></tr>
+    <tr><td>판정</td><td><code>judgeMarket</code> / <code>cancelPendingJudgment</code></td><td>승리 결과 선택 → 1분 유예 후 확정(그 안에 판정 취소 가능)</td></tr>
+    <tr><td>정산</td><td><code>finalizeMarketSettlement</code>(내부, 자동)</td><td>레이크·최소배당 반영해 승자에게 자동 지급, 참가자 부족 시 자동으로 <code>void</code> 전환</td></tr>
+    <tr><td>취소</td><td><code>voidMarket</code>(수동, 사유 필수)</td><td>모든 활성 베팅 전액 환불</td></tr>
+  </table>
+  <p>이 전체가 <code>index.html</code> + <code>js/market-feed.js</code>(<code>#admin-pending-list</code>·<code>#admin-open-list</code>) + <code>js/review-modal.js</code> + <code>js/manage-modal.js</code>로 이미 동작 중이다. <code>manage-modal.js</code>는 결과 선택·유예 카운트다운·조기종료 사유 입력·취소 사유 입력·최소참가자 예외 체크박스까지 한 모달 안에서 처리하는, 이 시리즈에서 가장 상호작용이 많은 관리 UI다.</p>
+  <div class="callout"><b>편집 기능은 없다</b> — 마켓 제목·배당·결과 항목은 생성 후 수정 불가능. 오타가 있으면 취소하고 새로 만드는 것 외엔 방법이 없다 — 새 기능을 설계할 때 "고칠 수 있다"고 가정하지 말 것.</div>
+  <div class="callout"><b>13번과의 구분</b> — 13번은 이미 공개된 마켓에 대한 <strong>신고</strong>(콘텐츠 판단)만 다뤘다. 이 21번은 신고와 무관하게 마켓 자체의 운영 흐름(제안 승인부터 정산·취소까지)을 다룬다는 점에서 범위가 다르다.</div>
+  <h3>admin-center로 옮길 실익이 있는가</h3>
+  <p>이 기능들(특히 <code>judgeMarket</code>의 유예 카운트다운, <code>manage-modal.js</code>의 다단계 폼)은 06번 패턴처럼 "목록 + 승인 버튼"으로 단순화하기 어렵다. 그대로 옮기려면 <code>manage-modal.js</code> 수준의 상호작용을 admin-center에도 다시 만들어야 해서, 지금까지 다룬 다른 카드들보다 이식 비용이 크다. StreamBet-Market 자체 UI가 이미 잘 동작하고 있으므로, <strong>급하게 옮길 이유는 약하다</strong> — 통합 관리 센터에서 여러 게임을 동시에 운영하는 관리자가 실제로 이 화면을 오가는 게 불편하다고 느낄 때 우선순위를 올리는 정도가 적절하다.</p>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">22</span><h2>통합 관리 센터 — 게시글 홍보 현황 (설계, 게임 전체로 확장)</h2></div>
+  <p>목표: StreamBet-Market에만 있는 "게시글 홍보 현황"(<code>promotedStreamers</code>) 개념을, 다른 기존 게임(soop-stock-market·interior-3d-viewer)과 <strong>앞으로 출시될 게임까지</strong> 게임을 가리지 않고 쓸 수 있는 통합 관리 센터 기능으로 만든다. 08번(devbar)·11번(통계)처럼 "게임별로 각자 만들지 말고 admin-center가 공통 틀을 소유"하는 패턴이다.</p>
+  <h3>먼저 정확히 알아야 할 것 — 지금 있는 건 뭔가</h3>
+  <p><code>bettingMarket/promotedStreamers</code>는 결제·승인이 전혀 없는 <strong>관리자 개인 체크리스트</strong>다. 관리자가 어떤 스트리머의 SOOP 방송국 게시판에 직접 홍보글을 올린 뒤, "이미 홍보했음"을 기록해 중복 게시를 막는 용도 — 인증 여부와 무관하게 아무 닉네임이나 등록 가능하다. <code>addPromotedStreamer</code>/<code>removePromotedStreamer</code>(관리자 전용)로 이미 구현돼 있고, <code>js/promoted-streamers.js</code>가 자동완성 입력 + 실시간 칩 목록 UI까지 완비돼 있다. soop-stock-market의 배너·핀은 "글"이 아니라 <strong>종목</strong>을 노출시키는 유료 기능이라 이것과는 방향이 반대(관리자가 밖에 홍보 vs 유저가 결제해서 노출을 삼)이고 이미 14번에서 다뤘으므로, 이 22번은 <code>promotedStreamers</code> 쪽 개념만 확장한다.</p>
+  <div class="callout"><b>일반화가 쉬운 이유</b> — 이 기능엔 게임별로 다른 로직이 원래 하나도 없었다(결제 없음, 승인 없음, 대상 검증도 없음 — 그냥 자유 텍스트 닉네임 + 시각). 그래서 "게임마다 다른 처리"를 새로 설계할 필요 없이, <strong>어떤 게임이든 자유 텍스트 라벨 하나 + 시각</strong>만 있으면 그대로 재사용된다. 12번(구매 현황)이나 13번(검수)처럼 게임마다 데이터 형태가 달라 정규화가 필요했던 것과 다르게, 이건 원래부터 게임 중립적인 데이터였다.</div>
+  <h3>제안하는 구조</h3>
+  <div class="flow">1) 새 공유 노드로 이전 — adminCenter/promotedContent/{gameId}/{entryId}
+   → { label, addedAt, addedBy }  (label = 기존의 nickname과 같은 자유 텍스트)
+   → .read: false, .write: false (Functions 전용, 05번 관례와 동일)
+   → gameId는 06번 GAME_CATALOG의 id 재사용 — 새 게임은 그 배열에
+     한 줄만 추가하면 이 기능도 자동으로 그 게임을 지원
+
+2) admin-center에 새 함수 3개(관리자 전용)
+   listPromotedContent() — GAME_CATALOG 순서로 게임별 목록을 묶어서 반환
+   addPromotedContent({ gameId, label })
+   removePromotedContent({ gameId, entryId })
+
+3) 새 카드 "게시글 홍보 현황" — 08번 콘텐츠 동결 카드처럼 게임별로 구분된
+   섹션, 각 섹션에 자유 텍스트 입력 + 칩 목록(기존 UI 패턴 재사용)</div>
+  <div class="callout warn"><b>기존 데이터 이전이 필요하다</b> — <code>bettingMarket/promotedStreamers</code>엔 이미 실제로 쌓인 이력이 있다. 새 노드로 옮길 때 한 번 데이터를 복사해야 하고(<code>{gameId: 'bettingMarket'}</code>로 마이그레이션), 이후 StreamBet-Market의 기존 <code>js/promoted-streamers.js</code>는 그대로 옛 노드를 보게 둘지, 새 함수를 호출하도록 같이 고칠지 정해야 한다. 그대로 두면 <strong>같은 정보를 두 곳에서 따로 관리하게 돼</strong> admin-center 쪽 목록과 어긋날 수 있다 — 04번에서 반복해서 겪은 "미러가 두 개 생기는" 패턴을 피하려면, StreamBet-Market 쪽도 결국 새 함수를 호출하도록 옮기는 게 맞다</div>
+  <p>이 구조라면 soop-stock-market·interior-3d-viewer, 그리고 앞으로 나올 게임도 별도 개발 없이 admin-center 화면에 새 섹션만 하나 더 생기는 방식으로 이 기능을 바로 쓸 수 있다.</p>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">23</span><h2>통합 관리 센터 — 페이지 디자인 기획</h2></div>
+  <p>목표: 08~22번에서 설계한 카드 15개(기존 4개 포함 총 19개)를 실제로 붙일 때 쓸 시각 언어와 페이지 구조를 정한다. <strong>이 문서(<code>시리즈_통합_문서.html</code>) 자체의 디자인과는 다른 이야기</strong>라는 걸 먼저 구분해야 한다 — 이 문서는 "읽는 문서"용 스타일(다크 세리프+골드, 스트리머_배팅시장_기획서.html과 동일 계열)이고, admin-center의 실제 페이지(<code>index.html</code>)는 "조작하는 도구"용 스타일로 이미 따로 만들어져 있다.</p>
+  <h3>지금 admin-center에 이미 있는 디자인 시스템</h3>
+  <table>
+    <tr><th>요소</th><th>값/패턴</th><th>의미</th></tr>
+    <tr><td>배경</td><td><code>#0b0d10</code>(페이지) / <code>#15181d</code>(카드) / <code>#191d24</code>(카드 안 행)</td><td>3단 명도로 배경-카드-행을 구분</td></tr>
+    <tr><td>강조색</td><td>골드 <code>#d9a441</code></td><td>관리자 배지, 강조 버튼, 포커스 아웃라인 — "관리자 권한/주의 끌기" 의미로 일관됨</td></tr>
+    <tr><td>긍정색</td><td>그린 <code>#3fb689</code></td><td>인증 스트리머 배지, 승인 버튼, "정상 운영" 태그</td></tr>
+    <tr><td>경고색</td><td>레드 <code>#e2554f</code></td><td>거절/해제 버튼, "동결됨" 태그, 정지 관련 예정 UI</td></tr>
+    <tr><td>출처 구분</td><td><code>.source-tag.bettingMarket</code>=골드, <code>.source-tag.stockMarket</code>=파랑(<code>#3f9bb6</code>)</td><td>여러 게임 데이터가 섞여 보일 때 어느 게임 것인지 색으로 구분하는 기존 관례</td></tr>
+    <tr><td>레이아웃</td><td><code>&lt;main&gt;</code> 최대폭 960px, <code>.card</code>를 세로로 나열</td><td>지금은 카드 4개뿐이라 문제없지만 19개가 되면 스크롤이 매우 길어짐</td></tr>
+    <tr><td>재사용 컴포넌트</td><td><code>.toggle-switch</code>(슬라이딩 토글), <code>.verif-row</code>/<code>.audit-row</code>(카드형 리스트 행), 720px 브레이크포인트에서 그리드 열 수 축소</td><td>새 카드도 이 부품을 재사용하면 됨 — 새로 디자인할 필요 없음</td></tr>
+  </table>
+  <h3>카드 19개 시대의 페이지 구조 — 그룹으로 묶어야 한다</h3>
+  <p>지금처럼 카드를 그냥 순서대로 쌓기만 하면, 19번(세션 빠른 이동)의 목차가 있어도 페이지 자체가 너무 길어져 "지금 내가 뭘 보고 있는지" 방향감을 잃기 쉽다. 카드를 성격별로 묶어 섹션 제목을 붙이는 걸 제안한다.</p>
+  <div class="flow">■ 신원·권한          — 인증 스트리머 관리, 정지계정 관리(20), 권한 위임, 유저 검색(16)
+■ 모니터링           — 감사 로그, 검수 알람(18), 접속자 분석(10), 전체 통계(11)
+■ 검수·승인          — 페이지별 검수(13), 구매 승인 검수(14), 종목 상장 관리(15)
+■ 콘텐츠·현황        — 구매 현황(12), 게시글 홍보 현황(22), 콘텐츠 동결 상태
+■ 커뮤니케이션        — 관리자·인증 스트리머 채팅(17)
+■ 사이트 설정         — devbar 구성(08)</div>
+  <div class="callout"><b>19번과 함께 가는 구조</b> — 이 그룹들은 19번의 <code>QUICKNAV_ITEMS</code> 배열에서 그룹 헤더 역할도 겸할 수 있다(soop-stock-market의 목차는 평평한 27줄 목록인데, admin-center는 처음부터 그룹 제목을 목차에 넣으면 27줄보다 덜 부담스러운 목차가 된다).</div>
+  <h3>새 카드를 붙일 때 지킬 것</h3>
+  <ul>
+    <li>배지 색 의미를 새로 만들지 말 것 — 골드=관리자/강조, 그린=긍정/인증, 레드=경고/제재라는 기존 약속을 그대로 따른다(예: 20번 정지계정 카드의 "정지됨" 태그는 레드, 21번 마켓 상태 중 <code>open</code>은 그린 계열로)</li>
+    <li>여러 게임 데이터가 한 목록에 섞이는 카드(12·13·14번 등)는 <code>.source-tag</code> 패턴을 그대로 재사용해 게임을 색으로 구분한다</li>
+    <li>스크롤박스가 필요한 카드(10·11번의 스파크라인, 로그성 목록)는 05번 감사 로그 카드가 이미 쓴 "실제 렌더링 높이를 측정해서 N줄 기준으로 <code>max-height</code>를 정한다" 방식을 그대로 따른다 — 대충 추측한 값을 쓰지 않는다</li>
+    <li>모바일 대응은 기존 720px 브레이크포인트를 그대로 쓴다(그리드 열 수 축소, 19번 목차는 아예 숨김 — soop-stock-market과 동일한 처리)</li>
+  </ul>
 </section>
 
 </div>
