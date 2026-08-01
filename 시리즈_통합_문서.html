@@ -1067,6 +1067,26 @@
     <li>RTDB 규칙과는 무관 — 알림은 서버(Cloud Functions)에서만 발송되므로 클라이언트 권한 설정을 바꿀 필요가 없다</li>
   </ul>
   <div class="callout"><b>스팸 위험</b> — 알림이 너무 잦으면 오히려 무시하게 된다. 특히 위 표의 구매 승인 신청 8종은 빈도가 높을 수 있어, 개별 알림 대신 일정 주기로 모아 보내는 다이제스트 방식이 나을 수도 있다 — 실제 신청 빈도를 보고 나서 판단할 열린 문제로 남겨둔다.</div>
+  <h3>웹훅 URL 등록 방식 — 관리 센터 UI로 입력 (절충안)</h3>
+  <p>CLI로 <code>firebase functions:secrets:set</code>을 직접 실행하는 대신, 통합 관리 센터 화면에서 URL을 입력하고 싶다는 요구가 있었다. 저장 위치를 RTDB로 바꾸는 건 <strong>추천하지 않는다</strong> — 05번에서 기록했듯 이 시리즈는 RTDB 규칙 동기화 실수가 실제로 있었던 곳이라, <code>.read:false</code>로 잠가도 규칙 파일 관리 실수 하나에 비밀번호급 값이 노출될 위험이 Secret Manager보다 크다. 대신 <strong>입력 경로만 UI로 열고 저장은 그대로 Secret Manager로 보내는</strong> 절충안을 쓴다.</p>
+  <div class="flow">1) 관리 센터에 "디스코드 웹훅 URL 설정" 입력창 추가 (관리자 전용)
+
+2) 새 함수 setDiscordWebhookUrl({ url })(onCall, 관리자 전용)
+   → RTDB에 쓰지 않는다
+   → @google-cloud/secret-manager의 addSecretVersion으로
+     DISCORD_WEBHOOK_URL 시크릿에 새 버전을 추가한다
+   → 입력값을 그대로 돌려주지 않는다(쓰기 전용) — UI는
+     "설정됨 / 설정 안 됨" 상태만 표시하고 값 자체는 절대 다시 보여주지 않는다
+
+3) 알림을 실제로 보내는 트리거 함수들은 항상 최신 버전(latest)을 읽으므로
+   admin-center에서 값을 바꾸면 재배포 없이 바로 다음 알림부터 반영된다</div>
+  <div class="callout warn"><b>이 함수가 동작하려면 미리 준비돼 있어야 하는 것</b>
+    <ul>
+      <li><strong>시크릿 컨테이너 최초 생성</strong> — <code>DISCORD_WEBHOOK_URL</code>이라는 이름의 시크릿 자체는 CLI로 한 번은 만들어야 한다(<code>firebase functions:secrets:set DISCORD_WEBHOOK_URL --project soop-stock-market</code>, 최초 값은 아무 문자열이나 넣고 이후 UI에서 덮어써도 된다). 함수가 "새 버전 추가"만 하도록 권한을 좁히기 위해, 컨테이너 생성 자체는 사람이 한 번 해두는 편이 안전하다</li>
+      <li><strong>IAM 권한</strong> — admin-center의 Cloud Functions가 쓰는 서비스 계정에 Secret Manager의 "보안 비밀 버전 관리자"(<code>roles/secretmanager.secretVersionManager</code>) 역할을 GCP 콘솔 IAM 페이지에서 부여해야 한다. 프로젝트 공유 IAM을 건드리는 작업이라 콘솔에서 직접 확인하며 하는 걸 권장한다</li>
+      <li><strong>패키지 추가</strong> — <code>admin-center/functions/package.json</code>에 <code>@google-cloud/secret-manager</code> 의존성 추가(코드 작성 시 같이 처리)</li>
+    </ul>
+  </div>
 </section>
 
 </div>
