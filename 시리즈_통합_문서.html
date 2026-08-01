@@ -408,6 +408,21 @@
       <td>통합 관리 센터 — 유저 검색/유저 상세 조회</td>
       <td>04·05·12번 등 uid 기반 설계들을 실제로 쓰게 해주는 진입점. soop-stock-market은 uid를 몰라야 검색 자체가 안 되는 상태. 16번에서 상세 설계</td>
     </tr>
+    <tr>
+      <td><strong>낮음</strong> (이미 동작 중인 걸 넓히는 작업)</td>
+      <td>통합 관리 센터 — 관리자·인증 스트리머 전용 채팅</td>
+      <td>StreamBet-Market에 이미 완성된 기능을 통합 관리 센터에서도 접근 가능하게. 17번에서 상세 설계</td>
+    </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>통합 관리 센터 — 검수 알람</td>
+      <td>13·14·15번 큐에 새 항목이 들어오면 놓치지 않게. 실시간 배지 자체가 admin-center의 기존 "단발성 새로고침" 설계와 부딪히는 선행 결정이 필요. 18번에서 상세 설계</td>
+    </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>통합 관리 센터 — 세션 빠른 이동</td>
+      <td>soop-stock-market 관리자 페이지의 우측 고정 목차 패널을 이식. 08~18번 카드가 다 쌓이면 admin-center도 같은 문제(카드 과다)를 겪게 됨. 19번에서 상세 설계</td>
+    </tr>
   </table>
   <div class="callout"><b>권장 순서</b> — 킬스위치 → 권한 카탈로그 채우기 순으로 가는 게 안전하다. 위임 메커니즘이 이미 있다고 해서 카탈로그부터 채우면, 되돌릴 방법 없이 실제 권한이 스트리머 전원에게 뿌려지는 상태가 먼저 생긴다.</div>
 </section>
@@ -769,6 +784,82 @@
    그 아래 게임별 섹션(배팅시장 잔액/베팅내역, 주식시장 현금/보유종목),
    맨 아래 구매 이력(12번)</div>
   <div class="callout"><b>정지·잔액조정 같은 액션은 그대로 각 게임 함수로</b> — StreamBet-Market의 <code>banAccount</code>/<code>adminAdjustBalance</code> 등 실제 조치는 새로 만들지 않고 기존 함수를 그대로 호출한다(06번 원칙). soop-stock-market 쪽에 상응하는 조치 함수가 있는지는 이 문서에서 아직 확인하지 않았으므로, 실제 구현 전에 해당 저장소의 <code>adminAction</code> 액션 목록을 다시 확인할 것.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">17</span><h2>통합 관리 센터 — 관리자·인증 스트리머 전용 채팅 (설계)</h2></div>
+  <p>목표: 관리자와 인증 스트리머끼리 실시간으로 소통하는 채팅을 통합 관리 센터에서도 쓸 수 있게 한다. 이 문서의 다른 항목과 달리 <strong>이미 완성된 기능을 넓히는 작업</strong>이라는 점이 다르다.</p>
+  <h3>현재 상태</h3>
+  <p>StreamBet-Market에 이미 완전한 형태로 구현돼 있다.</p>
+  <ul>
+    <li><code>sendAdminChatMessage({ text })</code>(<code>functions/src/chat.js</code>) — <code>requireAdminOrVerifiedStreamer</code> 가드, 300자 제한(<code>CHAT_MESSAGE_MAX_LENGTH</code>), <code>bettingMarket/profiles</code>에서 닉네임·아바타를 자동으로 붙여서 <code>bettingMarket/adminChat</code>에 기록</li>
+    <li><code>capped-log.js</code>의 <code>trimToLast</code>로 최근 200개만 유지, 클라이언트(<code>js/admin-chat.js</code>)도 <code>limitToLast(200)</code>으로만 구독 — 05번·10번에서 반복된 "무한정 쌓이는 로그성 노드는 캡을 둔다" 원칙과 동일</li>
+    <li>관리 탭 상단에서 이미 실시간으로 동작 중</li>
+  </ul>
+  <div class="callout"><b>가드가 이미 안전하게 짜여 있다</b> — <code>requireAdminOrVerifiedStreamer</code>는 <code>bettingMarket/verifiedStreamerUids</code> 미러가 아니라 공유 <code>streamerVerifications</code> 노드를 uid로 직접 조회한다(admin-center 자체 가드와 동일한 방식). 04번에서 다룬 미러 동기화 문제와 무관하게, <strong>어느 게임에서 인증받았든 이 채팅에는 즉시 접근 가능</strong>하다는 뜻 — 이 부분은 추가로 손볼 게 없다.</div>
+  <p>soop-stock-market·interior-3d-viewer·admin-center엔 이런 기능이 없다.</p>
+  <h3>문제</h3>
+  <p>이 채팅이 <strong>StreamBet-Market의 관리 탭 안에만</strong> 있어서, 그 페이지를 평소에 열지 않는 인증 스트리머나 관리자는 대화 자체를 놓친다. "관리자·인증 스트리머 전용 소통 채널"이라는 취지를 살리려면 시리즈 어디서든(특히 여러 게임을 오가는 관리자가 상시 열어두는 통합 관리 센터에서) 접근 가능해야 한다.</p>
+  <h3>제안하는 구조 — 두 가지 선택지</h3>
+  <table>
+    <tr><th>선택지</th><th>방식</th><th>장단점</th></tr>
+    <tr>
+      <td><strong>A. 기존 채널 재사용 (추천)</strong></td>
+      <td>admin-center UI가 StreamBet-Market이 이미 배포한 <code>sendAdminChatMessage</code>를 그대로 <code>httpsCallable</code>로 호출하고, <code>bettingMarket/adminChat</code>을 그대로 구독</td>
+      <td>새 Function 불필요, 기존 대화 이력 유지, 06번 원칙과 정확히 일치. 같은 Firebase 프로젝트 안에서는 codebase가 달라도 함수 이름만 맞으면 다른 저장소에서 배포한 함수를 그대로 호출할 수 있다(codebase는 배포 단위 구분일 뿐 호출 범위를 제한하지 않음)</td>
+    </tr>
+    <tr>
+      <td>B. admin-center 전용 새 채널</td>
+      <td><code>adminCenter/chat</code> 신설, 같은 로직을 admin-center 쪽에 복제</td>
+      <td>소유권은 깔끔하지만 대화가 두 갈래로 갈라지고(어디를 봐야 최신 대화인지 헷갈림), 이미 검증된 로직을 그대로 베끼는 것이라 실익이 없음</td>
+    </tr>
+  </table>
+  <p>A를 따르면 admin-center 쪽에서 할 일은 새 카드 "관리자·인증 스트리머 채팅" UI 하나뿐이다.</p>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">18</span><h2>통합 관리 센터 — 검수 알람 (설계)</h2></div>
+  <p>목표: 13번(페이지별 검수)·14번(구매 승인)·15번(종목 상장) 큐에 새 항목이 들어왔을 때 관리자·인증 스트리머가 놓치지 않게 한다.</p>
+  <h3>현재 상태 — StreamBet-Market에 재사용할 만한 패턴이 이미 있다</h3>
+  <p><code>js/admin-alerts.js</code>의 "관리 탭 검수 알림 배너": 이미 각자 실시간 구독으로 그려지는 6개 목록(<code>admin-pending-list</code>·<code>report-queue-list</code>·<code>nick-report-queue-list</code>·<code>verify-requests-list</code>·<code>chest-purchase-requests-list</code>·<code>streamer-requests-list</code>)의 DOM을 <code>MutationObserver</code>로 지켜보다가, 항목 수가 바뀔 때마다 배지 숫자를 다시 계산한다. 각 목록의 데이터 구독 로직은 전혀 건드리지 않고 <strong>이미 그려진 결과만 관찰</strong>하므로 다른 모듈과 결합되지 않는다는 게 장점 — 클릭하면 해당 섹션으로 스크롤 이동.</p>
+  <div class="callout warn"><b>이건 "알람"이라기보다 "배지"다</b> — 소리도, 브라우저 알림도, 다른 기기로 가는 알림도 없다. 그 관리 탭을 <strong>열어서 보고 있어야만</strong> 보이는 숫자 하나일 뿐이다. 시리즈 전체를 통틀어 이보다 더 적극적인 알림 수단(푸시 알림·사운드·외부 채널)은 어디에도 없다.</div>
+  <h3>admin-center에 그대로 옮길 때 부딪히는 선행 조건</h3>
+  <div class="callout warn"><b>admin-center의 기존 데이터 갱신 방식과 맞지 않는다</b> — 06번에서 세운 admin-center의 조회 함수들(<code>listStreamerVerificationOverview</code>·<code>listAuditLogOverview</code> 등)은 전부 <strong>단발성 호출</strong>이다(코드 주석에 명시된 의도적 트레이드오프 — 실시간 <code>onValue</code> 구독을 쓰지 않음). 그런데 <code>admin-alerts.js</code>의 배지는 "이미 실시간으로 갱신되는 DOM"을 관찰하는 전제로 동작한다. admin-center의 13·14·15번 카드가 지금처럼 수동 새로고침 방식으로 남아있으면, 배지도 <strong>새로고침해야만 갱신되는 숫자</strong>가 되어 "알람"으로서 의미가 크게 줄어든다. 배지를 실시간으로 만들려면 해당 카드들을 먼저 <code>onValue</code> 구독 방식으로 바꿔야 하는데, 이건 admin-center가 처음에 의도적으로 피했던 선택이라 — 되돌릴지 여부부터 결정이 필요하다</div>
+  <h3>제안하는 3단계</h3>
+  <table>
+    <tr><th>단계</th><th>내용</th><th>선행 조건</th></tr>
+    <tr>
+      <td><strong>1단계 — 배지 재사용</strong></td>
+      <td><code>admin-alerts.js</code>와 같은 패턴을 admin-center의 13·14·15 카드에 그대로 적용. 카드가 열려있고 보고 있을 때만 숫자가 정확</td>
+      <td>없음 — 지금 방식(단발성 새로고침) 그대로도 "새로고침을 누르면 최신 숫자가 보이는" 수준까진 바로 가능</td>
+    </tr>
+    <tr>
+      <td><strong>2단계 — 실시간 배지</strong></td>
+      <td>탭을 열어두면 새로 고침 없이도 숫자가 즉시 바뀜</td>
+      <td>13·14·15 카드를 <code>onValue</code> 구독으로 전환 — admin-center의 기존 설계 방침을 부분적으로 뒤집는 결정</td>
+    </tr>
+    <tr>
+      <td><strong>3단계 — 진짜 알림</strong></td>
+      <td>탭을 안 보고 있어도 알 수 있음(브라우저 푸시 알림·사운드·카카오톡/디스코드 웹훅 등)</td>
+      <td>시리즈 전체에 전례가 전혀 없는 신규 기능 — 필요성부터 별도로 판단할 것(예: 상장 신청처럼 급하지 않은 것과, 인증 신청처럼 빨리 봐야 하는 것을 같은 수준으로 알릴 필요는 없을 수 있음)</td>
+    </tr>
+  </table>
+  <div class="callout"><b>권장</b> — 1단계는 지금 바로 붙일 수 있다. 2단계로 갈지는 admin-center를 관리자가 얼마나 상시로 켜두는지에 달려있고, 3단계는 실제로 검수가 늦어져서 문제가 된 사례가 쌓인 뒤에 판단해도 늦지 않다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">19</span><h2>통합 관리 센터 — 세션 빠른 이동 (설계)</h2></div>
+  <p>목표: 카드가 계속 늘어나는 통합 관리 센터에, 페이지 우측에 고정된 채로 클릭하면 해당 섹션으로 바로 스크롤 이동하는 목차 패널을 둔다.</p>
+  <h3>현재 상태 — soop-stock-market에 이미 있는 패턴</h3>
+  <p>soop-stock-market 관리자 페이지의 <code>#admin-quicknav</code>: 화면 우측에 고정된 내비게이션으로, <code>QUICKNAV_ITEMS</code> 배열(섹션 id·라벨 <strong>27개</strong>를 하드코딩)을 <code>renderQuickNav()</code>가 버튼 목록으로 그리고, 클릭하면 <code>scrollIntoView({ behavior: 'smooth', block: 'start' })</code>로 이동한다. 좁은 화면에서는 <code>@media</code> 쿼리로 아예 숨김 처리. 관리자 로그인 성공 시 한 번 렌더링되는 정적인 목차다.</p>
+  <p>StreamBet-Market·interior-3d-viewer·admin-center엔 이런 전체 목차가 없다. StreamBet-Market의 <code>admin-alerts.js</code>(18번)도 클릭 시 스크롤 이동은 하지만, 그건 <strong>대기 항목이 있는 6개 검수 섹션에 한정된 배지</strong>이지 전체 섹션을 나열하는 목차가 아니다.</p>
+  <div class="callout"><b>왜 지금 이게 admin-center에 필요해지는가</b> — soop-stock-market이 이 패널을 만든 이유는 관리자 페이지 섹션이 27개까지 늘어났기 때문이다. 그런데 이 문서 08~18번에서 이미 설계한 카드만 세어봐도 devbar 구성·접속자 분석·전체 통계·구매 현황·페이지별 검수·구매 승인 검수·종목 상장 관리·유저 검색·채팅·검수 알람까지 <strong>10개</strong>가 기존 4개 카드(인증 스트리머 관리·감사 로그·콘텐츠 동결·권한 위임)에 더해진다. 다 구현하면 admin-center도 soop-stock-market과 똑같이 "카드가 너무 많아서 스크롤이 길어지는" 상태에 도달한다 — 같은 문제를 이미 풀어놓은 패턴이 바로 옆 저장소에 있는 셈이다.</div>
+  <h3>제안하는 구조</h3>
+  <ul>
+    <li>soop-stock-market의 <code>QUICKNAV_ITEMS</code> 패턴을 그대로 이식 — admin-center 자체 카드 id 기준으로 새 배열을 작성(예: 인증 스트리머 관리·감사 로그·콘텐츠 동결·권한 위임·devbar 구성·접속자 분석·전체 통계·구매 현황·페이지별 검수·구매 승인 검수·종목 상장 관리·유저 검색·채팅·검수 알람)</li>
+    <li>모바일에서 숨기는 처리도 동일하게 적용 — 좁은 화면에서 고정 패널이 콘텐츠를 가리지 않게</li>
+  </ul>
+  <div class="callout warn"><b>수동 관리 포인트</b> — 08번의 <code>GAME_CATALOG</code>처럼, 이 목차 배열도 <strong>카드가 추가/제거될 때마다 사람이 같이 고쳐야</strong> 자동으로 늘어나지 않는다. 새 카드를 붙이면서 이 배열에 항목 추가하는 걸 빠뜨리면, 그 카드만 목차에서 빠진 채로 조용히 방치될 수 있다.</div>
 </section>
 
 </div>
