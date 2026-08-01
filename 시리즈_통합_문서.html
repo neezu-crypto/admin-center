@@ -363,8 +363,49 @@
       <td><code>grantAchievement("account_protected")</code> 비대칭 수정</td>
       <td>인증 경로에 따라 이 업적이 지급되거나 안 되거나 하는 사소한 불일치. 사용자 경험에 미치는 영향이 작아 지금까지 우선순위에서 밀려남 — 다른 작업 하는 김에 같이 처리하는 정도로 충분</td>
     </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>devbar 구성을 통합 관리 센터에서 관리</td>
+      <td>지금은 각 페이지에 하드코딩된 정적 링크 목록. 08번에서 상세 설계</td>
+    </tr>
   </table>
   <div class="callout"><b>권장 순서</b> — 킬스위치 → 권한 카탈로그 채우기 순으로 가는 게 안전하다. 위임 메커니즘이 이미 있다고 해서 카탈로그부터 채우면, 되돌릴 방법 없이 실제 권한이 스트리머 전원에게 뿌려지는 상태가 먼저 생긴다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">08</span><h2>devbar를 통합 관리 센터에서 관리하기 (설계)</h2></div>
+  <p>각 게임 페이지 상단의 <strong>devbar</strong>(사이트명 + "다른 게임 바로가기" 링크 목록)는 아직 코드에 그대로 박혀있는 정적 HTML이다.</p>
+  <h3>현재 상태</h3>
+  <table>
+    <tr><th>저장소</th><th>devbar 위치</th><th>비고</th></tr>
+    <tr><td><span class="chip">StreamBet-Market</span></td><td><code>index.html</code> 1곳</td><td>링크 목록이 그 파일에 직접 하드코딩</td></tr>
+    <tr><td><span class="chip">interior-3d-viewer</span></td><td><code>index.html</code> · <code>ski-resort.html</code> · <code>fireworks.html</code> 3곳</td><td>거의 동일한 목록이 3개 파일에 각각 복사돼 있음</td></tr>
+    <tr><td><span class="chip">soop-stock-market</span></td><td><code>index.html</code> — <code>&lt;nav class="topnav"&gt;</code></td><td>이름과 마크업은 다르지만(devbar가 아니라 topnav, <code>.topnav-btn</code>) 같은 역할을 하는 목록이 <strong>독립적으로 하드코딩</strong>돼 있음 — 공유 컴포넌트가 아니라 각 저장소가 각자 베낀 사본이라 클래스명부터 이미 갈라진 상태</td></tr>
+  </table>
+  <div class="callout warn"><b>문제</b> — 새 게임이 추가되거나 링크 하나가 바뀔 때마다 사람이 여러 저장소의 여러 파일을 일일이(그것도 서로 다른 마크업/클래스명으로) 찾아 고쳐야 한다. 공유 코드가 아니라 각자 베낀 사본이다 보니 이미 이름부터 갈라졌고, 게임 수가 늘수록 어긋날 지점도 늘어난다.</div>
+  <h3>제안하는 구조</h3>
+  <div class="flow">1) devbar 링크 목록을 공유 RTDB 노드로 이동
+   → 예: <b>seriesConfig/devbarLinks</b> = [{ label, url, order }, ...]
+   → .read: true (원래도 페이지에 노출되는 공개 링크), .write: Functions 전용
+
+2) 각 페이지의 devbar 렌더링 스크립트가 로드 시점에 이 노드를 읽어서 링크를 그린다
+   → 06번 GAME_CATALOG와 마찬가지로 "한 곳만 고치면 전체에 반영"되는 패턴
+
+3) 네트워크 실패 / 노드가 비어있는 경우를 대비해
+   지금의 하드코딩된 목록을 그대로 기본값(fallback)으로 남겨둔다
+   → devbar가 통째로 사라지는 사고를 방지</div>
+  <h3>통합 관리 센터 쪽 작업</h3>
+  <ul>
+    <li>새 카드 "devbar 구성" 추가 — 링크 추가/수정/삭제/순서 변경 UI</li>
+    <li>저장 시 <span class="chip">seriesConfig/devbarLinks</span>를 갱신하는 Cloud Function(관리자 전용, 06번 <code>setSeriesConfig</code>류 패턴 재사용) + <span class="chip">adminAuditLog</span> 기록</li>
+  </ul>
+  <h3>영향 범위 (구현 시 손대야 할 파일)</h3>
+  <ul>
+    <li><span class="chip">StreamBet-Market/js/devbar.js</span> — 지금은 마퀴 스크롤 계산만 함, 링크 목록을 RTDB에서 읽어와 DOM에 그리는 로직 추가 필요</li>
+    <li><span class="chip">interior-3d-viewer</span>의 3개 페이지 — 각자 독립된 인라인 devbar 마크업이라 페이지마다 동일한 로직을 반복 적용해야 함</li>
+    <li><span class="chip">soop-stock-market/index.html</span> — <code>&lt;nav class="topnav"&gt;</code>/<code>.topnav-btn</code> 마크업이 devbar와 이름부터 다르므로, 공통 로직을 적용하려면 클래스명 통일 또는 별도 어댑터가 필요</li>
+  </ul>
+  <div class="callout"><b>권한 위임 후보로도 적합</b> — 링크 목록 수정은 신원·재화에 영향이 없는 낮은 리스크 작업이라, 07번 "위임 권한 카탈로그 채우기"의 첫 후보 항목으로 검토할 만하다.</div>
 </section>
 
 </div>
