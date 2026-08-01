@@ -217,6 +217,7 @@
         <input id="discordWebhookInput" type="text" placeholder="https://discord.com/api/webhooks/..."
           style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius:6px; font-size:12.5px;">
         <button id="discordWebhookSaveBtn" class="perm-refresh-btn" type="button">저장</button>
+        <button id="discordWebhookTestBtn" class="perm-refresh-btn" type="button">테스트 알림 보내기</button>
       </div>
     </div>
 
@@ -277,6 +278,7 @@
   const setSeriesConfigFn = httpsCallable(functions, 'setSeriesConfig');
   const setDiscordWebhookUrlFn = httpsCallable(functions, 'setDiscordWebhookUrl');
   const getDiscordWebhookStatusFn = httpsCallable(functions, 'getDiscordWebhookStatus');
+  const sendTestDiscordNotificationFn = httpsCallable(functions, 'sendTestDiscordNotification');
 
   // 인증 스트리머 관리 1단계 — 새 승인/거절/해제 로직을 만들지 않고, 같은 프로젝트에
   // 이미 배포돼 있는 각 게임의 기존 Cloud Functions를 그대로 호출한다(같은
@@ -311,6 +313,7 @@
   const discordWebhookStatusEl = document.getElementById('discordWebhookStatus');
   const discordWebhookInputEl = document.getElementById('discordWebhookInput');
   const discordWebhookSaveBtn = document.getElementById('discordWebhookSaveBtn');
+  const discordWebhookTestBtn = document.getElementById('discordWebhookTestBtn');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
@@ -636,6 +639,24 @@
       window.alert('저장에 실패했습니다: ' + (err && err.message ? err.message : err));
     }).finally(function () {
       discordWebhookSaveBtn.disabled = false;
+    });
+  });
+
+  discordWebhookTestBtn.addEventListener('click', function () {
+    discordWebhookTestBtn.disabled = true;
+    discordWebhookTestBtn.textContent = '전송 중...';
+    sendTestDiscordNotificationFn().then(function (result) {
+      if (result.data.sent) {
+        window.alert('✅ 테스트 알림을 보냈습니다. 디스코드 채널을 확인해 주세요.');
+      } else {
+        window.alert('❌ 전송 실패 (' + result.data.reason + '). 웹훅 URL이 올바른지, 채널에서 삭제되지 않았는지 확인해 주세요.');
+      }
+    }).catch(function (err) {
+      console.error('테스트 알림 전송 실패:', err);
+      window.alert('테스트 알림 전송에 실패했습니다: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      discordWebhookTestBtn.disabled = false;
+      discordWebhookTestBtn.textContent = '테스트 알림 보내기';
     });
   });
 

@@ -259,6 +259,8 @@ const getDiscordWebhookStatus = onCall(async (request) => {
 // 실제 알림 발송 — 트리거 함수들이 공용으로 쓰는 헬퍼. 매번 최신 버전(latest)을
 // 읽으므로, 관리자가 URL을 바꾸면 재배포 없이 다음 알림부터 바로 반영된다.
 // placeholder 상태(최초 부트스트랩 값)이거나 아직 설정 전이면 조용히 건너뛴다.
+// 반환값은 트리거 함수들은 신경 쓰지 않지만, sendTestDiscordNotification처럼
+// 사람에게 성공/실패를 알려줘야 하는 호출부를 위해 상태를 그대로 돌려준다.
 async function sendDiscordNotification(text) {
   let webhookUrl;
   try {
@@ -268,19 +270,38 @@ async function sendDiscordNotification(text) {
     webhookUrl = version.payload.data.toString('utf8');
   } catch (e) {
     console.error('디스코드 웹훅 시크릿을 읽을 수 없음', e);
-    return;
+    return { sent: false, reason: 'secret-read-failed' };
   }
-  if (!webhookUrl || !webhookUrl.startsWith('https://discord')) return;
+  if (!webhookUrl || !webhookUrl.startsWith('https://discord')) {
+    return { sent: false, reason: 'not-configured' };
+  }
   try {
-    await fetch(webhookUrl, {
+    const res = await fetch(webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: text }),
     });
+    if (!res.ok) {
+      console.error('디스코드 웹훅 전송 실패 - 응답 코드', res.status);
+      return { sent: false, reason: 'discord-rejected-' + res.status };
+    }
+    return { sent: true };
   } catch (e) {
     console.error('디스코드 웹훅 전송 실패', e);
+    return { sent: false, reason: 'network-error' };
   }
 }
+
+// 관리 센터 UI의 "테스트 알림 보내기" 버튼용 — 프로덕션 RTDB에 가짜 데이터를
+// 만들지 않고, 지금 설정된 웹훅으로 실제 메시지 한 건만 즉시 보내서 연결을
+// 검증한다. 성공/실패를 그대로 반환해 UI가 사람이 읽을 결과를 보여줄 수 있다.
+const sendTestDiscordNotification = onCall(async (request) => {
+  requireAdmin(request);
+  const result = await sendDiscordNotification(
+    '✅ **테스트 알림** — 통합 관리 센터 디스코드 웹훅 연결이 정상입니다.'
+  );
+  return result;
+});
 
 // interior-3d-viewer의 프리셋 소유권 병합 실패 — 13번에서 확인했듯 이 시리즈에서
 // 유일하게 관리자가 CLI로 직접 RTDB를 만져야 처리되는 사각지대라, 가장 먼저
@@ -349,6 +370,7 @@ module.exports = {
   setSeriesConfig,
   setDiscordWebhookUrl,
   getDiscordWebhookStatus,
+  sendTestDiscordNotification,
   notifyPresetMergeFailure,
   notifyMarketReport,
   notifyNicknameReport,
