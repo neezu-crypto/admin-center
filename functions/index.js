@@ -1,6 +1,8 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onValueCreated } = require('firebase-functions/v2/database');
 const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
+const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 
 initializeApp();
 
@@ -208,6 +210,136 @@ const setSeriesConfig = onCall(async (request) => {
   return { ok: true };
 });
 
+// 24번 — 디스코드 웹훅 검수 알림. 웹훅 URL은 비밀번호와 동급인 민감정보라
+// RTDB가 아니라 Secret Manager에 저장한다(05번에서 겪은 RTDB 규칙 동기화
+// 실수 사고를 이 값에는 반복하지 않기 위함). 시크릿 컨테이너 자체는
+// 미리 CLI로 한 번 만들어둬야 한다:
+//   firebase functions:secrets:set DISCORD_WEBHOOK_URL --project soop-stock-market
+const secretClient = new SecretManagerServiceClient();
+const DISCORD_WEBHOOK_SECRET = 'DISCORD_WEBHOOK_URL';
+
+function discordSecretParent() {
+  const project = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
+  return `projects/${project}/secrets/${DISCORD_WEBHOOK_SECRET}`;
+}
+
+// 관리자가 통합 관리 센터 화면에서 웹훅 URL을 입력하면, RTDB가 아니라
+// Secret Manager에 새 버전으로 기록한다. 입력값을 그대로 돌려주지 않는다
+// (쓰기 전용) — UI는 getDiscordWebhookStatus로 "설정됨/설정 안 됨"만 표시한다.
+const setDiscordWebhookUrl = onCall(async (request) => {
+  requireAdmin(request);
+  const url = String((request.data || {}).url || '').trim();
+  if (!/^https:\/\/discord(app)?\.com\/api\/webhooks\//.test(url)) {
+    throw new HttpsError('invalid-argument', '올바른 디스코드 웹훅 URL이 아닙니다.');
+  }
+  await secretClient.addSecretVersion({
+    parent: discordSecretParent(),
+    payload: { data: Buffer.from(url, 'utf8') },
+  });
+  const db = getDatabase();
+  await logToAdminAuditLog(db, request, '디스코드 웹훅 URL 변경', '');
+  return { ok: true };
+});
+
+// 시크릿의 값(payload)은 절대 조회하지 않고, 활성화된 버전이 있는지만
+// 확인한다 — 값을 화면에 다시 보여줄 방법 자체를 만들지 않기 위함.
+const getDiscordWebhookStatus = onCall(async (request) => {
+  requireAdmin(request);
+  try {
+    const [versions] = await secretClient.listSecretVersions({
+      parent: discordSecretParent(),
+      filter: 'state:ENABLED',
+    });
+    return { configured: versions.length > 0 };
+  } catch (e) {
+    return { configured: false };
+  }
+});
+
+// 실제 알림 발송 — 트리거 함수들이 공용으로 쓰는 헬퍼. 매번 최신 버전(latest)을
+// 읽으므로, 관리자가 URL을 바꾸면 재배포 없이 다음 알림부터 바로 반영된다.
+// placeholder 상태(최초 부트스트랩 값)이거나 아직 설정 전이면 조용히 건너뛴다.
+async function sendDiscordNotification(text) {
+  let webhookUrl;
+  try {
+    const [version] = await secretClient.accessSecretVersion({
+      name: `${discordSecretParent()}/versions/latest`,
+    });
+    webhookUrl = version.payload.data.toString('utf8');
+  } catch (e) {
+    console.error('디스코드 웹훅 시크릿을 읽을 수 없음', e);
+    return;
+  }
+  if (!webhookUrl || !webhookUrl.startsWith('https://discord')) return;
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: text }),
+    });
+  } catch (e) {
+    console.error('디스코드 웹훅 전송 실패', e);
+  }
+}
+
+// interior-3d-viewer의 프리셋 소유권 병합 실패 — 13번에서 확인했듯 이 시리즈에서
+// 유일하게 관리자가 CLI로 직접 RTDB를 만져야 처리되는 사각지대라, 가장 먼저
+// 연결하는 트리거. RTDB 트리거는 프로젝트 전체에 걸리므로, interior-3d-viewer의
+// 코드를 전혀 건드리지 않고 admin-center가 이 경로를 그대로 감시할 수 있다.
+const notifyPresetMergeFailure = onValueCreated('/presetMergeFailures/{entryId}', async (event) => {
+  const data = event.data.val() || {};
+  const oldUid = data.oldUid || '(알 수 없음)';
+  const newUid = data.newUid || '(알 수 없음)';
+  const reason = data.reason || '(사유 없음)';
+  await sendDiscordNotification(
+    '🔔 **프리셋 소유권 병합 실패** — 배경시장\n' +
+    '이전 uid: `' + oldUid + '`\n' +
+    '새 uid: `' + newUid + '`\n' +
+    '사유: ' + reason + '\n' +
+    '⚠️ 현재는 관리자가 CLI로 직접 처리해야 합니다.'
+  );
+});
+
+// 나머지 검수·승인 큐 — 24번 표에 정리된 경로 전부. 신청 노드마다 필드 이름이
+// 조금씩 다르지만(nickname/streamerId, soopId, stockName, days/hours, qty 등)
+// 공통으로 있을 법한 필드만 골라 한 줄 요약을 만든다 — 큐마다 완벽한 포맷을
+// 새로 짜는 대신, 06번 원칙처럼 하나의 공용 로직으로 감싼다.
+function formatRequestSummary(data) {
+  const parts = [];
+  const name = data.nickname || data.streamerId || '';
+  if (name) parts.push(name + (data.soopId ? ' (@' + data.soopId + ')' : ''));
+  else if (data.requesterUid || data.uid) parts.push('uid: ' + (data.requesterUid || data.uid));
+  if (data.stockName) parts.push('종목: ' + data.stockName);
+  if (data.days) parts.push(data.days + '일');
+  if (data.hours) parts.push(data.hours + '시간');
+  if (data.qty) parts.push(data.qty + '개');
+  if (data.reason) parts.push('사유: ' + data.reason);
+  return parts.length ? parts.join(' · ') : '(상세 정보 없음)';
+}
+
+function makeQueueTrigger(path, label) {
+  return onValueCreated(path, async (event) => {
+    const data = event.data.val() || {};
+    await sendDiscordNotification('🔔 **' + label + '**\n' + formatRequestSummary(data));
+  });
+}
+
+const notifyMarketReport            = makeQueueTrigger('/bettingMarket/marketReports/{id}', '새 마켓 신고 (배팅시장)');
+const notifyNicknameReport          = makeQueueTrigger('/bettingMarket/nicknameReports/{id}', '새 닉네임 신고 (배팅시장)');
+const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyRequests/{id}', '새 인증 신청 (배팅시장)');
+const notifyStockVerifyRequest      = makeQueueTrigger('/streamerVerificationRequests/{id}', '새 인증 신청 (주식시장)');
+const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)');
+const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)');
+const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)');
+const notifyPinRequest              = makeQueueTrigger('/pinRequests/{id}', '새 고정노출 신청 (주식시장)');
+const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}', '새 중계방 신청 (주식시장)');
+const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)');
+const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)');
+const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)');
+const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)');
+// cardBannerRequests(soop-stock-market)는 관리자 승인 단계 없이 즉시 적용되는
+// 흐름이라(14번에서 이미 확인) 검수 알림 대상이 아니다 — 의도적으로 제외.
+
 module.exports = {
   getAdminCenterState,
   setAdminCenterPermission,
@@ -215,4 +347,20 @@ module.exports = {
   listAuditLogOverview,
   getSeriesConfig,
   setSeriesConfig,
+  setDiscordWebhookUrl,
+  getDiscordWebhookStatus,
+  notifyPresetMergeFailure,
+  notifyMarketReport,
+  notifyNicknameReport,
+  notifyBettingVerifyRequest,
+  notifyStockVerifyRequest,
+  notifyChestPurchaseRequest,
+  notifyBannerRequest,
+  notifyChartBannerRequest,
+  notifyPinRequest,
+  notifyRelayRoomRequest,
+  notifyTreasureChestRequest,
+  notifyCashChargeRequest,
+  notifyUnfreezeDonationRequest,
+  notifyListingRequest,
 };

@@ -207,6 +207,20 @@
     </div>
 
     <div class="card">
+      <h2>디스코드 웹훅 검수 알림</h2>
+      <p class="hint">
+        검수 대기 항목(신고·인증 신청·구매 승인·상장 신청·프리셋 병합 실패 등)이 생기면 지정한 디스코드 채널로 알림을 보냅니다.
+        URL은 저장 후 다시 보여주지 않습니다(쓰기 전용) — 아래는 설정 여부만 표시합니다.
+      </p>
+      <div id="discordWebhookStatus" class="hint" style="margin-bottom:10px;">확인 중...</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <input id="discordWebhookInput" type="text" placeholder="https://discord.com/api/webhooks/..."
+          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius:6px; font-size:12.5px;">
+        <button id="discordWebhookSaveBtn" class="perm-refresh-btn" type="button">저장</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>인증 스트리머 권한 위임</h2>
       <p class="hint">
         여기서 체크한 권한은 <b>인증된 스트리머 전원에게 동일하게</b> 부여됩니다(스트리머별 개별 설정이 아님).
@@ -261,6 +275,8 @@
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
   const setSeriesConfigFn = httpsCallable(functions, 'setSeriesConfig');
+  const setDiscordWebhookUrlFn = httpsCallable(functions, 'setDiscordWebhookUrl');
+  const getDiscordWebhookStatusFn = httpsCallable(functions, 'getDiscordWebhookStatus');
 
   // 인증 스트리머 관리 1단계 — 새 승인/거절/해제 로직을 만들지 않고, 같은 프로젝트에
   // 이미 배포돼 있는 각 게임의 기존 Cloud Functions를 그대로 호출한다(같은
@@ -292,6 +308,9 @@
   const auditRefreshBtn = document.getElementById('auditRefreshBtn');
   const auditLogListEl = document.getElementById('auditLogList');
   const seriesConfigListEl = document.getElementById('seriesConfigList');
+  const discordWebhookStatusEl = document.getElementById('discordWebhookStatus');
+  const discordWebhookInputEl = document.getElementById('discordWebhookInput');
+  const discordWebhookSaveBtn = document.getElementById('discordWebhookSaveBtn');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
@@ -589,6 +608,37 @@
     });
   }
 
+  // 24번 — 디스코드 웹훅 URL 설정. RTDB가 아니라 Secret Manager에 저장되며(서버
+  // 쪽 setDiscordWebhookUrl 참고), 값 자체는 여기서도 절대 다시 조회하지 않는다 —
+  // "설정됨/설정 안 됨" 상태만 보여준다.
+  async function refreshDiscordWebhookStatus() {
+    discordWebhookStatusEl.textContent = '확인 중...';
+    try {
+      const result = await getDiscordWebhookStatusFn();
+      discordWebhookStatusEl.textContent = result.data.configured
+        ? '✅ 설정됨 (값은 보안상 다시 표시하지 않습니다)'
+        : '⚠️ 아직 설정되지 않았습니다.';
+    } catch (e) {
+      console.error('디스코드 웹훅 상태 조회 실패:', e);
+      discordWebhookStatusEl.textContent = '조회에 실패했습니다.';
+    }
+  }
+
+  discordWebhookSaveBtn.addEventListener('click', function () {
+    const url = discordWebhookInputEl.value.trim();
+    if (!url) { window.alert('웹훅 URL을 입력해 주세요.'); return; }
+    discordWebhookSaveBtn.disabled = true;
+    setDiscordWebhookUrlFn({ url: url }).then(function () {
+      discordWebhookInputEl.value = ''; // 저장 후 입력창도 비운다 - 값을 화면에 남기지 않는다
+      refreshDiscordWebhookStatus();
+    }).catch(function (err) {
+      console.error('디스코드 웹훅 URL 저장 실패:', err);
+      window.alert('저장에 실패했습니다: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      discordWebhookSaveBtn.disabled = false;
+    });
+  });
+
   function render() {
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
@@ -626,7 +676,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDiscordWebhookStatus(); }
   });
 </script>
 </body>
