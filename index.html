@@ -175,6 +175,15 @@
   <!-- 관리자 전용 화면 -->
   <div id="adminShell" hidden>
     <div class="card">
+      <h2>관리자 uid 등록 (1회성)</h2>
+      <p class="hint">
+        09번 — 관리자 판별을 이메일 문자열 비교에서 uid 기반 공유 노드로 옮기는 작업의 첫 단계입니다.
+        지금 로그인된 관리자 계정의 uid를 adminCenter/adminUids에 등록합니다. 이미 등록됐다면 다시 눌러도 안전합니다.
+      </p>
+      <button id="bootstrapAdminUidBtn" class="perm-refresh-btn" type="button">내 uid 등록하기</button>
+    </div>
+
+    <div class="card">
       <h2>인증 스트리머 관리</h2>
       <p class="hint">
         스트리머 주식시장·스트리머 배팅시장 양쪽의 인증 대기 신청과 공유 인증 목록을 한 화면에서 봅니다.
@@ -276,6 +285,7 @@
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
   const setSeriesConfigFn = httpsCallable(functions, 'setSeriesConfig');
+  const bootstrapAdminUidFn = httpsCallable(functions, 'bootstrapAdminUid');
   const setDiscordWebhookUrlFn = httpsCallable(functions, 'setDiscordWebhookUrl');
   const getDiscordWebhookStatusFn = httpsCallable(functions, 'getDiscordWebhookStatus');
   const sendTestDiscordNotificationFn = httpsCallable(functions, 'sendTestDiscordNotification');
@@ -657,6 +667,19 @@
     }).finally(function () {
       discordWebhookTestBtn.disabled = false;
       discordWebhookTestBtn.textContent = '테스트 알림 보내기';
+    });
+  });
+
+  const bootstrapAdminUidBtn = document.getElementById('bootstrapAdminUidBtn');
+  bootstrapAdminUidBtn.addEventListener('click', function () {
+    bootstrapAdminUidBtn.disabled = true;
+    bootstrapAdminUidFn().then(function (result) {
+      window.alert('✅ uid 등록 완료: ' + result.data.uid);
+    }).catch(function (err) {
+      console.error('관리자 uid 등록 실패:', err);
+      window.alert('등록에 실패했습니다: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      bootstrapAdminUidBtn.disabled = false;
     });
   });
 

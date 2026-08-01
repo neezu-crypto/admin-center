@@ -30,6 +30,19 @@ function requireAdmin(request) {
   return uid;
 }
 
+// 09번 — 관리자 이메일 하드코딩 정리의 1회성 부트스트랩. 이메일 문자열 비교
+// (isAdminEmail)는 이 함수에서 마지막으로 한 번 더 쓰이고, 그 결과로 호출한
+// 사람의 uid를 adminCenter/adminUids에 등록한다. 이후 모든 관리자 판별은
+// 이 uid 노드만 보게 되므로, 관리자 이메일을 바꿔야 할 때도 이 노드 하나만
+// 고치면 된다(전체 조사는 09번 문서 참고). request.auth.uid만 신뢰하고
+// 클라이언트가 보낸 값은 쓰지 않는다 — 위조 불가능한 자기 등록.
+const bootstrapAdminUid = onCall(async (request) => {
+  const uid = requireAdmin(request); // 기존 이메일 비교 방식으로 마지막 검증
+  const db = getDatabase();
+  await db.ref('adminCenter/adminUids/' + uid).set(true);
+  return { ok: true, uid };
+});
+
 // 주식시장·배팅시장이 공유하는 streamerVerifications 노드를 uid 필드로 조회한다.
 // Admin SDK로 조회하므로 그 노드의 RTDB 규칙과 무관하게 항상 읽을 수 있다.
 async function isVerifiedStreamerUid(uid) {
@@ -368,6 +381,7 @@ module.exports = {
   listAuditLogOverview,
   getSeriesConfig,
   setSeriesConfig,
+  bootstrapAdminUid,
   setDiscordWebhookUrl,
   getDiscordWebhookStatus,
   sendTestDiscordNotification,
