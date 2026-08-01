@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>스트리머 시리즈 통합 문서</title>
+<style>
+  :root{
+    --bg: #0e1013;
+    --panel: #16191f;
+    --panel-2: #1c2027;
+    --line: #2a2f38;
+    --gold: #d4a73c;
+    --gold-soft: rgba(212,167,60,0.14);
+    --green: #4c9a6e;
+    --red: #c1503f;
+    --red-soft: rgba(193,80,63,0.14);
+    --text: #e9e9ea;
+    --muted: #9aa0ac;
+    --serif: "Noto Serif KR", "Nanum Myeongjo", Georgia, "Apple SD Gothic Neo", serif;
+    --sans: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, sans-serif;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background: radial-gradient(ellipse at top, #14171d 0%, var(--bg) 60%);
+    color:var(--text);
+    font-family:var(--sans);
+    line-height:1.7;
+    padding:0 0 80px;
+  }
+  .wrap{max-width:900px;margin:0 auto;padding:0 28px;}
+
+  header{
+    padding:70px 28px 50px;
+    text-align:center;
+    border-bottom:1px solid var(--line);
+    position:relative;
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    letter-spacing:.25em;
+    font-size:12px;
+    color:var(--gold);
+    text-transform:uppercase;
+    margin-bottom:18px;
+  }
+  h1{
+    font-family:var(--serif);
+    font-weight:700;
+    font-size:44px;
+    margin:0 0 14px;
+    letter-spacing:-0.01em;
+  }
+  .subtitle{color:var(--muted);font-size:15px;}
+  .ticket-row{
+    margin-top:28px;
+    display:flex;
+    justify-content:center;
+    flex-wrap:wrap;
+    gap:0;
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--muted);
+  }
+  .ticket-row span{
+    padding:0 14px;
+    border-right:1px dashed var(--line);
+  }
+  .ticket-row span:last-child{border-right:none;}
+  .ticket-row b{color:var(--gold);font-weight:600;}
+
+  section{
+    padding:52px 28px;
+    border-bottom:1px solid var(--line);
+  }
+  section:last-of-type{border-bottom:none;}
+  .sec-head{
+    display:flex;
+    align-items:baseline;
+    gap:16px;
+    margin-bottom:22px;
+  }
+  .sec-num{
+    font-family:var(--mono);
+    color:var(--gold);
+    font-size:14px;
+    border:1px solid var(--gold-soft);
+    background:var(--gold-soft);
+    padding:3px 9px;
+    border-radius:3px;
+    flex-shrink:0;
+  }
+  h2{
+    font-family:var(--serif);
+    font-size:24px;
+    font-weight:700;
+    margin:0;
+  }
+  h3{
+    font-family:var(--sans);
+    font-size:15px;
+    color:var(--gold);
+    margin:26px 0 10px;
+    font-weight:600;
+  }
+  p{color:var(--text);font-size:15px;}
+  ul, ol{padding-left:22px;font-size:15px;}
+  li{margin-bottom:6px;}
+  strong{color:var(--gold);font-weight:600;}
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    margin:16px 0;
+    font-size:13.5px;
+    background:var(--panel);
+    border:1px solid var(--line);
+  }
+  th, td{
+    padding:11px 14px;
+    text-align:left;
+    border-bottom:1px solid var(--line);
+    vertical-align:top;
+  }
+  th{
+    font-family:var(--mono);
+    font-size:11.5px;
+    letter-spacing:.05em;
+    color:var(--gold);
+    background:var(--panel-2);
+    text-transform:uppercase;
+  }
+  tr:last-child td{border-bottom:none;}
+
+  .flow{
+    font-family:var(--mono);
+    font-size:13px;
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:20px 22px;
+    color:var(--muted);
+    white-space:pre-wrap;
+    line-height:2;
+  }
+  .flow b{color:var(--text);}
+
+  .chip{
+    display:inline-block;
+    font-family:var(--mono);
+    font-size:11px;
+    padding:2px 9px;
+    border-radius:20px;
+    border:1px solid var(--line);
+    color:var(--muted);
+    margin-right:6px;
+  }
+
+  .callout{
+    border-left:3px solid var(--gold);
+    background:var(--panel);
+    padding:14px 18px;
+    border-radius:0 6px 6px 0;
+    font-size:14px;
+    color:var(--muted);
+    margin-top:16px;
+  }
+  .callout b{color:var(--text);}
+  .callout.warn{ border-left-color: var(--red); }
+
+  .open-list li{
+    list-style:none;
+    position:relative;
+    padding-left:22px;
+    color:var(--muted);
+  }
+  .open-list li::before{
+    content:"○";
+    position:absolute;
+    left:0;
+    color:var(--gold);
+    font-size:11px;
+    top:5px;
+  }
+  .open-list{padding-left:0;}
+
+  footer{
+    text-align:center;
+    padding:40px 28px 0;
+    color:var(--muted);
+    font-family:var(--mono);
+    font-size:12px;
+    letter-spacing:.1em;
+  }
+
+  @media (max-width:600px){
+    h1{font-size:32px;}
+    header{padding:50px 20px 36px;}
+    section{padding:38px 20px;}
+    .ticket-row{flex-wrap:wrap;gap:8px 0;}
+    .ticket-row span{border-right:none;padding:0 10px;}
+    table{font-size:12px;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="eyebrow">Series Architecture Doc</div>
+  <h1>스트리머 시리즈 통합 문서</h1>
+  <div class="subtitle">여러 저장소·여러 게임이 하나의 Firebase 프로젝트를 공유하는 구조 — 코드만 봐서는 알기 어려운 부분을 기록한다</div>
+  <div class="ticket-row">
+    <span>저장소 <b>5개</b></span>
+    <span>공유 Firebase 프로젝트 <b>soop-stock-market</b> 1개</span>
+    <span>공유 오리진 <b>neezu-crypto.github.io</b></span>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="sec-head"><span class="sec-num">01</span><h2>이 문서가 존재하는 이유</h2></div>
+  <p>이 시리즈는 게임마다 별도 저장소로 존재하지만, <strong>인증·재화·관리 세션은 하나의 Firebase 프로젝트(soop-stock-market)를 여러 저장소가 함께 씀</strong>으로써 연결된다. 이 "공유"는 각 저장소의 코드만 따로 읽어서는 잘 드러나지 않고, 두 저장소를 동시에 봐야만 이해되는 경우가 많다.</p>
+  <div class="callout"><b>이 문서의 목적</b> — 게임 기획(무엇을 만드는가)이 아니라, <strong>저장소 사이의 연결 방식(어떻게 공유되는가)</strong>을 기록한다. 각 게임 고유 기획은 그 저장소의 자체 기획서 문서를 본다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">02</span><h2>저장소 지도</h2></div>
+  <table>
+    <tr><th>저장소</th><th>성격</th><th>Firebase Functions 코드베이스</th><th>비고</th></tr>
+    <tr>
+      <td><span class="chip">StreamBet-Market</span></td>
+      <td>스트리머 배팅시장</td>
+      <td><code>default</code> (functions/src)</td>
+      <td>공유 RTDB 규칙 파일의 <strong>원본</strong>을 관리(아래 06번 참고)</td>
+    </tr>
+    <tr>
+      <td><span class="chip">soop-stock-market</span></td>
+      <td>스트리머 주식시장</td>
+      <td><code>default</code> (functions/)</td>
+      <td>관리 액션이 <span class="chip">adminAction</span> 단일 디스패처(action 문자열로 분기) 하나에 몰려있음 — 배팅시장과 반대되는 구조</td>
+    </tr>
+    <tr>
+      <td><span class="chip">interior-3d-viewer</span></td>
+      <td>스트리머 배경시장(OBS 방송 배경)</td>
+      <td><code>presetgallery</code> (격리된 코드베이스)</td>
+      <td>index.html · ski-resort.html · fireworks.html 3개 페이지, 각자 독립 Firebase 초기화</td>
+    </tr>
+    <tr>
+      <td><span class="chip">admin-center</span></td>
+      <td>통합 관리 센터(이 문서가 있는 저장소)</td>
+      <td><code>admincenter</code> (격리된 코드베이스)</td>
+      <td>어느 게임도 소유하지 않는 시리즈 전체 관리 허브. 08번 참고</td>
+    </tr>
+    <tr>
+      <td><span class="chip">midnight-mart-run</span> / <span class="chip">dont-click-ads</span></td>
+      <td>미드나잇 마트런 / 절대 광고를 클릭하지 마</td>
+      <td>—</td>
+      <td>같은 GitHub Pages 오리진에 있지만, 아직 위 Firebase 프로젝트의 인증/재화 시스템과 연결되지 않은 독립 게임</td>
+    </tr>
+  </table>
+  <div class="callout"><b>Functions 코드베이스가 여러 개인 이유</b> — 한 Firebase 프로젝트에 여러 저장소가 각자 <code>firebase deploy</code>를 실행하는 구조라, 이름이 우연히 겹치면 서로 덮어쓸 위험이 있다. <span class="chip">presetgallery</span>·<span class="chip">admincenter</span>처럼 격리된 코드베이스 이름을 쓰는 저장소는 그 위험을 피하려는 것. 배팅시장·주식시장은 아직 <code>default</code> 코드베이스를 그대로 쓰고 있어 이름 충돌 방지가 순전히 "안 겹치게 짓기"에 의존하는 상태 — 게임이 더 늘어나면 이것도 격리하는 걸 고려할 것.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">03</span><h2>로그인 세션 자동 공유</h2></div>
+  <p>배팅시장·주식시장·배경시장·통합 관리 센터에 각각 로그인해야 할 것 같지만, 실제로는 <strong>한 곳에서 로그인하면 나머지도 처음 방문 시 이미 로그인된 상태</strong>로 시작한다.</p>
+  <div class="flow">전제 조건 두 가지가 모두 맞아야 함:
+
+1) 같은 오리진(scheme+host+port)
+   → 전부 <b>https://neezu-crypto.github.io</b> (경로만 다름, CNAME 커스텀 도메인 없음)
+   → 브라우저 저장소(IndexedDB)는 경로가 아니라 오리진 단위로만 분리됨
+
+2) 같은 Firebase apiKey
+   → Auth 세션은 firebase:authUser:{apiKey}:{앱이름} 키로 저장됨
+   → apiKey가 다르면 오리진이 같아도 완전히 별도 세션이 만들어짐</div>
+  <div class="callout warn"><b>실제로 있었던 문제</b> — 주식시장의 프론트엔드(index.html)만 자기 고유 Web App의 <strong>다른 apiKey</strong>를 쓰고 있어서, 나머지 3곳과 오리진은 같은데도 세션이 안 섞였다. 주식시장의 apiKey를 나머지와 동일하게 맞추고 나서야 공유되기 시작했다. <strong>appId는 이 메커니즘과 무관</strong>(저장 키에 안 들어감) — interior-3d-viewer의 appId는 원래부터 배팅시장과 달랐지만 세션 공유엔 문제없었다.</div>
+  <p>즉 <strong>새 페이지/저장소를 이 시리즈에 편입시키려면, firebaseConfig의 apiKey를 반드시 기존 값과 동일하게 맞춰야 한다</strong> — Firebase 콘솔에서 새 Web App을 등록해도 발급된 apiKey를 그대로 쓰면 안 되고, 기존 apiKey로 바꿔 써야 세션이 공유된다.</p>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">04</span><h2>인증 스트리머 상태가 3곳에 걸쳐 있는 이유</h2></div>
+  <p>uid(로그인 세션)는 위 방식으로 공유되지만, <strong>"이 uid가 인증 스트리머인가"를 판단하는 방식은 앱마다 다르다</strong> — 그래서 uid 공유만으로는 인증 상태까지 자동으로 안 따라온다.</p>
+  <table>
+    <tr><th>데이터</th><th>주체</th><th>내용</th></tr>
+    <tr><td><span class="chip">streamerVerifications</span></td><td>공유 노드(두 앱이 같이 씀)</td><td>SOOP 아이디를 canonical key로 삼는 인증 원장. 배팅시장은 이걸 uid로 직접 조회해서 판단</td></tr>
+    <tr><td><span class="chip">users/{uid}/streamerVerified</span></td><td>주식시장 전용</td><td>주식시장은 이 자체 캐시 플래그로 판단(공유 노드를 직접 안 봄) — "계정 보호" 등 자산 관련 특전의 기준</td></tr>
+    <tr><td><span class="chip">bettingMarket/profiles/{uid}</span></td><td>배팅시장 전용</td><td>인증 승인 시 채워지는 닉네임/SOOP아이디/아바타 — 안 채워지면 프로필이 초기 상태로 보임</td></tr>
+  </table>
+  <div class="callout warn"><b>실제로 있었던 문제 (3건 연쇄)</b>
+    <ul>
+      <li>매칭 키 비대칭 — 배팅시장은 SOOP 아이디로, 주식시장은 닉네임으로만 기존 레코드를 찾아서, 같은 사람이 두 앱에서 각각 인증받으면 <strong>uid가 다른 중복 레코드 두 개</strong>가 생겼다. → 양쪽 다 "SOOP 아이디 우선, 닉네임 폴백"으로 통일</li>
+      <li>해제 비대칭 — 배팅시장의 인증 해제가 <span class="chip">streamerVerifications</span>만 지우고 <span class="chip">users/{uid}/streamerVerified</span>는 안 건드려서, 해제해도 주식시장에선 계속 "보호된 계정"으로 남았다. → 승인/해제 양쪽 함수가 서로의 플래그도 같이 정리하도록 수정</li>
+      <li>프로필 비대칭 — 주식시장에서 인증해도 배팅시장 프로필은 안 채워져서, 배팅시장에 처음 들어가면 초기 상태로 보였다. → 주식시장의 승인 함수가 배팅시장 프로필도 같이 채우도록 수정</li>
+    </ul>
+  </div>
+  <div class="callout"><b>신규 uid 초기화 함정</b> — 주식시장의 <span class="chip">users/{uid}</span>는 "노드가 존재하면 이미 초기화된 계정"으로 취급해 시작 자금(1,000,000원)을 안 준다. 그래서 배팅시장 쪽에서 이 uid의 플래그를 미리 써넣을 때는 <strong>노드가 아직 없으면 시작 자금까지 같이 채워서 만들어야</strong> 한다(그냥 플래그 하나만 쓰면 나중에 실제 접속했을 때 돈을 못 받는 사고가 남).</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">05</span><h2>공유 RTDB 노드 지도</h2></div>
+  <table>
+    <tr><th>노드</th><th>용도</th><th>규칙</th></tr>
+    <tr><td><span class="chip">streamerVerifications</span></td><td>인증 스트리머 원장(공유)</td><td>읽기 공개, 쓰기 Functions 전용</td></tr>
+    <tr><td><span class="chip">adminCenter/streamerPermissions</span></td><td>인증 스트리머에게 위임한 권한 스위치(전원 공통)</td><td>Functions 전용(.read/.write 모두 false)</td></tr>
+    <tr><td><span class="chip">adminAuditLog</span></td><td>주식시장 쪽 관리 액션 감사 로그(신설, 아직 인증 관련 액션만 기록)</td><td>Functions 전용</td></tr>
+    <tr><td><span class="chip">seriesConfig/{gameId}/contentFreeze</span></td><td>게임별 "콘텐츠 동결" 라벨(서비스 점검과는 다른 개념 — 08번 참고)</td><td>Functions 전용</td></tr>
+    <tr><td><span class="chip">bettingMarket/auditLog</span></td><td>배팅시장 자체 감사 로그(기존)</td><td>Functions 전용</td></tr>
+  </table>
+  <div class="callout"><b>규칙 파일 배포 관례</b> — <span class="chip">database.rules.json</span>의 <strong>원본은 StreamBet-Market 저장소</strong>가 관리한다. interior-3d-viewer·soop-stock-market은 그 파일을 그대로 복사해 쓰는 사본(soop-stock-market 쪽은 이 파일이 gitignore돼 있어 버전관리 대상도 아님). <strong>새 공유 노드 규칙을 추가할 땐 반드시 StreamBet-Market에서 수정 → diff로 3파일이 정말 동일한지 확인 → 배포</strong> 순서를 지킨다. 과거에 이 동기화가 깨져서 한쪽 앱의 규칙이 다른 쪽에 없는 블록을 덮어써버린 사고가 있었다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">06</span><h2>통합 관리 센터 (admin-center)</h2></div>
+  <p>어느 게임도 소유하지 않는 <strong>시리즈 전체 관리 허브</strong>. 각 게임의 기존 관리 Cloud Functions를 대체하지 않고 <strong>그대로 호출</strong>하며(새 승인/거절 로직을 중복 구현하지 않음), 여러 게임에 걸친 데이터만 한 화면에 모아서 보여준다.</p>
+  <h3>권한 모델</h3>
+  <ul>
+    <li><strong>관리자</strong>(고정 이메일) — 항상 전체 권한</li>
+    <li><strong>인증 스트리머</strong> — 관리자가 <span class="chip">adminCenter/streamerPermissions</span>에서 켠 권한만 사용 가능(스트리머 개인별이 아니라 <strong>전원 공통</strong> 스위치). 승인·거절·해제처럼 신원을 좌우하는 민감한 권한은 아직 위임 대상에 넣지 않았다</li>
+  </ul>
+  <h3>지금 구현된 기능</h3>
+  <ul>
+    <li>인증 스트리머 관리 — 배팅시장·주식시장 양쪽의 대기 신청·인증 목록 통합 조회, 승인/거절/해제(각 게임 기존 함수 라우팅)</li>
+    <li>감사 로그 통합 — 배팅시장 <span class="chip">bettingMarket/auditLog</span> + 주식시장 신설 <span class="chip">adminAuditLog</span> 병합 조회</li>
+    <li>게임 콘텐츠 동결 상태 — 게임별 <span class="chip">contentFreeze</span> 토글(서비스 점검이 아니라 "신규 개발 중단, 버그 수정만" 라벨)</li>
+    <li>인증 스트리머 권한 위임 — 위임 가능 권한 목록(카탈로그) 체리피크 UI</li>
+  </ul>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">07</span><h2>해야 할 작업</h2></div>
+  <p>지금까지 논의·설계는 됐지만 아직 구현되지 않았거나, 의도적으로 미뤄둔 항목들. 우선순위 순으로 정리한다.</p>
+  <table>
+    <tr><th>우선순위</th><th>작업</th><th>내용 / 이유</th></tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>즉시 회수 킬스위치</td>
+      <td>위임받은 인증 스트리머의 최근 조치를 한 번에 되돌리는 기능. 아직 실제로 위임된 권한이 없어 급하진 않지만, <strong>권한 위임을 시작하기 전에 먼저 마련</strong>해야 안전하다 — 순서상 아래 "권한 카탈로그 채우기"보다 먼저 와야 함</td>
+    </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>위임 권한 카탈로그 채우기</td>
+      <td><span class="chip">adminCenter/streamerPermissions</span> 체리피크 메커니즘은 만들어졌지만 <code>PERMISSION_CATALOG</code>가 비어있어 실제로 위임 중인 권한이 하나도 없다. 승인·거절·해제처럼 신원을 좌우하는 민감한 권한은 제외하고, 낮은 리스크 항목(공지 등록, 배너 검수 등)부터 후보로 검토</td>
+    </tr>
+    <tr>
+      <td><strong>낮음~중간</strong></td>
+      <td>주식시장 감사 로그 확장</td>
+      <td>지금은 스트리머 인증 관련 액션 3개(승인·거절·해제)만 <span class="chip">adminAuditLog</span>에 기록 중. 주가 조정·배너·캐시충전 등 <span class="chip">adminAction</span>의 나머지 관리 액션(약 27개)까지 로깅 범위를 넓혀야 통합 관리 센터의 감사 로그 카드가 실제로 "전체" 로그가 된다</td>
+    </tr>
+    <tr>
+      <td><strong>낮음</strong> (보류 중)</td>
+      <td>콘텐츠 동결 플래그 실제 연동</td>
+      <td><span class="chip">seriesConfig/{gameId}/contentFreeze</span> 토글은 관리 센터에서 켤 수 있지만, 어떤 게임 프론트엔드도 아직 이 값을 읽지 않아 실제 화면엔 영향이 없다. 각 게임에 "신규 콘텐츠 동결 중" 배너/제약을 연동하는 작업 필요 — 사용자가 명시적으로 후순위로 미룬 항목</td>
+    </tr>
+    <tr>
+      <td><strong>낮음</strong> (미정)</td>
+      <td>미드나잇 마트런 / 절대 광고를 클릭하지 마 온보딩</td>
+      <td>같은 GitHub Pages 오리진에 있지만 아직 공유 Firebase 프로젝트의 인증/재화 시스템과 연결되지 않은 독립 게임 2종. 편입하려면 03번의 apiKey 통일 + 통합 관리 센터의 <code>GAME_CATALOG</code> 등록이 필요</td>
+    </tr>
+    <tr>
+      <td><strong>낮음</strong> (사소함)</td>
+      <td><code>grantAchievement("account_protected")</code> 비대칭 수정</td>
+      <td>인증 경로에 따라 이 업적이 지급되거나 안 되거나 하는 사소한 불일치. 사용자 경험에 미치는 영향이 작아 지금까지 우선순위에서 밀려남 — 다른 작업 하는 김에 같이 처리하는 정도로 충분</td>
+    </tr>
+  </table>
+  <div class="callout"><b>권장 순서</b> — 킬스위치 → 권한 카탈로그 채우기 순으로 가는 게 안전하다. 위임 메커니즘이 이미 있다고 해서 카탈로그부터 채우면, 되돌릴 방법 없이 실제 권한이 스트리머 전원에게 뿌려지는 상태가 먼저 생긴다.</div>
+</section>
+
+</div>
+
+<footer>STREAMER SERIES · CROSS-REPO ARCHITECTURE DOC</footer>
+
+</body>
+</html>
