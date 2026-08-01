@@ -383,6 +383,11 @@
       <td>통합 관리 센터 — 전체 통계 요약·이상 거래 모니터링</td>
       <td>오늘/누적/재무 건전성/일간·주간·월간 통계 + 이상 거래 모니터링. 11번에서 상세 설계</td>
     </tr>
+    <tr>
+      <td><strong>중간</strong></td>
+      <td>통합 관리 센터 — 유저 상품 구매 현황</td>
+      <td>게임별 구매 기록 통합 조회 + uid 기준 유저별 전체 구매 이력. 12번에서 상세 설계</td>
+    </tr>
   </table>
   <div class="callout"><b>권장 순서</b> — 킬스위치 → 권한 카탈로그 채우기 순으로 가는 게 안전하다. 위임 메커니즘이 이미 있다고 해서 카탈로그부터 채우면, 되돌릴 방법 없이 실제 권한이 스트리머 전원에게 뿌려지는 상태가 먼저 생긴다.</div>
 </section>
@@ -559,6 +564,54 @@
     <li>새 조회 함수 <code>getSeriesStatsOverview</code>(onCall, 관리자 전용) — 각 게임의 기존 함수를 <code>Promise.all</code>로 호출해 하나의 응답으로 합치는 조회 전용 함수(06번 패턴 재사용, 새 집계 로직 없음)</li>
   </ul>
   <div class="callout warn"><b>사전 집계가 필요해지는 시점</b> — 지금은 게임 3개, 데이터 규모가 크지 않아 "호출할 때마다 원본 스캔"이 버틸 만하지만, 통합 관리 센터가 여러 게임의 이런 스캔 함수를 동시에 호출하는 화면이 되면 부하가 배로 늘어난다. 데이터가 쌓이거나 게임이 늘어나면 10번에서 설계한 "Cloud Scheduler 주기 실행 + 시간 버킷 저장(<span class="chip">analytics/*</span>)" 패턴을 통계 쪽에도 확장 적용하는 걸 고려할 것 — 접속자 분석과 같은 <span class="chip">analytics</span> 네임스페이스를 공유하면 자연스럽게 이어진다.</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">12</span><h2>통합 관리 센터 — 유저 상품 구매 현황 (설계)</h2></div>
+  <p>목표: 게임별로 흩어진 "누가 무엇을 샀는가" 기록을 통합 관리 센터에서 한 화면에 모아 보고, uid 하나로 <strong>그 유저가 시리즈 전체에서 산 것</strong>까지 확인할 수 있게 한다.</p>
+  <h3>현재 상태 — 게임마다 구매 기록은 있지만, 모아서 보는 화면이 없다</h3>
+  <table>
+    <tr><th>저장소</th><th>구매 유형별 기록 위치</th><th>비고</th></tr>
+    <tr>
+      <td><span class="chip">StreamBet-Market</span></td>
+      <td><code>bettingMarket/skinPurchases</code>(uid·닉네임·skinId·가격·구매시각) — <code>purchaseSkin</code>이 기록</td>
+      <td><strong>관리 탭에 "스킨 구매 내역" 섹션이 이미 있다</strong>(<code>index.html</code>, <code>js/skins.js</code>의 <code>sbmRenderSkinPurchaseLog</code> — <code>onValue</code>로 실시간 구독, 닉네임·스킨명·가격·시각 표시). 시리즈 전체를 통틀어 <strong>완결된 형태의 유저 구매 이력 화면은 사실상 이것 하나뿐</strong> — 나머지 설계는 이 화면의 패턴을 다른 게임/다른 아이템 유형으로 넓히는 것에 가깝다</td>
+    </tr>
+    <tr>
+      <td><span class="chip">StreamBet-Market</span></td>
+      <td><code>bettingMarket/chestPurchaseRequests</code>(uid·수량·상태) · <code>chestOpenLog</code>(uid·보상·시각)</td>
+      <td><code>chestPurchaseRequests</code>는 관리 탭에 "보물상자 구매 신청"이라는 <strong>대기 승인 큐</strong>로는 보이지만(<code>js/charge-modal.js</code>), 승인 이후 실제 지급/오픈 결과가 쌓이는 <code>chestOpenLog</code>는 아직 보여주는 화면이 없음 — skinPurchases처럼 완결된 이력 뷰는 아님</td>
+    </tr>
+    <tr>
+      <td><span class="chip">StreamBet-Market</span> (미구현 예약)</td>
+      <td><code>bannerRequests</code> · <code>chartBannerRequests</code> · <code>cardBannerRequests</code> · <code>cashChargeRequests</code></td>
+      <td><code>database.rules.json</code>엔 노드가 있지만 <strong>이 노드들을 읽거나 쓰는 Cloud Function이 하나도 없다</strong> — 스키마만 미리 잡아둔 미구현 상태. 나중에 실제로 구현되면 이 개요에도 추가해야 할 항목</td>
+    </tr>
+    <tr>
+      <td><span class="chip">soop-stock-market</span></td>
+      <td>
+        <code>bannerRequests</code>/<code>chartBannerRequests</code>/<code>pinRequests</code>/<code>relayRoomRequests</code>(각각 uid·대상·상태) · <code>playTimePurchases</code>(uid·결제액) · <code>lotteryPurchases</code>(uid·번호·구매액) · <code>treasureChestOpens</code>(uid·보상)
+      </td>
+      <td>구매 유형별로 <strong>개수만 6개</strong>가 각자 노드를 가진 상태. <code>soop-stocks-admin-gate16103.html</code>이 유형별 "대기 중" 승인 큐는 보여주지만 이건 유저별로 모은 이력이 아니라 <strong>큐 하나하나</strong>이고, 단일 유저 조회 함수(<code>actionGetUserDetail</code>)에도 구매 이력 필드가 아예 없다</td>
+    </tr>
+    <tr>
+      <td><span class="chip">interior-3d-viewer</span></td>
+      <td>없음</td>
+      <td>배경(프리셋)은 전부 무료 갤러리 방식이라 구매 시스템 자체가 없음</td>
+    </tr>
+  </table>
+  <div class="callout"><b>이 기능이 실제로 채우는 빈틈</b> — StreamBet-Market의 스킨 구매 내역 하나를 빼면, 나머지(상자 오픈 로그, soop-stock-market의 배너·핀·릴레이·플레이타임·복권·보물상자 6종)는 전부 "대기 큐만 있고 완결 이력은 없음" 또는 "아예 없음"이다. 그리고 스킨 구매 내역조차 <strong>StreamBet-Market 안에서만</strong> 보인다 — 그 유저가 다른 게임에서 뭘 샀는지는 이어서 볼 방법이 없다. 즉 이 작업의 핵심 가치는 개별 화면을 새로 만드는 것보다, <strong>게임 경계를 넘어 uid로 이어 보는 것</strong>에 있다.</div>
+  <h3>제안하는 구조</h3>
+  <ul>
+    <li>새 조회 함수 <code>getPurchaseOverview({ uid?, gameId? })</code>(onCall, 관리자 전용) — 게임별로 위 표의 기존 노드를 읽어 <code>{ gameId, uid, itemType, itemLabel, amount, at }</code> 형태로 정규화해서 합친다. <code>uid</code>가 주어지면 그 유저의 <strong>시리즈 전체 구매 이력만</strong> 필터링, 없으면 최근 N건(예: 100건)을 게임별로 반환 — StreamBet-Market의 <code>sbmRenderSkinPurchaseLog</code>가 이미 검증한 표시 방식(닉네임·아이템명·가격·시각)을 다른 아이템 유형에도 그대로 적용하고, 06번 <code>listAuditLogOverview</code>와 같은 "새 계산 없이 기존 노드를 감싸기" 패턴으로 합친다</li>
+    <li>새 카드 "유저 상품 구매 현황" — 기본은 게임별 최근 구매 리스트, uid 검색창으로 특정 유저의 전체 구매 이력(게임 구분 없이)을 조회하는 모드 전환</li>
+  </ul>
+  <div class="callout"><b>uid 검색이 유의미한 이유</b> — 03번에서 다룬 로그인 세션 공유 덕분에 uid가 앱 간에 동일하므로, "이 유저가 배팅시장에서 스킨을 샀고 주식시장에서 배너도 샀다"를 <strong>uid 하나로 이어서</strong> 볼 수 있다. 이건 uid가 공유되지 않는 구조였다면 애초에 불가능했을 조회 방식이라, 이 시리즈의 공유 아키텍처(03번)가 실제로 값을 내는 지점이기도 하다.</div>
+  <h3>영향 범위</h3>
+  <ul>
+    <li>새로 만드는 건 admin-center의 조회 함수/카드뿐 — StreamBet-Market·soop-stock-market의 기존 구매 흐름 코드는 건드릴 필요 없음(있는 노드를 읽기만 함)</li>
+    <li>StreamBet-Market의 미구현 예약 노드(<code>bannerRequests</code> 등)가 나중에 실제로 연결되면, <code>getPurchaseOverview</code>에도 해당 게임의 데이터 소스를 추가해야 함</li>
+  </ul>
 </section>
 
 </div>
