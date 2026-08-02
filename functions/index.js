@@ -1,5 +1,6 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onValueCreated } = require('firebase-functions/v2/database');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
@@ -490,6 +491,70 @@ const getPurchaseOverview = onCall(async (request) => {
   return { entries: entries };
 });
 
+// 10번 — 페이지별 접속자 분석. interior-3d-viewer는 아직 presence 구현이 없어
+// 우선 제외한다(별도 후속 작업, 10번 문서 참고). soop-stock-market이 이미 검증한
+// 60분 유예 규칙을 그대로 재사용해 "활성 uid" 수를 센다.
+const PRESENCE_APPS = ['bettingMarket', 'stockMarket'];
+const PRESENCE_GRACE_MS = 60 * 60 * 1000;
+const PRESENCE_HOURLY_RETENTION_DAYS = 30;
+
+async function trimOldPresenceHourly(db, appId) {
+  const cutoffKey = new Date(Date.now() - PRESENCE_HOURLY_RETENTION_DAYS * 24 * 3600 * 1000).toISOString().slice(0, 13);
+  const ref = db.ref('analytics/presenceHourly/' + appId);
+  const snap = await ref.orderByKey().endAt(cutoffKey).get();
+  const updates = {};
+  Object.keys(snap.val() || {}).forEach(function (key) { updates[key] = null; });
+  if (Object.keys(updates).length) await ref.update(updates);
+}
+
+// appId 이름은 GAME_CATALOG의 id와 맞추되(06번), presence를 아직 구현한 앱만
+// PRESENCE_APPS에 등록돼 있다. 이 스케줄러가 실제로 도는지는 배포 후
+// Cloud Scheduler 콘솔이나 firebase functions:log로 확인할 것.
+const sampleConcurrentUsers = onSchedule('every 5 minutes', async function () {
+  const db = getDatabase();
+  const now = Date.now();
+  const hourKey = new Date(now).toISOString().slice(0, 13); // YYYY-MM-DDTHH (UTC 기준 — 관리 도구용이라 KST 변환 없이 단순화)
+
+  await Promise.all(PRESENCE_APPS.map(async function (appId) {
+    const snap = await db.ref('presence/' + appId).get();
+    const users = snap.val() || {};
+    let activeCount = 0;
+    Object.values(users).forEach(function (u) {
+      if (u && typeof u.lastSeen === 'number' && now - u.lastSeen <= PRESENCE_GRACE_MS) activeCount++;
+    });
+
+    const bucketRef = db.ref('analytics/presenceHourly/' + appId + '/' + hourKey);
+    const bucketSnap = await bucketRef.get();
+    const currentPeak = (bucketSnap.val() && bucketSnap.val().peak) || 0;
+    if (activeCount > currentPeak) {
+      await bucketRef.set({ peak: activeCount, sampledAt: now });
+    }
+    await trimOldPresenceHourly(db, appId);
+  }));
+});
+
+// 관리 센터 UI가 호출하는 조회 전용 함수 — 앱별 최근 hours시간의 시간당 최고
+// 접속자 수 시계열을 반환한다.
+const getVisitorAnalytics = onCall(async (request) => {
+  await requireAdmin(request);
+  const hours = Math.min(Math.max(parseInt((request.data || {}).hours, 10) || 24, 1), 168);
+  const db = getDatabase();
+  const now = Date.now();
+  const bucketKeys = [];
+  for (let i = hours - 1; i >= 0; i--) {
+    bucketKeys.push(new Date(now - i * 3600 * 1000).toISOString().slice(0, 13));
+  }
+
+  const results = {};
+  await Promise.all(PRESENCE_APPS.map(async function (appId) {
+    const snap = await db.ref('analytics/presenceHourly/' + appId).get();
+    const data = snap.val() || {};
+    results[appId] = bucketKeys.map(function (k) { return { hour: k, peak: (data[k] && data[k].peak) || 0 }; });
+  }));
+
+  return { apps: results };
+});
+
 module.exports = {
   getAdminCenterState,
   setAdminCenterPermission,
@@ -517,4 +582,6 @@ module.exports = {
   notifyListingRequest,
   searchSeriesUser,
   getPurchaseOverview,
+  sampleConcurrentUsers,
+  getVisitorAnalytics,
 };

@@ -206,6 +206,38 @@
     </div>
 
     <div class="card">
+      <h2>전체 통계 요약·이상 거래 모니터링</h2>
+      <p class="hint">
+        각 게임의 기존 통계 함수를 그대로 호출해 모은 화면입니다(새로 계산하지 않음). 이상 거래 모니터링은
+        아직 리스트 나열 수준(1단계)이고, soop-stock-market 쪽엔 상응하는 리스트가 없어 배팅시장만 표시됩니다.
+      </p>
+      <button id="statsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <h3 class="subhead">배팅시장 — 오늘/누적/재무 건전성</h3>
+      <div id="statsBettingSummary"></div>
+      <h3 class="subhead">주식시장 — 오늘/누적</h3>
+      <div id="statsStockSummary"></div>
+      <h3 class="subhead">배팅시장 — 일간·주간·월간</h3>
+      <div style="display:flex; gap:6px; margin-bottom:8px;">
+        <button class="perm-refresh-btn" type="button" data-granularity="day">일간</button>
+        <button class="perm-refresh-btn" type="button" data-granularity="week">주간</button>
+        <button class="perm-refresh-btn" type="button" data-granularity="month">월간</button>
+      </div>
+      <div id="statsTimeseries"></div>
+      <h3 class="subhead">이상 거래 모니터링 (배팅시장, 1단계 — 리스트 나열)</h3>
+      <div id="statsAnomaly"></div>
+    </div>
+
+    <div class="card">
+      <h2>페이지별 접속자 분석</h2>
+      <p class="hint">
+        시간당 최고 동시 접속자 수(최근 24시간)입니다. interior-3d-viewer(배경시장)는 아직 접속자 집계
+        기능 자체가 없어 제외됩니다 — 10번 문서 참고. 5분마다 서버가 자동으로 샘플링합니다.
+      </p>
+      <button id="visitorAnalyticsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="visitorAnalyticsView"></div>
+    </div>
+
+    <div class="card">
       <h2>인증 스트리머 관리</h2>
       <p class="hint">
         스트리머 주식시장·스트리머 배팅시장 양쪽의 인증 대기 신청과 공유 인증 목록을 한 화면에서 봅니다.
@@ -323,6 +355,14 @@
   // 16번/20번 — 유저 검색/상세조회/정지. adminLookupUser·banAccount·unbanAccount는
   // StreamBet-Market이 이미 배포한 함수를 그대로 호출한다(새 로직 아님).
   const bmAdminLookupUserFn = httpsCallable(functions, 'adminLookupUser');
+  // 11번 — 전체 통계 요약. StreamBet-Market이 이미 배포한 함수를 그대로
+  // 호출한다(새 계산 없음). soop-stock-market은 adminAction의 getOverviewStats
+  // 액션으로 이미 있는 smAdminActionFn을 그대로 재사용.
+  const bmGetAdminDashboardStatsFn = httpsCallable(functions, 'getAdminDashboardStats');
+  const bmGetStatsTimeseriesFn = httpsCallable(functions, 'getStatsTimeseries');
+  const bmGetAnomalyMonitorFn = httpsCallable(functions, 'getAnomalyMonitor');
+  const bmGetExchangeLogFn = httpsCallable(functions, 'getExchangeLog');
+  const getVisitorAnalyticsFn = httpsCallable(functions, 'getVisitorAnalytics');
   const bmBanAccountFn = httpsCallable(functions, 'banAccount');
   const bmUnbanAccountFn = httpsCallable(functions, 'unbanAccount');
   const searchSeriesUserFn = httpsCallable(functions, 'searchSeriesUser');
@@ -360,6 +400,13 @@
   const userDetailBasicEl = document.getElementById('userDetailBasic');
   const userDetailStockEl = document.getElementById('userDetailStock');
   const userDetailPurchasesEl = document.getElementById('userDetailPurchases');
+  const statsRefreshBtn = document.getElementById('statsRefreshBtn');
+  const statsBettingSummaryEl = document.getElementById('statsBettingSummary');
+  const statsStockSummaryEl = document.getElementById('statsStockSummary');
+  const statsTimeseriesEl = document.getElementById('statsTimeseries');
+  const statsAnomalyEl = document.getElementById('statsAnomaly');
+  const visitorAnalyticsRefreshBtn = document.getElementById('visitorAnalyticsRefreshBtn');
+  const visitorAnalyticsViewEl = document.getElementById('visitorAnalyticsView');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
@@ -865,6 +912,129 @@
     });
   }
 
+  // 11번 — 전체 통계 요약·이상거래 모니터링. 전부 기존 함수를 그대로 병렬
+  // 호출해서 모을 뿐, 여기서 새로 계산하는 값은 없다(06번 원칙).
+  const won = function (n) { return Math.round(n || 0).toLocaleString('ko-KR') + '원'; };
+
+  async function refreshStatsOverview(granularity) {
+    statsBettingSummaryEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    statsStockSummaryEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    statsTimeseriesEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    statsAnomalyEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+
+    const [dashResult, stockResult, seriesResult, anomalyResult, exchangeResult] = await Promise.allSettled([
+      bmGetAdminDashboardStatsFn(),
+      smAdminActionFn({ action: 'getOverviewStats' }),
+      bmGetStatsTimeseriesFn({ granularity: granularity || 'day' }),
+      bmGetAnomalyMonitorFn(),
+      bmGetExchangeLogFn(),
+    ]);
+
+    renderBettingSummary(dashResult);
+    renderStockSummary(stockResult);
+    renderTimeseries(seriesResult);
+    renderAnomaly(anomalyResult, exchangeResult);
+  }
+  statsRefreshBtn.addEventListener('click', function () { refreshStatsOverview('day'); });
+  document.querySelectorAll('[data-granularity]').forEach(function (btn) {
+    btn.addEventListener('click', function () { refreshStatsOverview(btn.dataset.granularity); });
+  });
+
+  function renderBettingSummary(result) {
+    if (result.status !== 'fulfilled') {
+      statsBettingSummaryEl.innerHTML = '<div class="empty-state">조회 실패</div>';
+      return;
+    }
+    const d = result.value.data;
+    statsBettingSummaryEl.innerHTML =
+      '<div class="verif-row"><div class="verif-info"><b>오늘 — 신규 지갑 ' + d.newWalletsToday + '명 · 진행중 마켓 ' + d.activeMarkets + '개 · 베팅액 ' + won(d.totalBetAmountToday) + '(' + d.totalBetCountToday + '건)</b>' +
+      '<span>누적 — 베팅액 ' + won(d.totalBetAmountAllTime) + '(' + d.totalBetCountAllTime + '건) · 페이아웃 ' + won(d.totalPayoutAllTime) + ' · 환전 ' + won(d.totalExchangeAmountAllTime) + ' · 레이크 ' + won(d.totalRakeCollected) + '</span>' +
+      '<span>회원 — 전체 ' + d.totalWallets + '명(익명 ' + d.anonymousCount + ' · 실계정 ' + d.realCount + ' · 인증 스트리머 ' + d.verifiedStreamerCount + ') · 정산 ' + d.settledCount + '건 · 무효 ' + d.voidCount + '건(' + d.voidRatePercent + '%)</span>' +
+      '<span>재무 건전성 — 총 유통량 ' + won(d.totalCirculation) + ' · 준비금 ' + won(d.reserveFundBalance) + ' · 잭팟 ' + won(d.jackpotBalance) + '</span></div></div>';
+  }
+
+  function renderStockSummary(result) {
+    if (result.status !== 'fulfilled') {
+      statsStockSummaryEl.innerHTML = '<div class="empty-state">조회 실패</div>';
+      return;
+    }
+    const d = result.value.data;
+    statsStockSummaryEl.innerHTML =
+      '<div class="verif-row"><div class="verif-info"><b>오늘 — 출석 ' + (d.attendance.claimedCount || 0) + '명(' + won(d.attendance.totalPaidToday) + ') · 셀프상품 매출 ' + won(d.purchase.todayRevenue) + '(' + d.purchase.todayCount + '건)</b>' +
+      '<span>누적 — 셀프상품 매출 ' + won(d.purchase.totalRevenue) + '(' + d.purchase.totalCount + '건) · 복권 판매 ' + d.lottery.totalSold + '장/순수익 ' + won(d.lottery.netRevenue) + '</span>' +
+      '<span>회원 — 전체 ' + d.users.totalUsers + '명(계정보호 ' + d.users.protectedUsers + ' · 미보호 ' + d.users.anonUsers + ') · 손익랭킹 등록 ' + d.profitRankingEntryCount + '건</span>' +
+      '<span style="color:#5f6672;">재무 건전성(발행량/준비금) 개념은 이 게임엔 아직 없음 — 09번 문서 참고</span></div></div>';
+  }
+
+  const GRANULARITY_LABEL = { day: '일간', week: '주간', month: '월간' };
+  function renderTimeseries(result) {
+    if (result.status !== 'fulfilled') {
+      statsTimeseriesEl.innerHTML = '<div class="empty-state">조회 실패</div>';
+      return;
+    }
+    const data = result.value.data;
+    const rows = (data.series || []).map(function (b) {
+      return '<tr><td>' + escapeHtml(b.label) + '</td><td>' + won(b.betAmount) + '</td><td>' + b.betCount + '건</td><td>' + b.newWallets + '명</td></tr>';
+    }).join('');
+    statsTimeseriesEl.innerHTML =
+      '<table style="width:100%; font-size:12px; border-collapse:collapse;">' +
+      '<tr style="color:#8b93a1; text-align:left;"><th>' + (GRANULARITY_LABEL[data.granularity] || data.granularity) + '</th><th>베팅액</th><th>건수</th><th>신규 지갑</th></tr>' +
+      rows + '</table>';
+  }
+
+  function renderAnomaly(anomalyResult, exchangeResult) {
+    if (anomalyResult.status !== 'fulfilled') {
+      statsAnomalyEl.innerHTML = '<div class="empty-state">조회 실패</div>';
+      return;
+    }
+    const a = anomalyResult.value.data;
+    const exchangeCount = exchangeResult.status === 'fulfilled' ? (exchangeResult.value.data.entries || []).length : '-';
+    const topBalancesText = (a.topBalances || []).slice(0, 5).map(function (w) {
+      return escapeHtml(w.nickname || w.uid.slice(0, 8)) + '(' + won(w.balance) + ')';
+    }).join(', ');
+    statsAnomalyEl.innerHTML =
+      '<div class="verif-row"><div class="verif-info"><b>최근 1시간 신규 지갑 ' + a.recentWalletsCount + '명</b>' +
+      '<span>잔액 상위 5 — ' + (topBalancesText || '(없음)') + '</span>' +
+      '<span>최근 24시간 환전 — ' + won(a.exchangeAmount24h) + '(' + a.exchangeCount24h + '건) · 최근 환전 로그 ' + exchangeCount + '건 조회됨</span></div></div>';
+  }
+
+  // 10번 — 페이지별 접속자 분석. 서버가 5분마다 자동 샘플링해둔 시간당
+  // 최고치를 그대로 조회해서 표로 보여준다(차트 라이브러리 없이 표 형태로
+  // 단순화 — soop-stock-market의 Chart.js를 admin-center에 새로 끌어오는
+  // 것보다 우선 표로 값어치를 확인하는 쪽을 택함).
+  const VISITOR_APP_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장' };
+  async function refreshVisitorAnalytics() {
+    visitorAnalyticsViewEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await getVisitorAnalyticsFn({ hours: 24 });
+      renderVisitorAnalytics(result.data.apps || {});
+    } catch (e) {
+      console.error('접속자 분석 조회 실패:', e);
+      visitorAnalyticsViewEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+  visitorAnalyticsRefreshBtn.addEventListener('click', refreshVisitorAnalytics);
+
+  function renderVisitorAnalytics(apps) {
+    const appIds = Object.keys(apps);
+    if (!appIds.length) {
+      visitorAnalyticsViewEl.innerHTML = '<div class="empty-state">데이터가 없습니다.</div>';
+      return;
+    }
+    // 시간대는 앱마다 동일하므로 첫 앱 기준으로 열을 만든다.
+    const hours = apps[appIds[0]].map(function (b) { return b.hour; });
+    let html = '<table style="width:100%; font-size:11.5px; border-collapse:collapse;"><tr style="color:#8b93a1; text-align:left;"><th>시간(UTC)</th>';
+    appIds.forEach(function (appId) { html += '<th>' + escapeHtml(VISITOR_APP_LABEL[appId] || appId) + '</th>'; });
+    html += '</tr>';
+    hours.forEach(function (hour, i) {
+      html += '<tr><td>' + escapeHtml(hour) + '</td>';
+      appIds.forEach(function (appId) { html += '<td>' + (apps[appId][i] ? apps[appId][i].peak : 0) + '명</td>'; });
+      html += '</tr>';
+    });
+    html += '</table>';
+    visitorAnalyticsViewEl.innerHTML = html;
+  }
+
   function render() {
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
@@ -902,7 +1072,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDiscordWebhookStatus(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); }
   });
 </script>
 </body>
