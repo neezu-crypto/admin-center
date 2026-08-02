@@ -162,6 +162,25 @@
   }
   .promoted-chip button:hover { color: #e2554f; background: rgba(226,85,79,0.14); }
 
+  /* 21번 — 배팅시장 마켓 관리 */
+  .market-status-tag {
+    font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px;
+  }
+  .market-status-tag.open { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
+  .market-status-tag.closed, .market-status-tag.pendingSettlement { background: rgba(217,164,65,0.14); color: #d9a441; border: 1px solid rgba(217,164,65,0.35); }
+  .market-outcome-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+  .market-outcome-option {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    border: 1px solid #262b33; border-radius: 6px; font-size: 12.5px; cursor: pointer;
+  }
+  .market-outcome-option.selected { border-color: #d9a441; background: rgba(217,164,65,0.08); }
+  .market-countdown { color: #d9a441; font-size: 11.5px; display: block; margin: 4px 0; }
+  .market-reason-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+  .market-reason-row select {
+    background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
+    padding: 6px 8px; border-radius: 6px; font-size: 12px; max-width: 220px;
+  }
+
   .game-row {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
     padding: 14px 2px; border-bottom: 1px solid #1c2027;
@@ -346,6 +365,20 @@
       <div id="listingRequestList"></div>
     </div>
 
+    <div class="card" id="section-market-management">
+      <h2>배팅시장 진행중인 마켓 관리</h2>
+      <p class="hint">
+        StreamBet-Market의 기존 함수(reviewProposal/closeMarketEarly/voidMarket/judgeMarket/
+        cancelPendingJudgment/setMinParticipantsOverride)를 그대로 호출합니다(새 로직 아님).
+        판정은 접수 후 60초 유예시간 동안 취소·재판정할 수 있습니다. 마켓 제목·배당·결과
+        항목은 생성 후 수정할 수 없습니다.
+      </p>
+      <h3 class="subhead">검수 대기중인 제안</h3>
+      <div id="marketReviewList"></div>
+      <h3 class="subhead">진행중 · 판정 대기중인 마켓</h3>
+      <div id="marketManageList"></div>
+    </div>
+
     <div class="card" id="section-verification">
       <h2>인증 스트리머 관리</h2>
       <p class="hint">
@@ -507,6 +540,15 @@
   const addPromotedContentFn = httpsCallable(functions, 'addPromotedContent');
   const removePromotedContentFn = httpsCallable(functions, 'removePromotedContent');
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
+  // 21번 — 배팅시장 마켓 관리. StreamBet-Market이 이미 배포한 함수를 그대로 호출한다
+  // (17번 채팅·22번 게시글 홍보 현황과 동일한 "codebase가 달라도 함수 이름만 맞으면
+  // 호출 가능" 패턴).
+  const reviewProposalFn = httpsCallable(functions, 'reviewProposal');
+  const closeMarketEarlyFn = httpsCallable(functions, 'closeMarketEarly');
+  const voidMarketFn = httpsCallable(functions, 'voidMarket');
+  const setMinParticipantsOverrideFn = httpsCallable(functions, 'setMinParticipantsOverride');
+  const judgeMarketFn = httpsCallable(functions, 'judgeMarket');
+  const cancelPendingJudgmentFn = httpsCallable(functions, 'cancelPendingJudgment');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
@@ -581,6 +623,8 @@
   const seriesConfigListEl = document.getElementById('seriesConfigList');
   const devbarLinksListEl = document.getElementById('devbarLinksList');
   const promotedContentListEl = document.getElementById('promotedContentList');
+  const marketReviewListEl = document.getElementById('marketReviewList');
+  const marketManageListEl = document.getElementById('marketManageList');
   const promotedContentMigrateBtn = document.getElementById('promotedContentMigrateBtn');
   const promotedContentMigrateStatusEl = document.getElementById('promotedContentMigrateStatus');
   const discordWebhookStatusEl = document.getElementById('discordWebhookStatus');
@@ -1531,6 +1575,242 @@
     if (e.key === 'Enter') { e.preventDefault(); sendAdminChatMessage(); }
   });
 
+  // 21번 — 배팅시장 마켓 관리. bettingMarket/markets는 이미 인증된 유저 전원에게
+  // .read가 열려 있고(공개 피드용), stocks도 이미 .read:true라 새 RTDB 규칙이
+  // 전혀 필요 없다 - StreamBet-Market의 기존 함수만 그대로 호출한다.
+  let marketManagementSubscribed = false;
+  let marketsCache = {};
+  let stockNamesCache = {};
+  let lastMarketReviewSignature = '';
+  let lastMarketManageSignature = '';
+  const marketCountdownIntervals = {};
+
+  const PROHIBITED_TOPIC_REASONS = [
+    '스트리머 비하', '평가 불가능한 주관적인 주제', '사회적 · 정치적 뉴스 주제',
+    '방송 송출 시 주의가 필요한 주제', '사생활 · 명예훼손 소지', '금전 · 도박 암시 · 유도',
+    '불법행위 조장 · 미화', '차별 · 혐오 표현 포함',
+  ];
+  const CLOSE_REASONS = ['이벤트가 예정보다 일찍 종료됨', '스트리머 방송 종료', '어뷰징 의심으로 조기 마감'].concat(PROHIBITED_TOPIC_REASONS, ['기타']);
+  const VOID_REASONS = ['최소 참여 인원 미달', '이벤트 자체 무산', '주제 오류 · 판정 불가', '어뷰징 적발'].concat(PROHIBITED_TOPIC_REASONS, ['기타']);
+  const MARKET_TYPE_LABEL = { personal: '개인전', '1v1': '1vs1', group: '단체전' };
+  const MARKET_STATUS_LABEL = { open: '진행중', closed: '마감', pendingSettlement: '판정 유예중' };
+
+  function marketStreamerText(m) {
+    if (m.type === 'personal') return stockNamesCache[(m.streamerIds || [])[0]] || (m.streamerIds || [])[0] || '-';
+    return (m.streamerIds || []).map(function (id) { return stockNamesCache[id] || id; }).join(' vs ');
+  }
+
+  function startMarketManagementSubscription() {
+    if (marketManagementSubscribed) return;
+    marketManagementSubscribed = true;
+    get(ref(db, 'stocks')).then(function (snap) {
+      const data = snap.val() || {};
+      Object.keys(data).forEach(function (id) { stockNamesCache[id] = (data[id] && data[id].name) || id; });
+    }).catch(function (e) { console.error('종목 이름 조회 실패:', e); });
+
+    onValue(ref(db, 'bettingMarket/markets'), function (snap) {
+      marketsCache = snap.val() || {};
+      renderMarketReviewList();
+      renderMarketManageList();
+    });
+  }
+
+  function renderMarketReviewList() {
+    const entries = Object.keys(marketsCache)
+      .filter(function (id) { return marketsCache[id].status === 'pendingValidation'; })
+      .map(function (id) { return Object.assign({ id: id }, marketsCache[id]); })
+      .sort(function (a, b) { return ((a.timing || {}).bettingOpensAt || 0) - ((b.timing || {}).bettingOpensAt || 0); });
+
+    const sig = JSON.stringify(entries.map(function (e) { return [e.id, e.title, e.validation && e.validation.likeCount]; }));
+    if (sig === lastMarketReviewSignature) return;
+    lastMarketReviewSignature = sig;
+
+    if (!entries.length) { marketReviewListEl.innerHTML = '<div class="empty-state">검수 대기중인 제안이 없습니다.</div>'; return; }
+    marketReviewListEl.innerHTML = '';
+    entries.forEach(function (m) {
+      const likeCount = (m.validation && m.validation.likeCount) || 0;
+      const passed = likeCount >= 10;
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.style.flexWrap = 'wrap';
+      row.innerHTML =
+        '<div class="verif-info" style="flex:1 1 100%;"><b>' + escapeHtml(m.title) + '</b>' +
+        '<span>' + (MARKET_TYPE_LABEL[m.type] || m.type) + ' · ' + escapeHtml(marketStreamerText(m)) +
+        ' · 추천 ' + likeCount + '/10' + (passed ? ' (기준 충족)' : ' (기준 미달)') + '</span></div>' +
+        '<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1 1 100%; margin-top:6px;">' +
+        '<label style="font-size:11.5px; color:#8b93a1; display:flex; gap:4px; align-items:center;">' +
+        '<input type="checkbox" class="override-likes"> 추천수 미달 강제승인</label>' +
+        '<label style="font-size:11.5px; color:#8b93a1; display:flex; gap:4px; align-items:center;">' +
+        '<input type="checkbox" class="override-participants"> 참가자 미달 허용</label>' +
+        '<button class="approve" type="button">승인</button>' +
+        '<button class="reject" type="button">반려</button>' +
+        '</div>';
+      row.querySelector('.approve').addEventListener('click', function () {
+        const overrideLikes = row.querySelector('.override-likes').checked;
+        const overrideParticipants = row.querySelector('.override-participants').checked;
+        reviewProposalFn({ marketId: m.id, action: 'approve', overrideLikes: overrideLikes, overrideParticipants: overrideParticipants }).catch(function (err) {
+          console.error('마켓 승인 실패:', err);
+          window.alert('승인에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      row.querySelector('.reject').addEventListener('click', function () {
+        if (!window.confirm('"' + m.title + '" 제안을 반려할까요?')) return;
+        reviewProposalFn({ marketId: m.id, action: 'reject' }).catch(function (err) {
+          console.error('마켓 반려 실패:', err);
+          window.alert('반려에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      marketReviewListEl.appendChild(row);
+    });
+  }
+
+  function clearMarketCountdowns() {
+    Object.keys(marketCountdownIntervals).forEach(function (id) { clearInterval(marketCountdownIntervals[id]); });
+    Object.keys(marketCountdownIntervals).forEach(function (id) { delete marketCountdownIntervals[id]; });
+  }
+
+  function openMarketReasonSelect(row, marketId, reasons, actionFn, label) {
+    const reasonRow = row.querySelector('.market-reason-row');
+    const selectId = 'reason-' + marketId + '-' + Math.random().toString(36).slice(2, 7);
+    reasonRow.style.display = 'flex';
+    reasonRow.innerHTML =
+      '<select id="' + selectId + '">' +
+      reasons.map(function (r) { return '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + '</option>'; }).join('') +
+      '</select>' +
+      '<button class="reason-confirm" type="button">' + label + ' 확정</button>' +
+      '<button class="reason-cancel" type="button">취소</button>';
+    reasonRow.querySelector('.reason-confirm').addEventListener('click', function () {
+      const reason = document.getElementById(selectId).value;
+      actionFn({ marketId: marketId, reason: reason }).then(function () {
+        reasonRow.style.display = 'none';
+        reasonRow.innerHTML = '';
+      }).catch(function (err) {
+        console.error(label + ' 실패:', err);
+        window.alert(label + '에 실패했습니다: ' + (err && err.message ? err.message : err));
+      });
+    });
+    reasonRow.querySelector('.reason-cancel').addEventListener('click', function () {
+      reasonRow.style.display = 'none';
+      reasonRow.innerHTML = '';
+    });
+  }
+
+  // 판정 대상 outcome은 실시간 갱신(totalPool 등) 때마다 목록 전체를 다시 그리면 안 된다
+  // (선택 중이던 라디오·열려있던 사유 선택창이 날아감) — status/pendingSettlement/
+  // minParticipantsOverride처럼 실제 의사결정에 영향을 주는 필드만으로 서명을 만들어
+  // 그게 바뀔 때만 다시 그린다. 그래서 이 화면은 의도적으로 실시간 배당/풀 금액을
+  // 보여주지 않는다(판정에는 "실제로 누가 이겼는가"만 필요하고 배당은 필요 없음).
+  function renderMarketManageList() {
+    const entries = Object.keys(marketsCache)
+      .filter(function (id) { return ['open', 'closed', 'pendingSettlement'].indexOf(marketsCache[id].status) > -1; })
+      .map(function (id) { return Object.assign({ id: id }, marketsCache[id]); })
+      .sort(function (a, b) { return ((a.timing || {}).bettingClosesAt || 0) - ((b.timing || {}).bettingClosesAt || 0); });
+
+    const sig = JSON.stringify(entries.map(function (e) {
+      return [e.id, e.status, e.pendingSettlement, e.minParticipantsOverride];
+    }));
+    if (sig === lastMarketManageSignature) return;
+    lastMarketManageSignature = sig;
+    clearMarketCountdowns();
+
+    if (!entries.length) { marketManageListEl.innerHTML = '<div class="empty-state">관리할 마켓이 없습니다.</div>'; return; }
+    marketManageListEl.innerHTML = '';
+    entries.forEach(function (m) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.style.flexWrap = 'wrap';
+      const outcomeIds = Object.keys(m.outcomes || {});
+      const preselect = (m.pendingSettlement && m.pendingSettlement.winningOutcomeId) || outcomeIds[0];
+      let selectedOutcomeId = preselect;
+
+      const outcomesHtml = outcomeIds.map(function (oid) {
+        const o = m.outcomes[oid];
+        const isSel = oid === preselect;
+        return '<label class="market-outcome-option' + (isSel ? ' selected' : '') + '" data-oid="' + escapeHtml(oid) + '">' +
+          '<input type="radio" name="outcome-' + escapeHtml(m.id) + '"' + (isSel ? ' checked' : '') + '>' +
+          escapeHtml(o.label) + '</label>';
+      }).join('');
+
+      row.innerHTML =
+        '<div class="verif-info" style="flex:1 1 100%;"><b>' + escapeHtml(m.title) +
+        '<span class="market-status-tag ' + m.status + '">' + (MARKET_STATUS_LABEL[m.status] || m.status) + '</span></b>' +
+        '<span>' + (MARKET_TYPE_LABEL[m.type] || m.type) + ' · ' + escapeHtml(marketStreamerText(m)) + '</span></div>' +
+        '<div class="market-outcome-list" style="flex:1 1 100%;">' + outcomesHtml + '</div>' +
+        '<span class="market-countdown" style="flex:1 1 100%; display:none;"></span>' +
+        '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; flex:1 1 100%;">' +
+        '<label style="font-size:11.5px; color:#8b93a1; display:flex; gap:4px; align-items:center;">' +
+        '<input type="checkbox" class="override-participants"' + (m.minParticipantsOverride ? ' checked' : '') + '> 참가자 미달 허용</label>' +
+        '<button class="judge" type="button">' + (m.status === 'pendingSettlement' ? '판정 변경' : '판정하기') + '</button>' +
+        (m.status === 'pendingSettlement' ? '<button class="cancel-judgment" type="button" style="border-color:#e2554f; color:#e2554f;">판정 취소</button>' : '') +
+        (m.status === 'open' ? '<button class="close-early" type="button">조기 마감</button>' : '') +
+        '<button class="void" type="button" style="border-color:#e2554f; color:#e2554f;">무효 처리</button>' +
+        '</div>' +
+        '<div class="market-reason-row" style="display:none; flex:1 1 100%;"></div>';
+
+      row.querySelectorAll('.market-outcome-option').forEach(function (label) {
+        label.addEventListener('click', function () {
+          row.querySelectorAll('.market-outcome-option').forEach(function (el) { el.classList.remove('selected'); });
+          label.classList.add('selected');
+          label.querySelector('input').checked = true;
+          selectedOutcomeId = label.dataset.oid;
+        });
+      });
+
+      row.querySelector('.override-participants').addEventListener('change', function (e) {
+        const checked = e.target.checked;
+        e.target.disabled = true;
+        setMinParticipantsOverrideFn({ marketId: m.id, override: checked }).catch(function (err) {
+          console.error('참가자 미달 허용 설정 실패:', err);
+          window.alert('설정에 실패했습니다: ' + (err && err.message ? err.message : err));
+          e.target.checked = !checked;
+        }).finally(function () { e.target.disabled = false; });
+      });
+
+      row.querySelector('.judge').addEventListener('click', function () {
+        if (!selectedOutcomeId) return;
+        judgeMarketFn({ marketId: m.id, winningOutcomeId: selectedOutcomeId }).catch(function (err) {
+          console.error('판정 실패:', err);
+          window.alert('판정에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+
+      const cancelBtn = row.querySelector('.cancel-judgment');
+      if (cancelBtn) {
+        cancelBtn.addEventListener('click', function () {
+          cancelPendingJudgmentFn({ marketId: m.id }).catch(function (err) {
+            console.error('판정 취소 실패:', err);
+            window.alert('판정 취소에 실패했습니다: ' + (err && err.message ? err.message : err));
+          });
+        });
+      }
+
+      const closeEarlyBtn = row.querySelector('.close-early');
+      if (closeEarlyBtn) {
+        closeEarlyBtn.addEventListener('click', function () { openMarketReasonSelect(row, m.id, CLOSE_REASONS, closeMarketEarlyFn, '조기 마감'); });
+      }
+      row.querySelector('.void').addEventListener('click', function () { openMarketReasonSelect(row, m.id, VOID_REASONS, voidMarketFn, '무효 처리'); });
+
+      if (m.status === 'pendingSettlement' && m.pendingSettlement) {
+        const countdownEl = row.querySelector('.market-countdown');
+        countdownEl.style.display = 'block';
+        const finalizeAt = m.pendingSettlement.finalizeAt;
+        (function scheduleTick(mid) {
+          function tick() {
+            const remaining = Math.max(0, Math.round((finalizeAt - Date.now()) / 1000));
+            countdownEl.textContent = remaining > 0
+              ? '판정 접수됨 — ' + remaining + '초 후 자동 확정(그 전까지 재판정·취소 가능)'
+              : '확정 처리 중...';
+            if (remaining <= 0) { clearInterval(marketCountdownIntervals[mid]); delete marketCountdownIntervals[mid]; }
+          }
+          tick();
+          marketCountdownIntervals[mid] = setInterval(tick, 1000);
+        })(m.id);
+      }
+
+      marketManageListEl.appendChild(row);
+    });
+  }
+
   let reviewSubscriptionsStarted = false;
   function startReviewQueueSubscriptions() {
     if (reviewSubscriptionsStarted) return;
@@ -1896,6 +2176,7 @@
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
+    { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
     { id: 'section-verification', label: '🎙️ 인증 스트리머 관리', role: 'admin' },
     { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin' },
     { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin' },
@@ -1964,7 +2245,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDevbarLinks(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDevbarLinks(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
     if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
   });
 </script>

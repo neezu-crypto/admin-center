@@ -430,9 +430,9 @@
       <td>StreamBet-Market에서 정지된 uid가 같은 로그인 세션(03번)으로 soop-stock-market에선 그대로 활동 가능 — 제재가 새는 보안 문제. soop-stock-market엔 계정 정지 개념 자체가 없음. 20번에서 상세 설계</td>
     </tr>
     <tr>
-      <td><strong>낮음</strong> (이미 잘 되는 걸 넓히는 작업)</td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 배팅시장 진행중인 마켓 관리</td>
-      <td>제안 검토·조기종료·판정·취소환불까지 StreamBet-Market에 이미 완결된 UI가 있음. admin-center로 옮길 실익부터 따져볼 것. 21번에서 상세 설계</td>
+      <td>제안 검토·조기종료·판정(유예 카운트다운 포함)·취소환불까지 StreamBet-Market 기존 함수 그대로 호출, admin-center 리스트형 UI로 단순화. 21번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -478,12 +478,13 @@
    위임 권한 카탈로그 채우기 → 08번(devbar) 구현 후 첫 후보 재검토(사용자 확인)
    (되돌릴 방법 없이 권한부터 뿌리지 않도록 이 순서 고정)
 
-5단계 — 이미 잘 되는 것 넓히기 / 편의 기능 (진행 중)
+5단계 — 이미 잘 되는 것 넓히기 / 편의 기능 ✅ 완료
    08 devbar 구성           ✅ 완료 — devbarLinks 노드 + 새 링크 추가 UI(무배포 확장 가능)
    17 채팅                  ✅ 완료 — 기존 채널 재사용, 새 함수/RTDB 노드 없이 UI만 추가
    22 게시글 홍보 현황      ✅ 완료 — GAME_CATALOG 기반 확장, StreamBet-Market도 새 함수로 이전
    19 세션 빠른 이동        ✅ 완료 — soop-stock-market 패턴 이식, 카드 16개 역할별 필터링
-   21 배팅시장 마켓 관리    → 이 목록에서 실익이 가장 낮다고 21번에서 이미 밝힘 (남은 유일한 5단계 항목)
+   21 배팅시장 마켓 관리    ✅ 완료 — 기존 함수 재사용, 리스트형 UI로 단순화(새 함수/RTDB 규칙 없음)
+   → 5단계 전체 완료 (남은 건 6단계 보류·미정 항목뿐)
 
 6단계 — 보류·미정 (사용자가 명시적으로 미룬 것 포함)
    콘텐츠 동결 실제 연동(보류 지시됨), 미드나잇 마트런/절대광고 온보딩(보류 지시됨),
@@ -1002,8 +1003,10 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">21</span><h2>통합 관리 센터 — 배팅시장 진행중인 마켓 관리 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">21</span><h2>통합 관리 센터 — 배팅시장 진행중인 마켓 관리 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: StreamBet-Market의 마켓(배팅 주제) 생명주기 관리를 통합 관리 센터에서도 다룰 수 있게 한다. 이 문서의 다른 항목과 달리 <strong>이미 상당히 잘 만들어진 기능</strong>이라, "빈틈을 채우는" 게 아니라 "잘 되는 걸 어디서든 쓸 수 있게" 하는 성격이다(17번 채팅과 같은 부류).</p>
+  <div class="callout"><b>실행 결과</b> — 아래 "실익이 있는가" 문단은 애초에 "급하게 옮길 이유는 약하다"고 결론 냈지만, 사용자가 명시적으로 진행을 요청해 구현했다. <code>manage-modal.js</code>의 다단계 모달을 그대로 옮기는 대신, admin-center의 기존 리스트형 UI(13·14번과 같은 톤)에 맞춰 인라인으로 단순화했다 — 판정 대상 outcome은 라디오 버튼 목록, 조기마감/무효처리 사유는 인라인 `<select>`로 펼쳤다 접는 방식. <code>reviewProposal</code>/<code>closeMarketEarly</code>/<code>voidMarket</code>/<code>judgeMarket</code>/<code>cancelPendingJudgment</code>/<code>setMinParticipantsOverride</code> 전부 StreamBet-Market이 이미 배포한 함수를 그대로 호출한다(17·22번과 동일 패턴) — 새 함수도, 새 RTDB 규칙도 전혀 필요 없었다(<code>bettingMarket/markets</code>는 이미 인증 유저 전원에게, <code>stocks</code>는 이미 전체 공개로 읽기가 열려 있었음을 재확인).</div>
+  <div class="callout warn"><b>실시간 배당·풀 금액은 의도적으로 안 보여준다</b> — <code>bettingMarket/markets</code>는 베팅이 들어올 때마다(주로 <code>totalPool</code>/각 outcome의 <code>pool</code>) 계속 갱신된다. 목록 전체를 매번 다시 그리면 관리자가 라디오를 고르거나 사유 선택창을 열어둔 채로 화면이 리셋돼버린다 — 그래서 <code>status</code>·<code>pendingSettlement</code>·<code>minParticipantsOverride</code>처럼 실제 판단에 영향을 주는 필드만으로 서명을 만들어 그게 바뀔 때만 다시 그리고, 배당·풀 숫자 자체는 화면에 아예 노출하지 않는다(판정에는 "실제로 누가 이겼는가"만 필요하고 배당 숫자는 필요 없음).</div>
   <h3>현재 상태 — 이미 완결된 생명주기</h3>
   <div class="flow">pendingValidation ─(검토)→ open ─(마감)→ closed ─(판정)→ pendingSettlement ─(자동정산)→ settled
       │                                                      │
