@@ -324,6 +324,10 @@
         여기서 체크한 권한은 <b>인증된 스트리머 전원에게 동일하게</b> 부여됩니다(스트리머별 개별 설정이 아님).
         관리자는 이 목록과 무관하게 항상 모든 권한을 가집니다.
       </p>
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+        <button id="killswitchBtn" type="button" style="background:none; border:1px solid #e2554f; color:#e2554f; border-radius:6px; padding:6px 12px; font-size:12.5px; cursor:pointer;">즉시 회수 킬스위치</button>
+        <span id="killswitchStatus" class="hint" style="margin:0;"></span>
+      </div>
       <div id="permissionEditList"></div>
     </div>
   </div>
@@ -377,6 +381,7 @@
   const db = getDatabase(app);
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
   const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
+  const revokeAllStreamerPermissionsFn = httpsCallable(functions, 'revokeAllStreamerPermissions');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
@@ -436,6 +441,8 @@
   const streamerShellEl = document.getElementById('streamerShell');
   const permissionEditListEl = document.getElementById('permissionEditList');
   const permissionViewListEl = document.getElementById('permissionViewList');
+  const killswitchBtn = document.getElementById('killswitchBtn');
+  const killswitchStatusEl = document.getElementById('killswitchStatus');
   const verificationRefreshBtn = document.getElementById('verificationRefreshBtn');
   const verificationPendingListEl = document.getElementById('verificationPendingList');
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
@@ -473,6 +480,7 @@
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
   let grantedPermissions = {};
+  let killswitchLastRun = null;
 
   const SOURCE_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장' };
 
@@ -537,13 +545,43 @@
       const result = await getAdminCenterStateFn();
       role = result.data.role;
       grantedPermissions = result.data.permissions || {};
+      killswitchLastRun = result.data.killswitchLastRun || null;
     } catch (e) {
       console.error('통합 관리 센터 상태 조회 실패:', e);
       role = 'none';
       grantedPermissions = {};
+      killswitchLastRun = null;
     }
     render();
+    renderKillswitchStatus();
   }
+
+  // 07번 4단계 — 카탈로그가 채워지기 전에 미리 마련해두는 패닉 버튼. 위임된 권한을
+  // 하나씩 끄는 대신 전부 한 번에 false로 되돌린다.
+  function renderKillswitchStatus() {
+    if (!killswitchLastRun) {
+      killswitchStatusEl.textContent = '';
+      return;
+    }
+    const when = new Date(killswitchLastRun.at).toLocaleString('ko-KR');
+    killswitchStatusEl.textContent =
+      '마지막 실행: ' + (killswitchLastRun.adminName || killswitchLastRun.adminUid) +
+      ' · ' + when + ' · ' + killswitchLastRun.revokedCount + '건 회수';
+  }
+
+  killswitchBtn.addEventListener('click', function () {
+    if (!window.confirm('위임된 권한을 전부 즉시 회수할까요? 인증 스트리머 전원에게서 모든 위임 권한이 즉시 꺼집니다.')) return;
+    killswitchBtn.disabled = true;
+    revokeAllStreamerPermissionsFn().then(function (result) {
+      window.alert((result.data.revokedCount || 0) + '건의 권한을 회수했습니다.');
+      return refreshAdminCenterState();
+    }).catch(function (err) {
+      console.error('킬스위치 실행 실패:', err);
+      window.alert('회수에 실패했습니다: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      killswitchBtn.disabled = false;
+    });
+  });
 
   // 권한 부여/해제는 관리자만 - 서버(setAdminCenterPermission Cloud Function)가
   // requireAdmin으로 검증한다. 클라이언트는 UI 판단(체크박스 표시)만 한다.

@@ -86,8 +86,11 @@ async function requireAdminOrVerifiedStreamer(request) {
 const getAdminCenterState = onCall(async (request) => {
   const { role } = await requireAdminOrVerifiedStreamer(request);
   const db = getDatabase();
-  const snap = await db.ref('adminCenter/streamerPermissions').get();
-  return { role, permissions: snap.val() || {} };
+  const [permsSnap, killswitchSnap] = await Promise.all([
+    db.ref('adminCenter/streamerPermissions').get(),
+    db.ref('adminCenter/killswitchLastRun').get(),
+  ]);
+  return { role, permissions: permsSnap.val() || {}, killswitchLastRun: killswitchSnap.val() || null };
 });
 
 // 통합 관리 센터 — 위임 권한 하나를 켜고/끈다. 관리자만 가능하고, 인증 스트리머 전원에게
@@ -104,6 +107,37 @@ const setAdminCenterPermission = onCall(async (request) => {
   const db = getDatabase();
   await db.ref('adminCenter/streamerPermissions/' + key.trim()).set(granted);
   return { ok: true };
+});
+
+// 07번 4단계 — 즉시 회수 킬스위치. 카탈로그(PERMISSION_CATALOG)가 아직 비어 있어
+// 지금 당장 되돌릴 위임 권한은 없지만, 나중에 카탈로그가 채워진 뒤 사고가 나면
+// 그때 급하게 만들 여유가 없으므로 실제 위임을 시작하기 전에 미리 마련해둔다
+// (07번에서 이 순서를 고정한 이유 그대로). 개별 스위치를 하나씩 끄는 대신
+// 위임된 권한 전체를 한 번에 false로 되돌리는 패닉 버튼.
+const revokeAllStreamerPermissions = onCall(async (request) => {
+  const uid = await requireAdmin(request);
+  const adminName = request.auth.token.name || request.auth.token.email || uid;
+  const db = getDatabase();
+  const snap = await db.ref('adminCenter/streamerPermissions').get();
+  const data = snap.val() || {};
+  const updates = {};
+  let revokedCount = 0;
+  Object.keys(data).forEach(function (key) {
+    if (data[key]) {
+      updates[key] = false;
+      revokedCount += 1;
+    }
+  });
+  if (revokedCount > 0) {
+    await db.ref('adminCenter/streamerPermissions').update(updates);
+  }
+  await db.ref('adminCenter/killswitchLastRun').set({
+    adminUid: uid,
+    adminName: adminName,
+    at: Date.now(),
+    revokedCount: revokedCount,
+  });
+  return { ok: true, revokedCount: revokedCount };
 });
 
 // 통합 관리 센터 — 인증 스트리머 관리 1단계: 배팅시장(bettingMarket/verifyRequests)·
@@ -558,6 +592,7 @@ const getVisitorAnalytics = onCall(async (request) => {
 module.exports = {
   getAdminCenterState,
   setAdminCenterPermission,
+  revokeAllStreamerPermissions,
   listStreamerVerificationOverview,
   listAuditLogOverview,
   getSeriesConfig,
