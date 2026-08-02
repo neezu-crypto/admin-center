@@ -601,8 +601,9 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">10</span><h2>통합 관리 센터 — 페이지별 접속자 분석 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">10</span><h2>통합 관리 센터 — 페이지별 접속자 분석 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span> (interior-3d-viewer 제외)</h2></div>
   <p>목표: 통합 관리 센터에서 <strong>페이지(게임)별 시간당 최고 동시 접속자 수</strong>를 보여주고, <strong>페이지 개별 / 전체 합산 접속자 수를 스파크라인 차트</strong>로 확인할 수 있게 한다.</p>
+  <div class="callout"><b>실행 결과</b> — <code>presence/{appId}/{uid}</code>(appId 네임스페이스 분리, soop-stock-market의 기존 <code>presence/users/{uid}</code>도 함께 이전)에 5분마다 서버가 샘플링해 <code>analytics/presenceHourly/{appId}/{hourKey}</code>에 시간당 최고치를 기록하고, <code>getVisitorAnalytics({hours})</code>가 이를 읽어 UTC 시간별 표로 보여준다. interior-3d-viewer는 접속자 집계 기능 자체가 없어 의도적으로 제외했다(스코프 축소, 버그 아님).</div>
   <h3>현재 상태</h3>
   <table>
     <tr><th>저장소</th><th>있는 것</th><th>비고</th></tr>
@@ -651,8 +652,9 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">11</span><h2>통합 관리 센터 — 전체 통계 요약·이상 거래 모니터링 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">11</span><h2>통합 관리 센터 — 전체 통계 요약·이상 거래 모니터링 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: <strong>오늘 / 누적(전체 기간) / 재무 건전성 / 일간·주간·월간 통계</strong>와 <strong>이상 거래 모니터링</strong>을 게임마다 따로 들어가지 않고 통합 관리 센터 한 화면에서 확인한다.</p>
+  <div class="callout"><b>실행 결과</b> — 06번 원칙 그대로, StreamBet-Market의 <code>getAdminDashboardStats</code>/<code>getStatsTimeseries</code>/<code>getAnomalyMonitor</code>/<code>getExchangeLog</code> + soop-stock-market의 <code>adminAction</code>{action:'getOverviewStats'}를 <code>Promise.allSettled</code>로 병렬 호출해 한 화면에 모았다. 새 통계 계산 로직은 admin-center에 전혀 추가하지 않았다 - 있는 걸 모아서 보여주기만 한다.</div>
   <h3>현재 상태 — 이미 있는 것 / 없는 것</h3>
   <table>
     <tr><th>저장소</th><th>있는 것</th><th>비고</th></tr>
@@ -699,8 +701,9 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">12</span><h2>통합 관리 센터 — 유저 상품 구매 현황 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">12</span><h2>통합 관리 센터 — 유저 상품 구매 현황 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: 게임별로 흩어진 "누가 무엇을 샀는가" 기록을 통합 관리 센터에서 한 화면에 모아 보고, uid 하나로 <strong>그 유저가 시리즈 전체에서 산 것</strong>까지 확인할 수 있게 한다.</p>
+  <div class="callout warn"><b>실행 결과 — 검증 중 필드명 오류 다수 발견</b> — <code>getPurchaseOverview</code>가 12종 구매 소스를 모아 uid로 필터링해 반환한다. 구현 직후 검증 과정에서 <code>PURCHASE_SOURCES</code> 설정의 절반(5/10곳)이 실제로는 <code>requesterUid</code>인데 <code>uidField: 'uid'</code>로 잘못 가정돼 있어 조용히 누락될 뻔한 걸 발견해 수정했고, <code>chestOpenLog</code>의 금액 필드도 실제론 <code>prize</code>인데 <code>reward</code>로 가정돼 있던 것과 누락된 구매 소스 2개(<code>chestPurchaseRequests</code>, <code>unfreezeDonationRequests</code>)도 추가했다 — "구현 후 검증 필수" 지침이 이 사고들 때문에 생겼다.</div>
   <h3>현재 상태 — 게임마다 구매 기록은 있지만, 모아서 보는 화면이 없다</h3>
   <table>
     <tr><th>저장소</th><th>구매 유형별 기록 위치</th><th>비고</th></tr>
@@ -845,8 +848,9 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">16</span><h2>통합 관리 센터 — 유저 검색/유저 상세 조회 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">16</span><h2>통합 관리 센터 — 유저 검색/유저 상세 조회 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: 닉네임이나 uid로 유저 한 명을 찾아, 그 사람의 시리즈 전체 정보(인증 상태·게임별 잔액/보유자산·구매 이력·정지 여부)를 한 화면에서 본다. 이 문서에서 uid를 기준으로 설계한 04·05·12번 등을 <strong>실제로 쓸 수 있게 만드는 진입점</strong>이 바로 이 검색 기능이다.</p>
+  <div class="callout"><b>실행 결과</b> — 신규 <code>searchSeriesUser</code>(부분 일치 검색)로 후보를 찾고, 선택하면 배팅시장의 <code>adminLookupUser</code> + 주식시장의 <code>adminAction</code>{action:'getUserDetail'} + admin-center 자체 <code>getPurchaseOverview</code>(12번)를 <code>Promise.allSettled</code>로 병렬 호출해 한 화면에 모은다. 20번(정지계정 관리)의 정지/해제 버튼도 이 화면에 연결됐다 — 이 검색 기능이 결국 04·05·12·20번을 실제로 쓰이게 만드는 진입점이라는 목표 그대로 됐다.</div>
   <h3>현재 상태 — 게임마다 검색 가능한 범위가 다르다</h3>
   <table>
     <tr><th>저장소</th><th>검색 방식</th><th>비고</th></tr>
@@ -1094,8 +1098,9 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">24</span><h2>통합 관리 센터 — 디스코드 웹훅 검수 알림 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">24</span><h2>통합 관리 센터 — 디스코드 웹훅 검수 알림 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: 18번의 3단계("탭을 안 보고 있어도 알림")를 디스코드 웹훅으로 구체화한다. 관리자가 admin-center를 켜두지 않아도, 검수 대기 항목이 생기는 순간 지정된 디스코드 채널에 메시지가 온다.</p>
+  <div class="callout"><b>실행 결과</b> — 14개 큐 트리거(가장 절실했던 <code>presetMergeFailures</code> 포함) + Secret Manager 기반 웹훅 URL 등록/테스트 발송 UI까지 배포·실제 테스트 알림 발송 확인 완료. 19번(세션 빠른 이동) 완료 후 미뤄뒀던 딥링크도 마저 붙여 각 트리거가 admin-center의 해당 카드로 바로 스크롤 이동하는 링크를 포함한다(자세한 내용은 이 섹션 하단 콜아웃 참고).</div>
   <h3>디스코드 웹훅이 하는 일</h3>
   <p>디스코드 채널마다 발급할 수 있는 URL 하나에 정해진 형식의 JSON을 <code>POST</code>하면, 그 채널에 메시지가 즉시 게시된다. 로그인이나 별도 인증이 필요 없다 — 즉 <strong>이 URL 자체가 비밀번호와 같은 민감정보</strong>다. 유출되면 누구나 그 채널에 메시지를 보낼 수 있게 된다.</p>
   <h3>핵심 설계 통찰 — admin-center가 다른 저장소를 건드리지 않고도 걸 수 있다</h3>
