@@ -411,16 +411,6 @@
       <div id="seriesConfigList"></div>
     </div>
 
-    <div class="card" id="section-devbar">
-      <h2>devbar 구성</h2>
-      <p class="hint">
-        각 페이지 상단 devbar("다른 게임 바로가기")에 표시되는 링크입니다. 여기서 저장하면
-        모든 페이지에 공통으로 반영됩니다(각 페이지는 자기 자신에 대한 링크는 자동으로
-        숨깁니다). 조회 실패 시 각 페이지는 기존에 하드코딩된 링크를 그대로 보여줍니다.
-      </p>
-      <div id="devbarLinksList"></div>
-    </div>
-
     <div class="card" id="section-promoted-content">
       <h2>게시글 홍보 현황</h2>
       <p class="hint">
@@ -468,6 +458,21 @@
       <h2>부여받은 권한</h2>
       <p class="hint">관리자가 인증 스트리머 전체에게 부여한 권한만 여기서 사용할 수 있습니다.</p>
       <div id="permissionViewList"></div>
+    </div>
+  </div>
+
+  <!-- 07번 4단계 — devbar 편집은 위임 권한 카탈로그의 첫 항목. 관리자는 항상 보이고,
+       인증 스트리머는 'devbarEdit' 권한이 켜져 있을 때만 보인다(render()에서 토글) —
+       그래서 adminShell/streamerShell 어느 쪽에도 속하지 않는 독립 래퍼로 뺐다. -->
+  <div id="devbarShell" hidden>
+    <div class="card" id="section-devbar">
+      <h2>devbar 구성</h2>
+      <p class="hint">
+        각 페이지 상단 devbar("다른 게임 바로가기")에 표시되는 링크입니다. 여기서 저장하면
+        모든 페이지에 공통으로 반영됩니다(각 페이지는 자기 자신에 대한 링크는 자동으로
+        숨깁니다). 조회 실패 시 각 페이지는 기존에 하드코딩된 링크를 그대로 보여줍니다.
+      </p>
+      <div id="devbarLinksList"></div>
     </div>
   </div>
 
@@ -593,10 +598,13 @@
   const searchSeriesUserFn = httpsCallable(functions, 'searchSeriesUser');
   const getPurchaseOverviewFn = httpsCallable(functions, 'getPurchaseOverview');
 
-  // 다음 단계에서 기존 관리 세션 기능을 하나씩 여기 추가하고, 그 key를 실제 기능
-  // 노출/활성화 조건(권한 있는 스트리머에게만 보이기 등)으로 사용한다.
-  // 예: { key: 'viewAuditLog', label: '감사 로그 조회', desc: '전체 게임의 관리 처리 내역을 볼 수 있습니다.' }
-  const PERMISSION_CATALOG = [];
+  // 07번 4단계 — 첫 위임 권한. devbar 링크 편집은 신원·재화에 영향이 없는 낮은
+  // 리스크 작업이라(08번 callout) 카탈로그 첫 후보로 채웠다. 실제 강제는
+  // 서버(admin-center/functions/index.js의 requireAdminOrDelegatedPermission)가
+  // 하고, 여기 key는 그 값과 정확히 일치해야 한다.
+  const PERMISSION_CATALOG = [
+    { key: 'devbarEdit', label: 'devbar 링크 편집', desc: '각 페이지 상단 devbar에 표시되는 게임 링크를 추가·수정·삭제할 수 있습니다.' },
+  ];
 
   const authStatusEl = document.getElementById('authStatus');
   const authBtnEl = document.getElementById('authBtn');
@@ -608,6 +616,7 @@
   const adminShellEl = document.getElementById('adminShell');
   const streamerShellEl = document.getElementById('streamerShell');
   const sharedShellEl = document.getElementById('sharedShell');
+  const devbarShellEl = document.getElementById('devbarShell');
   const adminChatMessagesEl = document.getElementById('adminChatMessages');
   const adminChatInputEl = document.getElementById('adminChatInput');
   const adminChatSendBtn = document.getElementById('adminChatSendBtn');
@@ -2194,7 +2203,12 @@
       quicknavEl.innerHTML = '';
       return;
     }
-    const items = QUICKNAV_ITEMS.filter(function (item) { return item.role === role || item.role === 'shared'; });
+    // section-devbar는 07번 4단계 위임 권한 대상이라 role 태그만으로는 못 거른다 —
+    // 관리자는 항상, 인증 스트리머는 devbarEdit 권한이 있을 때만 통과시킨다.
+    const items = QUICKNAV_ITEMS.filter(function (item) {
+      if (item.id === 'section-devbar') return role === 'admin' || !!grantedPermissions.devbarEdit;
+      return item.role === role || item.role === 'shared';
+    });
     quicknavEl.innerHTML = '<div class="quicknav-title">🧭 빠른 이동</div>' +
       items.map(function (item) { return '<button type="button" data-target="' + item.id + '">' + item.label + '</button>'; }).join('');
     quicknavEl.querySelectorAll('button[data-target]').forEach(function (btn) {
@@ -2211,6 +2225,11 @@
     adminShellEl.hidden = role !== 'admin';
     streamerShellEl.hidden = role !== 'streamer';
     sharedShellEl.hidden = role === 'none';
+    // 07번 4단계 — devbar 편집 카드는 관리자는 항상, 인증 스트리머는 'devbarEdit'
+    // 권한이 켜져 있을 때만 보인다(어느 shell에도 속하지 않는 독립 래퍼).
+    const canEditDevbar = role === 'admin' || (role === 'streamer' && !!grantedPermissions.devbarEdit);
+    devbarShellEl.hidden = !canEditDevbar;
+    if (canEditDevbar) refreshDevbarLinks();
     roleBadgeEl.hidden = role === 'none';
     if (role === 'admin') {
       roleBadgeEl.textContent = '관리자';
@@ -2260,7 +2279,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDevbarLinks(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
     if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
   });
 </script>

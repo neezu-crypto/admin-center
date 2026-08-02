@@ -340,9 +340,9 @@
       <td><code>revokeAllStreamerPermissions</code>(관리자 전용)로 위임된 권한 전체를 한 번에 false로 되돌리고, <span class="chip">adminCenter/killswitchLastRun</span>에 실행 기록(누가/언제/몇 건)을 남긴다. "인증 스트리머 권한 위임" 카드에 버튼 + 마지막 실행 기록 표시 추가. 배포·커밋 완료</td>
     </tr>
     <tr>
-      <td><strong>중간</strong> (08번 이후로 보류)</td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>위임 권한 카탈로그 채우기</td>
-      <td><span class="chip">adminCenter/streamerPermissions</span> 체리피크 메커니즘과 킬스위치는 마련됐지만 <code>PERMISSION_CATALOG</code>는 의도적으로 비워뒀다. 첫 후보로 검토했던 devbar 링크 수정(08번)이 아직 구현되지 않았고, 콘텐츠 동결 위임은 사용자가 이미 후순위로 미룬 항목이라 — 08번 devbar 구현 후 다시 후보를 검토한다</td>
+      <td>첫 항목으로 <code>devbarEdit</code>(devbar 링크 편집) 등록. 서버에 실제 강제 로직(<code>requireAdminOrDelegatedPermission</code>)을 새로 만들어 <code>setDevbarLink</code>/<code>deleteDevbarLink</code>에 적용 — <code>PERMISSION_CATALOG</code>는 UI 표시용일 뿐, 실권한은 이 서버 검증이 담당한다. 07번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -472,10 +472,11 @@
    24 디스코드 웹훅 알림    ✅ 완료 — 14개 큐 트리거 + 웹훅 등록/테스트 UI + 딥링크까지 전부 배포됨
    → 3단계 전체 완료
 
-4단계 — 권한 위임 준비 (킬스위치 완료, 카탈로그는 08번 이후로 보류)
+4단계 — 권한 위임 준비 ✅ 완료
    즉시 회수 킬스위치        ✅ 완료 — revokeAllStreamerPermissions + 실행 기록
-   위임 권한 카탈로그 채우기 → 08번(devbar) 구현 후 첫 후보 재검토(사용자 확인)
-   (되돌릴 방법 없이 권한부터 뿌리지 않도록 이 순서 고정)
+   위임 권한 카탈로그 채우기 ✅ 완료 — 첫 항목 devbarEdit 등록 + 서버 강제 로직 신설
+   (되돌릴 방법 없이 권한부터 뿌리지 않도록 이 순서 고정 — 킬스위치를 먼저 만들어둔
+   덕분에 실제로 권한이 하나 풀린 지금도 문제 생기면 바로 되돌릴 수 있다)
 
 5단계 — 이미 잘 되는 것 넓히기 / 편의 기능 ✅ 완료
    08 devbar 구성           ✅ 완료 — devbarLinks 노드 + 새 링크 추가 UI(무배포 확장 가능)
@@ -535,7 +536,7 @@
     <li><span class="chip">interior-3d-viewer</span>의 3개 페이지 — 각자 독립된 인라인 devbar 마크업이라 페이지마다 동일한 로직을 반복 적용해야 함</li>
     <li><span class="chip">soop-stock-market/index.html</span> — <code>&lt;nav class="topnav"&gt;</code>/<code>.topnav-btn</code> 마크업이 devbar와 이름부터 다르므로, 공통 로직을 적용하려면 클래스명 통일 또는 별도 어댑터가 필요</li>
   </ul>
-  <div class="callout"><b>권한 위임 후보로도 적합</b> — 링크 목록 수정은 신원·재화에 영향이 없는 낮은 리스크 작업이라, 07번 "위임 권한 카탈로그 채우기"의 첫 후보 항목으로 검토할 만하다.</div>
+  <div class="callout"><b>권한 위임 후보로도 적합 — 실제로 채택됨</b> — 링크 목록 수정은 신원·재화에 영향이 없는 낮은 리스크 작업이라는 판단대로, 07번 "위임 권한 카탈로그 채우기"의 첫 항목(<code>devbarEdit</code>)으로 실제 구현했다. <code>setDevbarLink</code>/<code>deleteDevbarLink</code>가 이제 관리자 또는 이 권한을 받은 인증 스트리머 둘 다 호출할 수 있다.</div>
 </section>
 
 <section>

@@ -81,6 +81,26 @@ async function requireAdminOrVerifiedStreamer(request) {
   throw new HttpsError('permission-denied', '관리자 또는 인증된 스트리머만 이용할 수 있습니다.');
 }
 
+// 07번 4단계 — 위임 권한 카탈로그의 실제 서버측 강제. 관리자는 항상 통과하고,
+// 인증 스트리머는 adminCenter/streamerPermissions/{permissionKey}가 true로
+// 켜져 있을 때만 통과한다(PERMISSION_CATALOG는 UI 표시용일 뿐, 실제 권한은
+// 여기서만 검증한다 — 클라이언트가 체크박스 상태를 위조해도 서버가 다시 확인).
+async function requireAdminOrDelegatedPermission(request, permissionKey) {
+  const uid = requireAuth(request);
+  if (await isAdminUid(uid)) return { uid, role: 'admin' };
+  const email = request.auth.token && request.auth.token.email;
+  if (isAdminEmail(email)) {
+    console.warn('관리자 판별 이메일 폴백 사용됨(uid 미등록):', uid);
+    return { uid, role: 'admin' };
+  }
+  if (await isVerifiedStreamerUid(uid)) {
+    const db = getDatabase();
+    const granted = (await db.ref('adminCenter/streamerPermissions/' + permissionKey).get()).val();
+    if (granted === true) return { uid, role: 'streamer' };
+  }
+  throw new HttpsError('permission-denied', '이 작업을 수행할 권한이 없습니다.');
+}
+
 // 통합 관리 센터 — 인증 스트리머 전원에게 공통으로 적용되는 위임 권한 목록을 읽는다.
 // 관리자·인증 스트리머 둘 다 호출 가능(화면에 보여줄 상태를 그대로 반환).
 const getAdminCenterState = onCall(async (request) => {
@@ -290,7 +310,9 @@ const DEVBAR_URL_RE = /^https:\/\/\S+$/;
 const DEVBAR_GAME_ID_RE = /^[a-zA-Z0-9_-]{1,40}$/;
 
 const setDevbarLink = onCall(async (request) => {
-  await requireAdmin(request);
+  // 07번 4단계 — devbar 링크 편집은 위임 권한 카탈로그의 첫 항목('devbarEdit').
+  // 신원·재화에 영향이 없는 낮은 리스크 작업이라 관리자가 켜면 인증 스트리머도 쓸 수 있다.
+  await requireAdminOrDelegatedPermission(request, 'devbarEdit');
   const { gameId, label, url, order } = request.data || {};
   const trimmedGameId = String(gameId || '').trim();
   if (!DEVBAR_GAME_ID_RE.test(trimmedGameId)) {
@@ -315,7 +337,7 @@ const setDevbarLink = onCall(async (request) => {
 });
 
 const deleteDevbarLink = onCall(async (request) => {
-  await requireAdmin(request);
+  await requireAdminOrDelegatedPermission(request, 'devbarEdit');
   const { gameId } = request.data || {};
   const trimmedGameId = String(gameId || '').trim();
   if (!trimmedGameId) throw new HttpsError('invalid-argument', 'gameId가 필요합니다.');
