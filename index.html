@@ -59,6 +59,15 @@
   }
   [hidden] { display: none !important; }
   h3.subhead { font-size: 12.5px; color: #8b93a1; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  /* 23번 — 카드 19개 시대의 페이지 구조. 카드(h2)보다 한 단계 위, 문서 전체
+     내비게이션 역할의 그룹 제목 — subhead(카드 안 소제목)와 확실히 구분되도록
+     골드 강조색 + 밑줄로 표시한다. */
+  h2.card-group-header {
+    font-size: 13px; font-weight: 800; color: #d9a441; text-transform: uppercase;
+    letter-spacing: .06em; margin: 36px 0 12px; padding-bottom: 8px;
+    border-bottom: 1px solid #262b33;
+  }
+  h2.card-group-header:first-child { margin-top: 0; }
   .perm-refresh-btn {
     background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
     padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
@@ -228,6 +237,11 @@
   }
   .quicknav.visible { display: flex; }
   .quicknav-title { font-size: 11px; font-weight: 800; color: #5f6672; padding: 4px 10px 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .quicknav-group {
+    font-size: 10px; font-weight: 800; color: #d9a441; padding: 10px 10px 2px;
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .quicknav-group:first-of-type { padding-top: 0; }
   .quicknav button {
     background: transparent; color: #8b93a1; border: none; padding: 7px 10px; border-radius: 8px;
     font-size: 12.5px; font-weight: 600; text-align: left; white-space: nowrap;
@@ -269,15 +283,7 @@
 
   <!-- 관리자 전용 화면 -->
   <div id="adminShell" hidden>
-    <div class="card" id="section-bootstrap">
-      <h2>관리자 uid 등록 (1회성)</h2>
-      <p class="hint">
-        09번 — 관리자 판별을 이메일 문자열 비교에서 uid 기반 공유 노드로 옮기는 작업의 첫 단계입니다.
-        지금 로그인된 관리자 계정의 uid를 adminCenter/adminUids에 등록합니다. 이미 등록됐다면 다시 눌러도 안전합니다.
-      </p>
-      <button id="bootstrapAdminUidBtn" class="perm-refresh-btn" type="button">내 uid 등록하기</button>
-    </div>
-
+    <h2 class="card-group-header">신원·권한</h2>
     <div class="card" id="section-user-search">
       <h2>유저 검색/상세 조회</h2>
       <p class="hint">
@@ -305,6 +311,33 @@
       </div>
     </div>
 
+    <div class="card" id="section-verification">
+      <h2>인증 스트리머 관리</h2>
+      <p class="hint">
+        스트리머 주식시장·스트리머 배팅시장 양쪽의 인증 대기 신청과 공유 인증 목록을 한 화면에서 봅니다.
+        승인·거절·해제는 각 게임의 기존 처리 로직을 그대로 호출합니다(새 로직 아님).
+      </p>
+      <button id="verificationRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <h3 class="subhead">대기 중인 신청</h3>
+      <div id="verificationPendingList"></div>
+      <h3 class="subhead">인증된 스트리머</h3>
+      <div id="verificationVerifiedList"></div>
+    </div>
+
+    <div class="card" id="section-permission-delegation">
+      <h2>인증 스트리머 권한 위임</h2>
+      <p class="hint">
+        여기서 체크한 권한은 <b>인증된 스트리머 전원에게 동일하게</b> 부여됩니다(스트리머별 개별 설정이 아님).
+        관리자는 이 목록과 무관하게 항상 모든 권한을 가집니다.
+      </p>
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+        <button id="killswitchBtn" type="button" style="background:none; border:1px solid #e2554f; color:#e2554f; border-radius:6px; padding:6px 12px; font-size:12.5px; cursor:pointer;">즉시 회수 킬스위치</button>
+        <span id="killswitchStatus" class="hint" style="margin:0;"></span>
+      </div>
+      <div id="permissionEditList"></div>
+    </div>
+
+    <h2 class="card-group-header">모니터링</h2>
     <div class="card" id="section-stats">
       <h2>전체 통계 요약·이상 거래 모니터링</h2>
       <p class="hint">
@@ -347,6 +380,17 @@
       <div id="galleryStatsList" style="margin-top:12px;"></div>
     </div>
 
+    <div class="card" id="section-audit-log">
+      <h2>감사 로그</h2>
+      <p class="hint">
+        배팅시장의 기존 처리 내역과 주식시장의 관리 처리 내역(현재는 스트리머 인증 관련
+        액션만 기록 중)을 합쳐서 시간순으로 보여줍니다. 최근 100건.
+      </p>
+      <button id="auditRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="auditLogList"></div>
+    </div>
+
+    <h2 class="card-group-header">검수·승인</h2>
     <div class="card" id="section-review-queue">
       <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
       <p class="hint">
@@ -394,29 +438,7 @@
       <div id="marketManageList"></div>
     </div>
 
-    <div class="card" id="section-verification">
-      <h2>인증 스트리머 관리</h2>
-      <p class="hint">
-        스트리머 주식시장·스트리머 배팅시장 양쪽의 인증 대기 신청과 공유 인증 목록을 한 화면에서 봅니다.
-        승인·거절·해제는 각 게임의 기존 처리 로직을 그대로 호출합니다(새 로직 아님).
-      </p>
-      <button id="verificationRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
-      <h3 class="subhead">대기 중인 신청</h3>
-      <div id="verificationPendingList"></div>
-      <h3 class="subhead">인증된 스트리머</h3>
-      <div id="verificationVerifiedList"></div>
-    </div>
-
-    <div class="card" id="section-audit-log">
-      <h2>감사 로그</h2>
-      <p class="hint">
-        배팅시장의 기존 처리 내역과 주식시장의 관리 처리 내역(현재는 스트리머 인증 관련
-        액션만 기록 중)을 합쳐서 시간순으로 보여줍니다. 최근 100건.
-      </p>
-      <button id="auditRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
-      <div id="auditLogList"></div>
-    </div>
-
+    <h2 class="card-group-header">콘텐츠·현황</h2>
     <div class="card" id="section-content-freeze">
       <h2>게임 콘텐츠 동결 상태</h2>
       <p class="hint">
@@ -438,6 +460,7 @@
       <div id="promotedContentList" style="margin-top:12px;"></div>
     </div>
 
+    <h2 class="card-group-header">사이트 설정</h2>
     <div class="card" id="section-discord-webhook">
       <h2>디스코드 웹훅 검수 알림</h2>
       <p class="hint">
@@ -453,17 +476,13 @@
       </div>
     </div>
 
-    <div class="card" id="section-permission-delegation">
-      <h2>인증 스트리머 권한 위임</h2>
+    <div class="card" id="section-bootstrap">
+      <h2>관리자 uid 등록 (1회성)</h2>
       <p class="hint">
-        여기서 체크한 권한은 <b>인증된 스트리머 전원에게 동일하게</b> 부여됩니다(스트리머별 개별 설정이 아님).
-        관리자는 이 목록과 무관하게 항상 모든 권한을 가집니다.
+        09번 — 관리자 판별을 이메일 문자열 비교에서 uid 기반 공유 노드로 옮기는 작업의 첫 단계입니다.
+        지금 로그인된 관리자 계정의 uid를 adminCenter/adminUids에 등록합니다. 이미 등록됐다면 다시 눌러도 안전합니다.
       </p>
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
-        <button id="killswitchBtn" type="button" style="background:none; border:1px solid #e2554f; color:#e2554f; border-radius:6px; padding:6px 12px; font-size:12.5px; cursor:pointer;">즉시 회수 킬스위치</button>
-        <span id="killswitchStatus" class="hint" style="margin:0;"></span>
-      </div>
-      <div id="permissionEditList"></div>
+      <button id="bootstrapAdminUidBtn" class="perm-refresh-btn" type="button">내 uid 등록하기</button>
     </div>
   </div>
 
@@ -2330,23 +2349,26 @@
   // 19번 — 세션 빠른 이동. soop-stock-market의 QUICKNAV_ITEMS/renderQuickNav
   // 패턴을 그대로 이식했다 - 카드가 추가/제거될 때마다 이 배열도 사람이 같이
   // 고쳐야 한다(자동으로 늘어나지 않음, soop-stock-market도 동일한 한계).
+  // 23번 — 카드 그룹(신원·권한/모니터링/검수·승인/콘텐츠·현황/사이트 설정)과 목차
+  // 순서를 일치시킨다. group이 있는 항목은 목차에서도 그룹 제목을 겸해 보여준다
+  // (soop-stock-market의 평평한 27줄 목록보다 덜 부담스럽게).
   const QUICKNAV_ITEMS = [
-    { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
-    { id: 'section-user-search', label: '🔍 유저 검색/조회', role: 'admin' },
-    { id: 'section-stats', label: '📊 전체 통계', role: 'admin' },
+    { id: 'section-user-search', label: '🔍 유저 검색/조회', role: 'admin', group: '신원·권한' },
+    { id: 'section-verification', label: '🎙️ 인증 스트리머 관리', role: 'admin' },
+    { id: 'section-permission-delegation', label: '🗝️ 권한 위임', role: 'admin' },
+    { id: 'section-stats', label: '📊 전체 통계', role: 'admin', group: '모니터링' },
     { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin' },
     { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin' },
-    { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin' },
+    { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin' },
+    { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
-    { id: 'section-verification', label: '🎙️ 인증 스트리머 관리', role: 'admin' },
-    { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin' },
-    { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin' },
-    { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin' },
+    { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
-    { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin' },
-    { id: 'section-permission-delegation', label: '🗝️ 권한 위임', role: 'admin' },
+    { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
+    { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
+    { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin' },
     { id: 'section-granted-permissions', label: '🗝️ 부여받은 권한', role: 'streamer' },
     { id: 'section-chat', label: '💬 채팅', role: 'shared' },
   ];
@@ -2364,7 +2386,10 @@
       return item.role === role || item.role === 'shared';
     });
     quicknavEl.innerHTML = '<div class="quicknav-title">🧭 빠른 이동</div>' +
-      items.map(function (item) { return '<button type="button" data-target="' + item.id + '">' + item.label + '</button>'; }).join('');
+      items.map(function (item) {
+        const groupHtml = item.group ? '<div class="quicknav-group">' + item.group + '</div>' : '';
+        return groupHtml + '<button type="button" data-target="' + item.id + '">' + item.label + '</button>';
+      }).join('');
     quicknavEl.querySelectorAll('button[data-target]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const target = document.getElementById(btn.dataset.target);
