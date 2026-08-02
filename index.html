@@ -217,7 +217,11 @@
   .promoted-chip button:hover { color: #e2554f; background: rgba(226,85,79,0.14); }
 
   /* 21번 — 배팅시장 마켓 관리 */
-  .market-status-tag {
+  /* .verif-info span { display:block } 규칙이 명시성(0,1,1)에서 이 규칙(0,1,0)을
+     이겨서 상태 태그가 알약이 아니라 풀너비 막대로 렌더링되던 버그 — 조상 클래스를
+     붙여 명시성을 맞춘다 */
+  .verif-info .market-status-tag {
+    display: inline-block; width: auto; margin-top: 0;
     font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px;
   }
   .market-status-tag.open { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
@@ -228,12 +232,31 @@
     border: 1px solid #262b33; border-radius: 6px; font-size: 12.5px; cursor: pointer;
   }
   .market-outcome-option.selected { border-color: #d9a441; background: rgba(217,164,65,0.08); }
+  .market-outcome-option input[type="radio"] { accent-color: #d9a441; }
   .market-countdown { color: #d9a441; font-size: 11.5px; display: block; margin: 4px 0; }
   .market-reason-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
   .market-reason-row select {
     background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
     padding: 6px 8px; border-radius: 6px; font-size: 12px; max-width: 220px;
   }
+  /* 마켓 관리·검수 카드의 액션 줄 — 브라우저 기본 버튼이 그대로 노출돼 있던 부분을
+     .verif-actions와 같은 언어로 통일 (다만 이 줄은 flex-wrap이 필요해 별도 클래스로 둠) */
+  .market-action-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .market-action-row .override-label {
+    font-size: 11.5px; color: #8b93a1; display: flex; gap: 5px; align-items: center;
+  }
+  .market-action-row .override-label input[type="checkbox"] { accent-color: #d9a441; }
+  .market-action-row button, .market-reason-row button {
+    background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
+    padding: 6px 13px; border-radius: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  }
+  .market-action-row button:hover, .market-reason-row button:hover { border-color: #d9a441; }
+  .market-action-row button.primary { background: #d9a441; color: #1a1005; border: none; }
+  .market-action-row button.primary:hover { background: #e6b25a; }
+  .market-action-row button.danger, .market-reason-row button.danger {
+    background: none; border: 1px solid #e2554f; color: #e2554f;
+  }
+  .market-action-row button.danger:hover, .market-reason-row button.danger:hover { background: rgba(226,85,79,0.12); }
 
   .game-row {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -1875,13 +1898,11 @@
         '<div class="verif-info" style="flex:1 1 100%;"><b>' + escapeHtml(m.title) + '</b>' +
         '<span>' + (MARKET_TYPE_LABEL[m.type] || m.type) + ' · ' + escapeHtml(marketStreamerText(m)) +
         ' · 추천 ' + likeCount + '/10' + (passed ? ' (기준 충족)' : ' (기준 미달)') + '</span></div>' +
-        '<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; flex:1 1 100%; margin-top:6px;">' +
-        '<label style="font-size:11.5px; color:#8b93a1; display:flex; gap:4px; align-items:center;">' +
-        '<input type="checkbox" class="override-likes"> 추천수 미달 강제승인</label>' +
-        '<label style="font-size:11.5px; color:#8b93a1; display:flex; gap:4px; align-items:center;">' +
-        '<input type="checkbox" class="override-participants"> 참가자 미달 허용</label>' +
-        '<button class="approve" type="button">승인</button>' +
-        '<button class="reject" type="button">반려</button>' +
+        '<div class="market-action-row" style="flex:1 1 100%; margin-top:6px;">' +
+        '<label class="override-label"><input type="checkbox" class="override-likes"> 추천수 미달 강제승인</label>' +
+        '<label class="override-label"><input type="checkbox" class="override-participants"> 참가자 미달 허용</label>' +
+        '<button class="approve primary" type="button">승인</button>' +
+        '<button class="reject danger" type="button">반려</button>' +
         '</div>';
       row.querySelector('.approve').addEventListener('click', function () {
         const overrideLikes = row.querySelector('.override-likes').checked;
@@ -1915,7 +1936,7 @@
       '<select id="' + selectId + '">' +
       reasons.map(function (r) { return '<option value="' + escapeHtml(r) + '">' + escapeHtml(r) + '</option>'; }).join('') +
       '</select>' +
-      '<button class="reason-confirm" type="button">' + label + ' 확정</button>' +
+      '<button class="reason-confirm danger" type="button">' + label + ' 확정</button>' +
       '<button class="reason-cancel" type="button">취소</button>';
     reasonRow.querySelector('.reason-confirm').addEventListener('click', function () {
       const reason = document.getElementById(selectId).value;
@@ -1975,13 +1996,12 @@
         '<span>' + (MARKET_TYPE_LABEL[m.type] || m.type) + ' · ' + escapeHtml(marketStreamerText(m)) + '</span></div>' +
         '<div class="market-outcome-list" style="flex:1 1 100%;">' + outcomesHtml + '</div>' +
         '<span class="market-countdown" style="flex:1 1 100%; display:none;"></span>' +
-        '<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; flex:1 1 100%;">' +
-        '<label style="font-size:11.5px; color:#8b93a1; display:flex; gap:4px; align-items:center;">' +
-        '<input type="checkbox" class="override-participants"' + (m.minParticipantsOverride ? ' checked' : '') + '> 참가자 미달 허용</label>' +
-        '<button class="judge" type="button">' + (m.status === 'pendingSettlement' ? '판정 변경' : '판정하기') + '</button>' +
-        (m.status === 'pendingSettlement' ? '<button class="cancel-judgment" type="button" style="border-color:#e2554f; color:#e2554f;">판정 취소</button>' : '') +
+        '<div class="market-action-row" style="flex:1 1 100%;">' +
+        '<label class="override-label"><input type="checkbox" class="override-participants"' + (m.minParticipantsOverride ? ' checked' : '') + '> 참가자 미달 허용</label>' +
+        '<button class="judge primary" type="button">' + (m.status === 'pendingSettlement' ? '판정 변경' : '판정하기') + '</button>' +
+        (m.status === 'pendingSettlement' ? '<button class="cancel-judgment danger" type="button">판정 취소</button>' : '') +
         (m.status === 'open' ? '<button class="close-early" type="button">조기 마감</button>' : '') +
-        '<button class="void" type="button" style="border-color:#e2554f; color:#e2554f;">무효 처리</button>' +
+        '<button class="void danger" type="button">무효 처리</button>' +
         '</div>' +
         '<div class="market-reason-row" style="display:none; flex:1 1 100%;"></div>';
 
