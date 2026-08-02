@@ -425,9 +425,9 @@
       <td>soop-stock-market 관리자 페이지의 우측 고정 목차 패널을 이식, 카드 16개에 역할별(admin/streamer/shared) 필터링 적용. 19번에 실행 결과 기록</td>
     </tr>
     <tr>
-      <td><strong>높음</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 정지계정 관리</td>
-      <td>StreamBet-Market에서 정지된 uid가 같은 로그인 세션(03번)으로 soop-stock-market에선 그대로 활동 가능 — 제재가 새는 보안 문제. soop-stock-market엔 계정 정지 개념 자체가 없음. 20번에서 상세 설계</td>
+      <td>공유 원장(bannedAccounts)으로 게임별 정지를 기본, 전체 게임 정지는 admin-center에서만 격상. soop-stock-market에 assertNotBanned 신설해 14개 파일 17개 함수에 적용 - 제재가 새던 보안 구멍 해소. 20번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -456,6 +456,10 @@
 1단계 — 신원 허브 ✅ 완료
    16 유저 검색/상세 조회  ✅ searchSeriesUser + 배팅시장·주식시장 병렬 조회
    20-1단계 정지계정 관리  ✅ 16번 화면에 정지/해제 버튼 연결 완료
+   20-2단계 soop-stock-market 신규 정지 가드 ✅ 완료 — assertNotBanned 신설,
+                            14개 파일 17개 함수에 적용, 공유 원장(bannedAccounts)
+                            으로 StreamBet-Market과 통합. 게임별 정지가 기본,
+                            전체 게임 정지는 admin-center에서만 격상(07번과 같은 결)
 
 2단계 — 모니터링 (읽기 전용이라 상대적으로 안전)
    주식시장 감사 로그 확장 ✅ 완료(뮤테이션 39개 자동 기록)
@@ -488,7 +492,7 @@
 
 6단계 — 보류·미정 (사용자가 명시적으로 미룬 것 포함)
    콘텐츠 동결 실제 연동(보류 지시됨), 미드나잇 마트런/절대광고 온보딩(보류 지시됨),
-   grantAchievement 비대칭 수정(사소함), 20-2단계 soop-stock-market 신규 정지 가드(큰 작업)</div>
+   grantAchievement 비대칭 수정(사소함)</div>
   <div class="callout"><b>이 순서를 뒤집어도 되는 예외</b> — 0·1단계는 다른 모든 걸 뒷받침하는 기반이라 순서를 지키는 게 안전하지만, 2·3·5단계 안에서의 항목 순서는 실제로 어떤 사고가 먼저 터지느냐·어떤 카드가 더 급하게 필요해지느냐에 따라 바뀌어도 무방하다. 4단계(킬스위치→카탈로그)만은 순서를 바꾸면 안 된다 — 되돌릴 방법 없이 권한이 먼저 풀리는 상태가 생기기 때문이다.</div>
   <div class="callout warn"><b>24번 중 하나는 더 당겨도 된다</b> — 24번이 감시하는 RTDB 경로들은 admin-center의 카드 유무와 무관하게 <strong>지금 이 순간에도 이미 쓰이고 있다</strong>. 특히 <code>presetMergeFailures</code>(13번에서 지목한 유일한 CLI 전용 사각지대)는 다른 어떤 단계도 먼저 끝날 필요 없이 <strong>지금 바로</strong> 웹훅 하나만 연결해도 값어치가 있다 — 3단계까지 기다리지 않고 0단계와 병행해도 무방한 유일한 예외로 취급할 것.</div>
 </section>
@@ -963,8 +967,11 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">20</span><h2>통합 관리 센터 — 정지계정 관리 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">20</span><h2>통합 관리 센터 — 정지계정 관리 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: 악성 유저를 정지시키는 기능을 통합 관리 센터에서 다루고, 게임 간에 정지 효력이 새는 지점을 막는다. 이 문서의 다른 항목들과 달리 <strong>편의 문제가 아니라 제재 회피가 가능한 보안 문제</strong>라 우선순위를 높게 잡는다.</p>
+  <div class="callout"><b>실행 결과 — "전체 게임 정지 vs 게임별 정지" 정책 결정</b> — 실제 게임업계 관행(넥슨·넷마블 등은 이용정지를 게임 단위로 하고, 결제사기·다중계정 어뷰징·명의도용처럼 신원 단위로 명백히 심각한 사안만 계정 전체로 격상)을 참고해 <strong>게임별 정지를 기본값</strong>으로 정했다. 공유 원장 <code>bannedAccounts/{uid}</code>에 <code>games/{gameId}</code>(게임별 정지)와 <code>all</code>(전체 게임 정지, 신규 게임도 자동 포함) 두 계층을 두고, 각 게임의 기존 정지 버튼은 그대로 자기 게임만 건드리며, "전체 게임 정지"로 격상하는 건 admin-center 전용 <code>banAccountAllGames</code>/<code>unbanAccountAllGames</code>만 할 수 있게 분리했다 — 07번 위임 권한 카탈로그와 같은 결(기본은 좁게, 심각할 때만 넓힌다).</div>
+  <div class="callout"><b>실행 결과 — 2단계(soop-stock-market 실제 차단 효력) 구현</b> — <code>common.js</code>에 <code>assertNotBanned(db, auth)</code>를 신설해 <code>requireNotInMaintenance</code>가 이미 호출되던 모든 자리(14개 파일, 17개 함수 — 매매·복권·플레이타임·출석·보물상자·각종 셀프 신청 등 가치가 오가는 진입부 전부)에 나란히 추가했다. StreamBet-Market의 <code>assertNotBanned(uid)</code>도 내부 구현만 <code>bettingMarket/bannedAccounts</code> 대신 공유 원장을 보도록 바꿔서, 호출부(15개 함수) 코드는 한 줄도 안 건드리고 동작만 바꿨다. <code>banAccount</code>/<code>unbanAccount</code>(soop-stock-market은 <code>adminAction</code> 디스패처의 새 케이스, StreamBet-Market은 기존 함수 내부 경로만 교체)는 각자 <code>games/{자기gameId}</code>만 쓰고 지운다.</div>
+  <div class="callout warn"><b>기존 데이터 이전</b> — <code>bettingMarket/bannedAccounts</code>에 쌓인 기존 정지 이력은 admin-center의 <code>migrateBannedAccounts</code>(멱등, 같은 uid 키 존재 여부로 판단)로 공유 원장의 <code>games/bettingMarket</code>로 옮긴다 - CLI 직접 쓰기 대신 검증된 함수 경로를 거치도록, 유저 검색 카드의 버튼으로 관리자가 직접 실행한다.</div>
   <h3>현재 상태</h3>
   <table>
     <tr><th>저장소</th><th>있는 것</th><th>비고</th></tr>

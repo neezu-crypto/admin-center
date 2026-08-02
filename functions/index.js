@@ -779,8 +779,79 @@ const getGalleryStats = onCall(async (request) => {
   return { presets: presets };
 });
 
+// 20번 2단계 — 정지계정 관리. 게임별 정지(각 게임의 기존 banAccount/unbanAccount)가
+// 기본이고, 여기 두 함수는 신원 단위로 명백히 심각한 사안(다중계정 어뷰징, 결제
+// 사기 등)만 관리자가 명시적으로 "전체 게임 정지"로 격상시키는 전용 통로다(07번
+// 위임 권한 카탈로그처럼 기본은 좁게 두고 필요할 때만 넓히는 결). 공유 원장
+// bannedAccounts/{uid}의 all* 필드만 건드리고, 개별 게임의 games/{gameId}는
+// 그대로 둔다 - 전체 정지를 해제해도 개별 게임 정지가 있었다면 그건 남는다.
+const banAccountAllGames = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const adminName = request.auth.token.name || request.auth.token.email;
+  const { uid, reason } = request.data || {};
+  if (!uid) throw new HttpsError('invalid-argument', '대상 uid가 필요합니다.');
+  if (!reason || !reason.trim()) throw new HttpsError('invalid-argument', '정지 사유를 입력해주세요.');
+  const db = getDatabase();
+  await db.ref('bannedAccounts/' + uid).update({
+    all: true,
+    allReason: reason.trim(),
+    allBannedAt: Date.now(),
+    allBannedBy: adminUid,
+    allBannedByName: adminName,
+  });
+  await logToAdminAuditLog(db, request, '전체 게임 정지', uid + ' · ' + reason.trim());
+  return { ok: true };
+});
+
+const unbanAccountAllGames = onCall(async (request) => {
+  await requireAdmin(request);
+  const { uid } = request.data || {};
+  if (!uid) throw new HttpsError('invalid-argument', '대상 uid가 필요합니다.');
+  const db = getDatabase();
+  await db.ref('bannedAccounts/' + uid).update({
+    all: null,
+    allReason: null,
+    allBannedAt: null,
+    allBannedBy: null,
+    allBannedByName: null,
+  });
+  await logToAdminAuditLog(db, request, '전체 게임 정지 해제', uid);
+  return { ok: true };
+});
+
+// bettingMarket/bannedAccounts에 쌓인 기존 정지 이력을 공유 원장으로 1회 이전한다.
+// games.bettingMarket이 이미 있으면 건너뛰므로(멱등) 여러 번 눌러도 안전하다.
+const migrateBannedAccounts = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const oldSnap = await db.ref('bettingMarket/bannedAccounts').get();
+  const oldData = oldSnap.val() || {};
+  const uids = Object.keys(oldData);
+  const newSnaps = await Promise.all(uids.map(function (uid) {
+    return db.ref('bannedAccounts/' + uid + '/games/bettingMarket').get();
+  }));
+  const updates = {};
+  let migratedCount = 0;
+  uids.forEach(function (uid, i) {
+    if (newSnaps[i].exists()) return;
+    const old = oldData[uid];
+    updates['bannedAccounts/' + uid + '/games/bettingMarket'] = {
+      reason: old.reason || '',
+      bannedAt: old.bannedAt || Date.now(),
+      bannedBy: old.bannedBy || null,
+      bannedByName: old.bannedByName || '',
+    };
+    migratedCount += 1;
+  });
+  if (migratedCount > 0) await db.ref().update(updates);
+  return { migratedCount: migratedCount };
+});
+
 module.exports = {
   getGalleryStats,
+  banAccountAllGames,
+  unbanAccountAllGames,
+  migrateBannedAccounts,
   getAdminCenterState,
   setAdminCenterPermission,
   revokeAllStreamerPermissions,
