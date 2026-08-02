@@ -410,9 +410,9 @@
       <td><code>searchSeriesUser</code>(부분 검색, 신규) + 배팅시장·주식시장 기존 조회 함수 병렬 호출로 화면 구성. 정지/해제(20번 1단계)까지 연결. 16번에 실행 결과 기록</td>
     </tr>
     <tr>
-      <td><strong>낮음</strong> (이미 동작 중인 걸 넓히는 작업)</td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 관리자·인증 스트리머 전용 채팅</td>
-      <td>StreamBet-Market에 이미 완성된 기능을 통합 관리 센터에서도 접근 가능하게. 17번에서 상세 설계</td>
+      <td>StreamBet-Market의 기존 채널(<code>sendAdminChatMessage</code>/<code>bettingMarket/adminChat</code>)을 그대로 재사용, 새 함수/노드 없이 UI만 추가. 17번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -480,7 +480,8 @@
 
 5단계 — 이미 잘 되는 것 넓히기 / 편의 기능 (진행 중)
    08 devbar 구성           ✅ 완료 — devbarLinks 노드 + 새 링크 추가 UI(무배포 확장 가능)
-   17 채팅, 22 게시글 홍보 현황,
+   17 채팅                  ✅ 완료 — 기존 채널 재사용, 새 함수/RTDB 노드 없이 UI만 추가
+   22 게시글 홍보 현황,
    19 세션 빠른 이동        → 카드가 어느 정도 쌓인 뒤라야 목차의 진가가 생긴다
    21 배팅시장 마켓 관리    → 이 목록에서 실익이 가장 낮다고 21번에서 이미 밝힘
 
@@ -880,8 +881,9 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">17</span><h2>통합 관리 센터 — 관리자·인증 스트리머 전용 채팅 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">17</span><h2>통합 관리 센터 — 관리자·인증 스트리머 전용 채팅 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: 관리자와 인증 스트리머끼리 실시간으로 소통하는 채팅을 통합 관리 센터에서도 쓸 수 있게 한다. 이 문서의 다른 항목과 달리 <strong>이미 완성된 기능을 넓히는 작업</strong>이라는 점이 다르다.</p>
+  <div class="callout"><b>실행 결과</b> — A안(기존 채널 재사용)대로 구현했다. admin-center의 <code>sendAdminChatMessageFn</code>이 StreamBet-Market이 배포한 <code>sendAdminChatMessage</code>를 그대로 호출하고, <code>bettingMarket/adminChat</code>을 <code>limitToLast(200)</code>으로 직접 구독한다(js/admin-chat.js와 동일한 렌더링 방식 — column-reverse, 아바타 폴백, role 태그). 새 함수·새 RTDB 노드·규칙 변경이 전혀 없어 admin-center의 <code>index.html</code> 하나만 수정하면 끝났다. 관리자 전용도 인증 스트리머 전용도 아닌, <strong>둘 다 접근하는 최초의 공용 화면</strong>이라 기존 <code>adminShell</code>/<code>streamerShell</code> 밖에 새 <code>sharedShell</code>을 두고 두 역할 모두에서 보이게 했다.</div>
   <h3>현재 상태</h3>
   <p>StreamBet-Market에 이미 완전한 형태로 구현돼 있다.</p>
   <ul>

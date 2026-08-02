@@ -113,6 +113,41 @@
   }
   .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: ui-monospace, monospace; }
 
+  /* 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market 관리 탭과 동일하게
+     최신 메시지가 아래에 오도록 column-reverse를 쓴다. */
+  .admin-chat-list {
+    display: flex; flex-direction: column-reverse; gap: 10px;
+    max-height: 420px; overflow-y: auto; padding: 4px 4px 4px 0; margin: 0 0 10px;
+    list-style: none;
+  }
+  .admin-chat-msg { display: flex; gap: 8px; align-items: flex-start; }
+  .admin-chat-msg.mine { flex-direction: row-reverse; }
+  .admin-chat-avatar, .admin-chat-avatar-fallback {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  }
+  .admin-chat-avatar { object-fit: cover; }
+  .admin-chat-avatar-fallback {
+    display: flex; align-items: center; justify-content: center;
+    background: #262b33; color: #8b93a1; font-size: 12px; font-weight: 700;
+  }
+  .admin-chat-bubble {
+    background: #191d24; border: 1px solid #262b33; border-radius: 8px;
+    padding: 8px 10px; font-size: 12.5px; max-width: 80%; min-width: 0;
+  }
+  .admin-chat-msg-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; flex-wrap: wrap; }
+  .admin-chat-msg-head b { font-size: 12.5px; }
+  .admin-chat-role {
+    font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 700;
+  }
+  .admin-chat-role.admin { background: rgba(217,164,65,0.14); color: #d9a441; border: 1px solid rgba(217,164,65,0.35); }
+  .admin-chat-role.streamer { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
+  .admin-chat-msg-text { color: #eef0f2; word-break: break-word; }
+  .admin-chat-input-row { display: flex; gap: 8px; }
+  .admin-chat-input-row input {
+    flex: 1; background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
+    padding: 8px 10px; border-radius: 6px; font-size: 12.5px;
+  }
+
   .game-row {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
     padding: 14px 2px; border-bottom: 1px solid #1c2027;
@@ -350,6 +385,24 @@
       <div id="permissionViewList"></div>
     </div>
   </div>
+
+  <!-- 17번 — 관리자·인증 스트리머 둘 다 접근하는 공용 화면. StreamBet-Market이 이미
+       배포한 sendAdminChatMessage/bettingMarket-adminChat을 그대로 재사용한다(06번
+       원칙 — 새 채널을 따로 만들지 않음). -->
+  <div id="sharedShell" hidden>
+    <div class="card">
+      <h2>관리자·인증 스트리머 채팅</h2>
+      <p class="hint">
+        StreamBet-Market 관리 탭의 채팅과 동일한 채널입니다(대화가 그대로 이어집니다).
+        최근 200개까지만 표시됩니다.
+      </p>
+      <ul id="adminChatMessages" class="admin-chat-list"></ul>
+      <div class="admin-chat-input-row">
+        <input id="adminChatInput" type="text" maxlength="300" placeholder="메시지를 입력하세요...">
+        <button id="adminChatSendBtn" class="perm-refresh-btn" type="button">전송</button>
+      </div>
+    </div>
+  </div>
 </main>
 
 <script type="module">
@@ -365,7 +418,7 @@
   // 큐는 05번 관례대로 관리자 uid 기준으로 이미 .read가 열려 있어 직접 구독이
   // 가능하다 — 쓰기는 여전히 전부 Cloud Functions를 통해서만 한다).
   import {
-    getDatabase, ref, onValue, get,
+    getDatabase, ref, onValue, get, query, limitToLast,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
 
   // 07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
@@ -392,6 +445,10 @@
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
   const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
   const revokeAllStreamerPermissionsFn = httpsCallable(functions, 'revokeAllStreamerPermissions');
+  // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market이 이미 배포한 함수를 그대로
+  // httpsCallable로 부른다(06번 원칙 — codebase가 달라도 같은 프로젝트 안에서는
+  // 함수 이름만 맞으면 호출 가능, 24번에서 재확인된 사실).
+  const sendAdminChatMessageFn = httpsCallable(functions, 'sendAdminChatMessage');
   const setDevbarLinkFn = httpsCallable(functions, 'setDevbarLink');
   const deleteDevbarLinkFn = httpsCallable(functions, 'deleteDevbarLink');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
@@ -451,6 +508,10 @@
   const gateLoginBtn = document.getElementById('gateLoginBtn');
   const adminShellEl = document.getElementById('adminShell');
   const streamerShellEl = document.getElementById('streamerShell');
+  const sharedShellEl = document.getElementById('sharedShell');
+  const adminChatMessagesEl = document.getElementById('adminChatMessages');
+  const adminChatInputEl = document.getElementById('adminChatInput');
+  const adminChatSendBtn = document.getElementById('adminChatSendBtn');
   const permissionEditListEl = document.getElementById('permissionEditList');
   const permissionViewListEl = document.getElementById('permissionViewList');
   const killswitchBtn = document.getElementById('killswitchBtn');
@@ -1277,6 +1338,63 @@
     { path: 'relayRoomRequests', label: '중계방 신청', kind: 'relayRoom' },
   ];
 
+  // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market의 js/admin-chat.js와 동일한
+  // 패턴(limitToLast(200) 구독, column-reverse로 최신이 아래)을 그대로 재사용한다.
+  let adminChatSubscribed = false;
+  function startAdminChatSubscription() {
+    if (adminChatSubscribed) return;
+    adminChatSubscribed = true;
+    const q = query(ref(db, 'bettingMarket/adminChat'), limitToLast(200));
+    onValue(q, function (snap) {
+      const val = snap.val() || {};
+      const messages = Object.keys(val).map(function (k) { return val[k]; })
+        .sort(function (a, b) { return b.at - a.at; });
+      if (!messages.length) {
+        adminChatMessagesEl.innerHTML = '<li class="empty-state">아직 대화가 없습니다. 첫 메시지를 남겨보세요.</li>';
+        return;
+      }
+      const myUid = currentUser && currentUser.uid;
+      const atBottom = adminChatMessagesEl.scrollTop <= 40;
+      adminChatMessagesEl.innerHTML = messages.map(function (m) {
+        const roleTag = m.role === 'admin'
+          ? '<span class="admin-chat-role admin">관리자</span>'
+          : '<span class="admin-chat-role streamer">인증 스트리머</span>';
+        const mine = m.uid === myUid;
+        const avatarHtml = m.avatarUrl
+          ? '<img class="admin-chat-avatar" src="' + escapeHtml(m.avatarUrl) + '" alt="">'
+          : '<span class="admin-chat-avatar-fallback">' + escapeHtml((m.name || '?').charAt(0)) + '</span>';
+        return '<li class="admin-chat-msg' + (mine ? ' mine' : '') + '">' +
+          avatarHtml +
+          '<div class="admin-chat-bubble">' +
+          '<div class="admin-chat-msg-head"><b>' + escapeHtml(m.name) + '</b>' + roleTag +
+          '<span class="audit-time">' + new Date(m.at).toLocaleString('ko-KR') + '</span></div>' +
+          '<div class="admin-chat-msg-text">' + escapeHtml(m.text) + '</div></div></li>';
+      }).join('');
+      if (atBottom) adminChatMessagesEl.scrollTop = 0;
+    });
+  }
+
+  function sendAdminChatMessage() {
+    const text = adminChatInputEl.value.trim();
+    if (!text) return;
+    adminChatInputEl.disabled = true;
+    adminChatSendBtn.disabled = true;
+    sendAdminChatMessageFn({ text: text }).then(function () {
+      adminChatInputEl.value = '';
+    }).catch(function (err) {
+      console.error('채팅 전송 실패:', err);
+      window.alert('전송에 실패했습니다: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      adminChatInputEl.disabled = false;
+      adminChatSendBtn.disabled = false;
+      adminChatInputEl.focus();
+    });
+  }
+  adminChatSendBtn.addEventListener('click', sendAdminChatMessage);
+  adminChatInputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); sendAdminChatMessage(); }
+  });
+
   let reviewSubscriptionsStarted = false;
   function startReviewQueueSubscriptions() {
     if (reviewSubscriptionsStarted) return;
@@ -1635,6 +1753,7 @@
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
     streamerShellEl.hidden = role !== 'streamer';
+    sharedShellEl.hidden = role === 'none';
     roleBadgeEl.hidden = role === 'none';
     if (role === 'admin') {
       roleBadgeEl.textContent = '관리자';
@@ -1669,6 +1788,7 @@
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
     if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDevbarLinks(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); }
+    if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
   });
 </script>
 </body>
