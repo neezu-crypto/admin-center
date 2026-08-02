@@ -345,9 +345,9 @@
       <td><span class="chip">adminCenter/streamerPermissions</span> 체리피크 메커니즘은 만들어졌지만 <code>PERMISSION_CATALOG</code>가 비어있어 실제로 위임 중인 권한이 하나도 없다. 승인·거절·해제처럼 신원을 좌우하는 민감한 권한은 제외하고, 낮은 리스크 항목(공지 등록, 배너 검수 등)부터 후보로 검토</td>
     </tr>
     <tr>
-      <td><strong>낮음~중간</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>주식시장 감사 로그 확장</td>
-      <td>지금은 스트리머 인증 관련 액션 3개(승인·거절·해제)만 <span class="chip">adminAuditLog</span>에 기록 중. 주가 조정·배너·캐시충전 등 <span class="chip">adminAction</span>의 나머지 관리 액션(약 27개)까지 로깅 범위를 넓혀야 통합 관리 센터의 감사 로그 카드가 실제로 "전체" 로그가 된다</td>
+      <td><code>adminAction</code> 디스패처에서 뮤테이션 액션 39개를 자동으로 <span class="chip">adminAuditLog</span>에 기록하도록 확장(개별 함수 수정 대신 디스패처 레벨 처리). 배포·커밋 완료</td>
     </tr>
     <tr>
       <td><strong>낮음</strong> (보류 중)</td>
@@ -385,9 +385,9 @@
       <td>오늘/누적/재무 건전성/일간·주간·월간 통계 + 이상 거래 모니터링. 11번에서 상세 설계</td>
     </tr>
     <tr>
-      <td><strong>중간</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 유저 상품 구매 현황</td>
-      <td>게임별 구매 기록 통합 조회 + uid 기준 유저별 전체 구매 이력. 12번에서 상세 설계</td>
+      <td><code>getPurchaseOverview</code>로 게임별 구매 기록 12종 통합 조회 + uid 필터. 검증 과정에서 필드명 오류 다수(uid/requesterUid 혼동) 발견해 수정. 12번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong>중간~높음</strong></td>
@@ -405,9 +405,9 @@
       <td>soop-stock-market 전용, 무료 셀프 상장 신청. 승인 시 종목명 수정 재량 등 구매 승인과 다른 UX 필요. 15번에서 상세 설계</td>
     </tr>
     <tr>
-      <td><strong>높음</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 유저 검색/유저 상세 조회</td>
-      <td>04·05·12번 등 uid 기반 설계들을 실제로 쓰게 해주는 진입점. soop-stock-market은 uid를 몰라야 검색 자체가 안 되는 상태. 16번에서 상세 설계</td>
+      <td><code>searchSeriesUser</code>(부분 검색, 신규) + 배팅시장·주식시장 기존 조회 함수 병렬 호출로 화면 구성. 정지/해제(20번 1단계)까지 연결. 16번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong>낮음</strong> (이미 동작 중인 걸 넓히는 작업)</td>
@@ -453,13 +453,14 @@
    09 관리자 이메일 정리   ✅ 완료 — uid 기반(adminCenter/adminUids)으로 전환,
                             새로 짜는 함수들은 이제 이 패턴을 그대로 재사용하면 됨
 
-1단계 — 신원 허브
-   16 유저 검색/상세 조회  → 04·05·12·20번이 기대는 진입점, 먼저 있어야
-                            나머지가 실제로 쓸모 있어진다
-   20-1단계 정지계정 관리  → 16번 화면에 정지/해제 버튼만 얹으면 되는 수준이라 바로 이어붙임
+1단계 — 신원 허브 ✅ 완료
+   16 유저 검색/상세 조회  ✅ searchSeriesUser + 배팅시장·주식시장 병렬 조회
+   20-1단계 정지계정 관리  ✅ 16번 화면에 정지/해제 버튼 연결 완료
 
 2단계 — 모니터링 (읽기 전용이라 상대적으로 안전)
-   주식시장 감사 로그 확장, 10 접속자 분석, 11 전체 통계, 12 구매 현황
+   주식시장 감사 로그 확장 ✅ 완료(뮤테이션 39개 자동 기록)
+   12 구매 현황           ✅ 완료(getPurchaseOverview, 필드명 오류 다수 수정)
+   10 접속자 분석, 11 전체 통계 — 남음
 
 3단계 — 검수·승인 큐
    13 페이지별 검수, 14 구매 승인 검수, 15 종목 상장 관리
