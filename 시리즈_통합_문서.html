@@ -1127,6 +1127,63 @@
   </div>
 </section>
 
+<section>
+  <div class="sec-head"><span class="sec-num">25</span><h2>새 페이지/게임을 출시할 때마다 확인할 체크리스트</h2></div>
+  <p>지금까지 이 문서 곳곳에 흩어져 있던 "새 저장소를 이 시리즈에 편입시키려면 반드시 해야 하는 것"들을 한 곳에 모은다. 새 게임 하나를 만들 때마다 이 목록을 위에서부터 확인한다 — 항목 대부분은 미드나잇 마트런·절대 광고를 클릭하지 마 두 게임이 아직 "같은 오리진에 있지만 시리즈에는 편입 안 된" 상태인 이유이기도 하다(02·03번 참고).</p>
+  <table>
+    <tr><th>순서</th><th>항목</th><th>필수 여부</th><th>안 하면 생기는 일</th></tr>
+    <tr>
+      <td>1</td>
+      <td><b>firebaseConfig의 apiKey를 기존 값과 동일하게</b> (03번)</td>
+      <td><strong style="color:#e2554f;">필수</strong> (로그인 세션 공유가 필요하다면)</td>
+      <td>Firebase 콘솔에서 새로 발급받은 apiKey를 그대로 쓰면, 오리진(<code>neezu-crypto.github.io</code>)이 같아도 세션이 전혀 안 섞인다 — 다른 게임에 로그인해도 이 새 페이지는 다시 로그인해야 한다. appId는 이 메커니즘과 무관하니 새로 발급받은 값을 그대로 써도 된다.</td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><b>Cloud Functions 이름이 프로젝트 전체에서 안 겹치는지 확인</b> (02번)</td>
+      <td><strong style="color:#e2554f;">필수</strong></td>
+      <td><code>firebase functions:list --project soop-stock-market</code>로 기존 이름을 먼저 확인할 것. codebase를 격리해도(<code>presetgallery</code>·<code>admincenter</code>처럼) 실제 함수 이름공간은 프로젝트+리전 전체가 공유되므로, 겹치는 이름으로 배포하면 나중에 배포한 쪽이 기존 함수를 조용히 덮어쓴다(09번 마이그레이션 중 <code>whoAmI</code> 충돌로 실제 발생) — 흔한 이름(<code>whoAmI</code> 등)은 저장소를 특정하는 접두사를 붙인다(<code>stockWhoAmI</code>/<code>galleryWhoAmI</code>처럼).</td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><b>새 저장소가 자체 database.rules.json 사본을 갖는다면 3파일 동기화 대상에 추가</b> (05번)</td>
+      <td><strong style="color:#e2554f;">필수</strong> (그 저장소가 공유 RTDB 노드를 읽는다면)</td>
+      <td>원본은 StreamBet-Market 저장소. 새 사본을 만들었다면 앞으로 규칙을 바꿀 때마다 이 저장소도 <code>diff</code>로 동일한지 확인 후 배포하는 루틴에 포함시켜야 한다 — 과거 이 동기화가 깨져 한쪽 규칙이 다른 쪽에 없는 블록을 덮어쓴 사고가 있었다.</td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><b>devbar/topnav 로더 스크립트 추가 + 자기 gameId 지정</b> (08번)</td>
+      <td><strong style="color:#e2554f;">필수</strong> (devbar를 쓰는 페이지라면)</td>
+      <td><code>get(ref(db, 'devbarLinks'))</code> 조회 → 자기 gameId 제외 → order 정렬 → <code>data-game-id</code> 속성 붙여 그리기 → 마퀴가 있다면 <code>resize</code> dispatch, 이 로직을 새 페이지에도 넣어야 한다. <strong>반대 방향(기존 4개 페이지에 이 새 게임 링크가 보이게 하는 것)은 admin-center "devbar 구성"에서 gameId 하나만 추가하면 무배포로 끝난다</strong> — 코드가 필요한 쪽은 오직 새로 생기는 이 페이지 자신뿐. 빠뜨리면 자기 자신으로 가는 어색한 링크가 devbar에 나타난다(에러 없음, 눈에 안 띌 수 있음).</td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td><b>06번 GAME_CATALOG(admin-center/functions/index.js)에 한 줄 등록</b></td>
+      <td>선택 (콘텐츠 동결 상태·전체 통계에 이 게임을 포함시키려면 필요)</td>
+      <td>이 배열은 devbar와는 이제 무관하지만(08번, devbarLinks로 분리됨), "게임 콘텐츠 동결" 토글과 향후 통계 집계가 여전히 이 목록을 순회한다. 등록 안 하면 그 두 기능에서 이 게임이 계속 빠진 채로 남는다.</td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td><b>presence/{appId}/{uid} 하트비트 구현</b> (10번, appId는 GAME_CATALOG의 id와 동일하게)</td>
+      <td>선택 (접속자 분석·전체 통계에 잡히려면 필요)</td>
+      <td>안 하면 10번(접속자 분석)에서 이 게임이 계속 제외된다 — interior-3d-viewer가 지금 이 상태(의도적 스코프 축소로 기록돼 있음, 10번 참고). 나중에 추가해도 되는 항목이라 급하지 않다.</td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td><b>관리자 전용 기능이 있다면 whoAmI류 함수 + adminCenter/adminUids 확인</b> (09번)</td>
+      <td>선택 (그 게임에 자체 관리자 UI가 있을 때만)</td>
+      <td><code>requireAdmin</code> 패턴(uid 우선 확인, 필요시 이메일 폴백)을 재사용한다. 함수 이름은 2번 항목대로 다른 저장소와 안 겹치게 짓는다.</td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td><b>새 저장소에 CLAUDE.md 작성</b></td>
+      <td><strong style="color:#e2554f;">필수</strong> (Claude가 그 저장소를 다루게 될 거라면)</td>
+      <td>"구현 후 검증 필수" 지침, Cloud Functions 전체배포 위험 경고(<code>--only functions:이름</code>으로만 배포, 다른 저장소가 이미 배포해둔 함수를 삭제 대상으로 착각하지 않도록)를 반드시 포함시킨다 — 이미 4개 저장소 전부에 이 지침이 있다.</td>
+    </tr>
+  </table>
+  <div class="callout"><b>지금 시리즈 안에서 이 체크리스트가 아직 안 끝난 사례</b> — 미드나잇 마트런·절대 광고를 클릭하지 마는 devbar에 서로 링크는 걸려 있지만(4번 항목만 충족), 1·2·5·6·7번은 전혀 안 돼 있는 "같은 오리진에 있을 뿐인 독립 게임" 상태다(07번 표에 "미정"으로 남아있음).</div>
+</section>
+
 </div>
 
 <footer>STREAMER SERIES · CROSS-REPO ARCHITECTURE DOC</footer>
