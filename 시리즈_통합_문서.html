@@ -435,9 +435,9 @@
       <td>제안 검토·조기종료·판정·취소환불까지 StreamBet-Market에 이미 완결된 UI가 있음. admin-center로 옮길 실익부터 따져볼 것. 21번에서 상세 설계</td>
     </tr>
     <tr>
-      <td><strong>중간</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 게시글 홍보 현황</td>
-      <td>StreamBet-Market 전용 개념을 게임 공통 기능으로 확장(GAME_CATALOG 기반) — 앞으로 나올 게임도 자동 지원. 기존 데이터 이전 필요. 22번에서 상세 설계</td>
+      <td>StreamBet-Market 전용 개념을 GAME_CATALOG 기반 게임 공통 기능으로 확장, StreamBet-Market 쪽도 새 함수를 호출하도록 같이 이전(미러 방지). 22번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -481,7 +481,7 @@
 5단계 — 이미 잘 되는 것 넓히기 / 편의 기능 (진행 중)
    08 devbar 구성           ✅ 완료 — devbarLinks 노드 + 새 링크 추가 UI(무배포 확장 가능)
    17 채팅                  ✅ 완료 — 기존 채널 재사용, 새 함수/RTDB 노드 없이 UI만 추가
-   22 게시글 홍보 현황,
+   22 게시글 홍보 현황      ✅ 완료 — GAME_CATALOG 기반 확장, StreamBet-Market도 새 함수로 이전
    19 세션 빠른 이동        → 카드가 어느 정도 쌓인 뒤라야 목차의 진가가 생긴다
    21 배팅시장 마켓 관리    → 이 목록에서 실익이 가장 낮다고 21번에서 이미 밝힘
 
@@ -1024,8 +1024,10 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">22</span><h2>통합 관리 센터 — 게시글 홍보 현황 (설계, 게임 전체로 확장)</h2></div>
+  <div class="sec-head"><span class="sec-num">22</span><h2>통합 관리 센터 — 게시글 홍보 현황 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span> (게임 전체로 확장)</h2></div>
   <p>목표: StreamBet-Market에만 있는 "게시글 홍보 현황"(<code>promotedStreamers</code>) 개념을, 다른 기존 게임(soop-stock-market·interior-3d-viewer)과 <strong>앞으로 출시될 게임까지</strong> 게임을 가리지 않고 쓸 수 있는 통합 관리 센터 기능으로 만든다. 08번(devbar)·11번(통계)처럼 "게임별로 각자 만들지 말고 admin-center가 공통 틀을 소유"하는 패턴이다.</p>
+  <div class="callout"><b>실행 결과</b> — 제안한 구조 그대로 구현했다. <code>listPromotedContent</code>/<code>addPromotedContent</code>/<code>removePromotedContent</code> 3개 함수 + <code>adminCenter/promotedContent/{gameId}/{entryId}</code> 노드(Functions 전용) 배포 완료. "미러가 두 개 생기는" 문제를 피하기 위해 아래 경고대로 <strong>StreamBet-Market의 js/promoted-streamers.js도 함께 고쳐서</strong> 이제 자기 저장소의 옛 함수(<code>addPromotedStreamer</code>/<code>removePromotedStreamer</code>, 로컬 소스에서 삭제됨) 대신 admin-center의 새 함수를 직접 호출한다 — 17번 채팅과 동일한 "codebase가 달라도 함수 이름만 맞으면 호출 가능" 패턴. 기존 실시간 <code>onValue</code> 구독은 admin-center와 트레이드오프를 맞추기 위해 "액션 후 다시 조회" 방식으로 바뀌었다(개인 체크리스트라 실시간 동기화가 꼭 필요하지 않다고 판단). 기존 이력 이전은 <code>migratePromotedStreamers</code>(멱등, 같은 push 키 재사용으로 중복 이전 방지)를 관리자가 "게시글 홍보 현황" 카드의 버튼으로 직접 실행하는 방식으로 남겨뒀다 — CLI로 직접 RTDB에 쓰는 대신 검증된 함수 경로를 거치게 함.</div>
+  <div class="callout warn"><b>정리 필요 — 배포는 됐지만 아직 안 지운 것</b> — <code>addPromotedStreamer</code>/<code>removePromotedStreamer</code>는 로컬 소스에서 삭제됐지만, 이미 배포된 Cloud Function 자체는 아직 프로젝트에 남아있다(더 이상 어디서도 호출하지 않는 고아 상태). 지우려면 <code>firebase functions:delete addPromotedStreamer removePromotedStreamer --project soop-stock-market</code>를 명시적으로 실행해야 한다 — 다음에 이 저장소 함수를 만질 때 같이 처리할 것.</div>
   <h3>먼저 정확히 알아야 할 것 — 지금 있는 건 뭔가</h3>
   <p><code>bettingMarket/promotedStreamers</code>는 결제·승인이 전혀 없는 <strong>관리자 개인 체크리스트</strong>다. 관리자가 어떤 스트리머의 SOOP 방송국 게시판에 직접 홍보글을 올린 뒤, "이미 홍보했음"을 기록해 중복 게시를 막는 용도 — 인증 여부와 무관하게 아무 닉네임이나 등록 가능하다. <code>addPromotedStreamer</code>/<code>removePromotedStreamer</code>(관리자 전용)로 이미 구현돼 있고, <code>js/promoted-streamers.js</code>가 자동완성 입력 + 실시간 칩 목록 UI까지 완비돼 있다. soop-stock-market의 배너·핀은 "글"이 아니라 <strong>종목</strong>을 노출시키는 유료 기능이라 이것과는 방향이 반대(관리자가 밖에 홍보 vs 유저가 결제해서 노출을 삼)이고 이미 14번에서 다뤘으므로, 이 22번은 <code>promotedStreamers</code> 쪽 개념만 확장한다.</p>
   <div class="callout"><b>일반화가 쉬운 이유</b> — 이 기능엔 게임별로 다른 로직이 원래 하나도 없었다(결제 없음, 승인 없음, 대상 검증도 없음 — 그냥 자유 텍스트 닉네임 + 시각). 그래서 "게임마다 다른 처리"를 새로 설계할 필요 없이, <strong>어떤 게임이든 자유 텍스트 라벨 하나 + 시각</strong>만 있으면 그대로 재사용된다. 12번(구매 현황)이나 13번(검수)처럼 게임마다 데이터 형태가 달라 정규화가 필요했던 것과 다르게, 이건 원래부터 게임 중립적인 데이터였다.</div>

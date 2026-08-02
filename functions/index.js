@@ -325,6 +325,90 @@ const deleteDevbarLink = onCall(async (request) => {
   return { ok: true };
 });
 
+// 22번 — 게시글 홍보 현황(게임 전체로 확장). StreamBet-Market 전용이던
+// bettingMarket/promotedStreamers 개념을 GAME_CATALOG 어떤 게임이든 쓸 수 있는
+// 공용 노드로 옮긴다. 결제·승인·대상 검증이 전혀 없는 "자유 텍스트 라벨 + 시각"
+// 체크리스트라 게임별 로직 분기가 필요 없다(12번·13번과 달리 정규화 이슈가 없음).
+const PROMOTED_CONTENT_LABEL_MAX = 40;
+
+const listPromotedContent = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const snap = await db.ref('adminCenter/promotedContent').get();
+  const data = snap.val() || {};
+  const games = GAME_CATALOG.map(function (g) {
+    const gameData = data[g.id] || {};
+    const entries = Object.keys(gameData).map(function (id) {
+      return Object.assign({ id: id }, gameData[id]);
+    }).sort(function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+    return { id: g.id, name: g.name, entries: entries };
+  });
+  return { games: games };
+});
+
+const addPromotedContent = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const { gameId, label } = request.data || {};
+  const game = GAME_CATALOG.find(function (g) { return g.id === gameId; });
+  if (!game) throw new HttpsError('invalid-argument', '알 수 없는 게임입니다.');
+  const trimmedLabel = String(label || '').trim();
+  if (!trimmedLabel) throw new HttpsError('invalid-argument', '내용을 입력해주세요.');
+  if (trimmedLabel.length > PROMOTED_CONTENT_LABEL_MAX) {
+    throw new HttpsError('invalid-argument', PROMOTED_CONTENT_LABEL_MAX + '자 이하로 입력해주세요.');
+  }
+  const db = getDatabase();
+  const listRef = db.ref('adminCenter/promotedContent/' + gameId);
+  const existingSnap = await listRef.get();
+  const existing = existingSnap.val() || {};
+  const alreadyAdded = Object.keys(existing).some(function (key) { return existing[key].label === trimmedLabel; });
+  if (alreadyAdded) throw new HttpsError('failed-precondition', '이미 추가된 항목입니다.');
+  const ref = listRef.push();
+  await ref.set({ label: trimmedLabel, addedAt: Date.now(), addedBy: adminUid });
+  await logToAdminAuditLog(db, request, '게시글 홍보 현황 추가', game.name + ' - ' + trimmedLabel);
+  return { id: ref.key };
+});
+
+const removePromotedContent = onCall(async (request) => {
+  await requireAdmin(request);
+  const { gameId, entryId } = request.data || {};
+  const game = GAME_CATALOG.find(function (g) { return g.id === gameId; });
+  if (!game) throw new HttpsError('invalid-argument', '알 수 없는 게임입니다.');
+  if (!entryId) throw new HttpsError('invalid-argument', 'entryId가 필요합니다.');
+  const db = getDatabase();
+  const ref = db.ref('adminCenter/promotedContent/' + gameId + '/' + entryId);
+  const snap = await ref.get();
+  const entry = snap.val();
+  await ref.remove();
+  await logToAdminAuditLog(db, request, '게시글 홍보 현황 삭제', game.name + ' - ' + (entry ? entry.label : entryId));
+  return { status: 'removed' };
+});
+
+// bettingMarket/promotedStreamers에 이미 쌓인 이력을 새 공용 노드로 1회 이전한다.
+// 같은 push 키를 그대로 재사용해서 이전 여부를 판단하므로(새 노드에 그 키가 이미
+// 있으면 건너뜀) 여러 번 눌러도 안전(멱등)하다.
+const migratePromotedStreamers = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const [oldSnap, newSnap] = await Promise.all([
+    db.ref('bettingMarket/promotedStreamers').get(),
+    db.ref('adminCenter/promotedContent/bettingMarket').get(),
+  ]);
+  const oldData = oldSnap.val() || {};
+  const newData = newSnap.val() || {};
+  const updates = {};
+  let migratedCount = 0;
+  Object.keys(oldData).forEach(function (id) {
+    if (newData[id]) return;
+    const entry = oldData[id];
+    updates['adminCenter/promotedContent/bettingMarket/' + id] = {
+      label: entry.nickname, addedAt: entry.addedAt, addedBy: entry.addedBy || null,
+    };
+    migratedCount += 1;
+  });
+  if (migratedCount > 0) await db.ref().update(updates);
+  return { migratedCount: migratedCount };
+});
+
 // 24번 — 디스코드 웹훅 검수 알림. 웹훅 URL은 비밀번호와 동급인 민감정보라
 // RTDB가 아니라 Secret Manager에 저장한다(05번에서 겪은 RTDB 규칙 동기화
 // 실수 사고를 이 값에는 반복하지 않기 위함). 시크릿 컨테이너 자체는
@@ -646,6 +730,10 @@ module.exports = {
   revokeAllStreamerPermissions,
   setDevbarLink,
   deleteDevbarLink,
+  listPromotedContent,
+  addPromotedContent,
+  removePromotedContent,
+  migratePromotedStreamers,
   listStreamerVerificationOverview,
   listAuditLogOverview,
   getSeriesConfig,

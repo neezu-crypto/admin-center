@@ -148,6 +148,20 @@
     padding: 8px 10px; border-radius: 6px; font-size: 12.5px;
   }
 
+  /* 22번 — 게시글 홍보 현황 칩 목록 */
+  .promoted-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .promoted-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #191d24; border: 1px solid #262b33; border-radius: 999px;
+    padding: 5px 6px 5px 12px; font-size: 12px; color: #eef0f2;
+  }
+  .promoted-chip-date { color: #5f6672; font-size: 10.5px; }
+  .promoted-chip button {
+    background: none; border: none; color: #8b93a1; cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 50%;
+  }
+  .promoted-chip button:hover { color: #e2554f; background: rgba(226,85,79,0.14); }
+
   .game-row {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
     padding: 14px 2px; border-bottom: 1px solid #1c2027;
@@ -349,6 +363,18 @@
     </div>
 
     <div class="card">
+      <h2>게시글 홍보 현황</h2>
+      <p class="hint">
+        결제·승인 없이 관리자가 "이 스트리머 게시판에 이미 홍보글을 올렸음"을 스스로
+        기억해두는 개인 체크리스트입니다. 게임별로 구분됩니다. StreamBet-Market에만
+        있던 기존 기능을 여기로 옮기고, 앞으로 나올 게임도 자동으로 지원합니다.
+      </p>
+      <button id="promotedContentMigrateBtn" class="perm-refresh-btn" type="button">StreamBet-Market 레거시 데이터 이전</button>
+      <span id="promotedContentMigrateStatus" class="hint" style="margin:8px 0 0; display:block;"></span>
+      <div id="promotedContentList" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card">
       <h2>디스코드 웹훅 검수 알림</h2>
       <p class="hint">
         검수 대기 항목(신고·인증 신청·구매 승인·상장 신청·프리셋 병합 실패 등)이 생기면 지정한 디스코드 채널로 알림을 보냅니다.
@@ -451,6 +477,10 @@
   const sendAdminChatMessageFn = httpsCallable(functions, 'sendAdminChatMessage');
   const setDevbarLinkFn = httpsCallable(functions, 'setDevbarLink');
   const deleteDevbarLinkFn = httpsCallable(functions, 'deleteDevbarLink');
+  const listPromotedContentFn = httpsCallable(functions, 'listPromotedContent');
+  const addPromotedContentFn = httpsCallable(functions, 'addPromotedContent');
+  const removePromotedContentFn = httpsCallable(functions, 'removePromotedContent');
+  const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
@@ -523,6 +553,9 @@
   const auditLogListEl = document.getElementById('auditLogList');
   const seriesConfigListEl = document.getElementById('seriesConfigList');
   const devbarLinksListEl = document.getElementById('devbarLinksList');
+  const promotedContentListEl = document.getElementById('promotedContentList');
+  const promotedContentMigrateBtn = document.getElementById('promotedContentMigrateBtn');
+  const promotedContentMigrateStatusEl = document.getElementById('promotedContentMigrateStatus');
   const discordWebhookStatusEl = document.getElementById('discordWebhookStatus');
   const discordWebhookInputEl = document.getElementById('discordWebhookInput');
   const discordWebhookSaveBtn = document.getElementById('discordWebhookSaveBtn');
@@ -979,6 +1012,82 @@
     });
     devbarLinksListEl.appendChild(addRow);
   }
+
+  // 22번 — 게시글 홍보 현황(게임 전체로 확장). 단발성 조회(실시간 구독 없음) —
+  // 08번 콘텐츠 동결 카드와 동일한 트레이드오프(변경 후 다시 조회해서 반영).
+  async function refreshPromotedContent() {
+    promotedContentListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await listPromotedContentFn();
+      renderPromotedContentList(result.data.games || []);
+    } catch (e) {
+      console.error('게시글 홍보 현황 조회 실패:', e);
+      promotedContentListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+
+  function renderPromotedContentList(games) {
+    if (!games.length) {
+      promotedContentListEl.innerHTML = '<div class="empty-state">등록된 게임이 없습니다.</div>';
+      return;
+    }
+    promotedContentListEl.innerHTML = '';
+    games.forEach(function (g) {
+      const section = document.createElement('div');
+      section.style.marginBottom = '18px';
+      const inputId = 'promotedInput-' + g.id;
+      const chipsHtml = g.entries.length
+        ? g.entries.map(function (e) {
+            const dateText = e.addedAt ? new Date(e.addedAt).toLocaleDateString('ko-KR') : '-';
+            return '<span class="promoted-chip" data-id="' + escapeHtml(e.id) + '">' +
+              escapeHtml(e.label) + '<span class="promoted-chip-date">' + dateText + '</span>' +
+              '<button type="button" aria-label="삭제">×</button></span>';
+          }).join('')
+        : '<span class="empty-state" style="padding:8px 0;">아직 추가된 항목이 없습니다.</span>';
+      section.innerHTML =
+        '<h3 class="subhead">' + escapeHtml(g.name) + '</h3>' +
+        '<div style="display:flex; gap:6px; margin-bottom:8px;">' +
+        '<input id="' + inputId + '" placeholder="예: 스트리머 닉네임" maxlength="40" style="flex:1; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius:6px; font-size:12.5px;">' +
+        '<button class="perm-refresh-btn" type="button">추가</button>' +
+        '</div>' +
+        '<div class="promoted-chip-list">' + chipsHtml + '</div>';
+      section.querySelector('button.perm-refresh-btn').addEventListener('click', function () {
+        const inputEl = document.getElementById(inputId);
+        const label = inputEl.value;
+        addPromotedContentFn({ gameId: g.id, label: label }).then(function () {
+          refreshPromotedContent();
+        }).catch(function (err) {
+          console.error('게시글 홍보 현황 추가 실패:', err);
+          window.alert('추가에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      section.querySelectorAll('.promoted-chip button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const entryId = btn.parentElement.dataset.id;
+          removePromotedContentFn({ gameId: g.id, entryId: entryId }).then(function () {
+            refreshPromotedContent();
+          }).catch(function (err) {
+            console.error('게시글 홍보 현황 삭제 실패:', err);
+            window.alert('삭제에 실패했습니다: ' + (err && err.message ? err.message : err));
+          });
+        });
+      });
+      promotedContentListEl.appendChild(section);
+    });
+  }
+
+  promotedContentMigrateBtn.addEventListener('click', function () {
+    promotedContentMigrateBtn.disabled = true;
+    migratePromotedStreamersFn().then(function (result) {
+      promotedContentMigrateStatusEl.textContent = (result.data.migratedCount || 0) + '건 이전 완료(이미 이전된 항목은 건너뜀 - 여러 번 눌러도 안전).';
+      refreshPromotedContent();
+    }).catch(function (err) {
+      console.error('레거시 데이터 이전 실패:', err);
+      window.alert('이전에 실패했습니다: ' + (err && err.message ? err.message : err));
+    }).finally(function () {
+      promotedContentMigrateBtn.disabled = false;
+    });
+  });
 
   // 24번 — 디스코드 웹훅 URL 설정. RTDB가 아니라 Secret Manager에 저장되며(서버
   // 쪽 setDiscordWebhookUrl 참고), 값 자체는 여기서도 절대 다시 조회하지 않는다 —
@@ -1787,7 +1896,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDevbarLinks(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDevbarLinks(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); }
     if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
   });
 </script>
