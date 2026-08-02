@@ -122,6 +122,51 @@
   }
   .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: ui-monospace, monospace; }
 
+  /* 통계 섹션 공용 — 브라우저 기본 표 대신 쓰는 정돈된 테이블 껍데기.
+     얼룩무늬 + 우측 정렬 숫자로 raw <table>보다 스캔하기 쉽게 만든다. */
+  .stat-table-wrap { border: 1px solid #262b33; border-radius: 8px; overflow: hidden; }
+  .stat-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .stat-table th {
+    text-align: right; color: #5f6672; font-weight: 700; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: .03em; padding: 9px 12px;
+    border-bottom: 1px solid #262b33; background: #1c2027;
+  }
+  .stat-table th:first-child, .stat-table td:first-child { text-align: left; }
+  .stat-table td { text-align: right; padding: 8px 12px; color: #eef0f2; }
+  .stat-table td:first-child { color: #8b93a1; }
+  .stat-table tbody tr:nth-child(even) { background: #191d24; }
+  .stat-table tbody tr:hover { background: #21262e; }
+
+  /* 통계 섹션 공용 — "이름 + 지표 여러 개" 목록(갤러리 통계 등)을 verif-row와
+     같은 카드 행 언어로 표현 */
+  .stat-row-list { display: flex; flex-direction: column; gap: 6px; }
+  .stat-row-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 12px; border: 1px solid #262b33; border-radius: 8px; background: #191d24;
+  }
+  .stat-row-item .name {
+    flex: 1 1 auto; min-width: 0; font-size: 13px; color: #eef0f2;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .stat-row-item .metrics { display: flex; gap: 18px; flex-shrink: 0; }
+  .stat-metric { text-align: center; min-width: 40px; }
+  .stat-metric .value { display: block; font-size: 13.5px; font-weight: 700; color: #d9a441; }
+  .stat-metric .unit { display: block; font-size: 10px; color: #5f6672; margin-top: 1px; }
+  .stat-row-item .date { flex-shrink: 0; min-width: 68px; text-align: right; font-size: 11px; color: #5f6672; }
+
+  /* 10번 — 페이지별 접속자 분석. 시간대별 최고 접속자 수를 표 대신
+     앱별 스파크라인 카드로 보여준다(추세를 표보다 한눈에 파악하기 위함) */
+  .sparkline-card {
+    border: 1px solid #262b33; border-radius: 8px; background: #191d24;
+    padding: 14px 16px; margin-bottom: 8px;
+  }
+  .sparkline-card:last-child { margin-bottom: 0; }
+  .sparkline-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .sparkline-head .app-name { font-size: 13px; font-weight: 700; color: #eef0f2; }
+  .sparkline-head .peak { font-size: 11.5px; color: #8b93a1; white-space: nowrap; }
+  .sparkline-head .peak b { color: #d9a441; font-size: 13.5px; font-weight: 700; }
+  .sparkline-svg { display: block; width: 100%; height: 46px; }
+
   /* 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market 관리 탭과 동일하게
      최신 메시지가 아래에 오도록 column-reverse를 쓴다. */
   .admin-chat-list {
@@ -1580,9 +1625,9 @@
       return '<tr><td>' + escapeHtml(b.label) + '</td><td>' + won(b.betAmount) + '</td><td>' + b.betCount + '건</td><td>' + b.newWallets + '명</td></tr>';
     }).join('');
     statsTimeseriesEl.innerHTML =
-      '<table style="width:100%; font-size:12px; border-collapse:collapse;">' +
-      '<tr style="color:#8b93a1; text-align:left;"><th>' + (GRANULARITY_LABEL[data.granularity] || data.granularity) + '</th><th>베팅액</th><th>건수</th><th>신규 지갑</th></tr>' +
-      rows + '</table>';
+      '<div class="stat-table-wrap"><table class="stat-table"><thead><tr>' +
+      '<th>' + (GRANULARITY_LABEL[data.granularity] || data.granularity) + '</th><th>베팅액</th><th>건수</th><th>신규 지갑</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
   function renderAnomaly(anomalyResult, exchangeResult) {
@@ -1602,10 +1647,25 @@
   }
 
   // 10번 — 페이지별 접속자 분석. 서버가 5분마다 자동 샘플링해둔 시간당
-  // 최고치를 그대로 조회해서 표로 보여준다(차트 라이브러리 없이 표 형태로
-  // 단순화 — soop-stock-market의 Chart.js를 admin-center에 새로 끌어오는
-  // 것보다 우선 표로 값어치를 확인하는 쪽을 택함).
+  // 최고치를 앱별 스파크라인 카드로 보여준다(차트 라이브러리 없이 인라인 SVG로
+  // 직접 그려서 soop-stock-market의 Chart.js를 새로 끌어오지 않고도 추세를 표현).
   const VISITOR_APP_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장' };
+  function buildSparklineSvg(values) {
+    const w = 400, h = 46, pad = 4;
+    const max = Math.max.apply(null, values.concat([1]));
+    const n = values.length;
+    const points = values.map(function (v, i) {
+      const x = n <= 1 ? w / 2 : (i / (n - 1)) * (w - pad * 2) + pad;
+      const y = h - pad - (v / max) * (h - pad * 2);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    });
+    const linePoints = points.join(' ');
+    const areaPoints = pad + ',' + (h - pad) + ' ' + linePoints + ' ' + (w - pad) + ',' + (h - pad);
+    return '<svg class="sparkline-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
+      '<polyline points="' + areaPoints + '" fill="rgba(217,164,65,0.14)" stroke="none"></polyline>' +
+      '<polyline points="' + linePoints + '" fill="none" stroke="#d9a441" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>' +
+      '</svg>';
+  }
   async function refreshVisitorAnalytics() {
     visitorAnalyticsViewEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     try {
@@ -1624,18 +1684,17 @@
       visitorAnalyticsViewEl.innerHTML = '<div class="empty-state">데이터가 없습니다.</div>';
       return;
     }
-    // 시간대는 앱마다 동일하므로 첫 앱 기준으로 열을 만든다.
-    const hours = apps[appIds[0]].map(function (b) { return b.hour; });
-    let html = '<table style="width:100%; font-size:11.5px; border-collapse:collapse;"><tr style="color:#8b93a1; text-align:left;"><th>시간(UTC)</th>';
-    appIds.forEach(function (appId) { html += '<th>' + escapeHtml(VISITOR_APP_LABEL[appId] || appId) + '</th>'; });
-    html += '</tr>';
-    hours.forEach(function (hour, i) {
-      html += '<tr><td>' + escapeHtml(hour) + '</td>';
-      appIds.forEach(function (appId) { html += '<td>' + (apps[appId][i] ? apps[appId][i].peak : 0) + '명</td>'; });
-      html += '</tr>';
-    });
-    html += '</table>';
-    visitorAnalyticsViewEl.innerHTML = html;
+    visitorAnalyticsViewEl.innerHTML = appIds.map(function (appId) {
+      const buckets = apps[appId] || [];
+      const values = buckets.map(function (b) { return b.peak || 0; });
+      const peak = Math.max.apply(null, values.concat([0]));
+      const latest = values.length ? values[values.length - 1] : 0;
+      return '<div class="sparkline-card">' +
+        '<div class="sparkline-head"><span class="app-name">' + escapeHtml(VISITOR_APP_LABEL[appId] || appId) + '</span>' +
+        '<span class="peak">최근 24시간 최고 <b>' + peak + '명</b> · 현재 ' + latest + '명</span></div>' +
+        buildSparklineSvg(values) +
+        '</div>';
+    }).join('');
   }
 
   // 배경시장(interior-3d-viewer) 갤러리 통계 — 단발성 조회(다른 통계 카드와 동일한
@@ -1657,19 +1716,17 @@
       galleryStatsListEl.innerHTML = '<div class="empty-state">게시된 프리셋이 없습니다.</div>';
       return;
     }
-    let html = '<table style="width:100%; font-size:12px; border-collapse:collapse;">' +
-      '<tr style="color:#8b93a1; text-align:left;"><th>프리셋</th><th>적용</th><th>OBS 링크</th><th>게시일</th></tr>';
-    presets.forEach(function (p) {
+    galleryStatsListEl.innerHTML = '<div class="stat-row-list">' + presets.map(function (p) {
       const dateText = p.createdAt ? new Date(p.createdAt).toLocaleDateString('ko-KR') : '-';
-      html += '<tr>' +
-        '<td style="padding:6px 4px;">' + escapeHtml(p.name) + '</td>' +
-        '<td style="padding:6px 4px;">' + p.applyCount + '회</td>' +
-        '<td style="padding:6px 4px;">' + p.obsLinkCount + '회</td>' +
-        '<td style="padding:6px 4px; color:#5f6672;">' + dateText + '</td>' +
-        '</tr>';
-    });
-    html += '</table>';
-    galleryStatsListEl.innerHTML = html;
+      return '<div class="stat-row-item">' +
+        '<span class="name">' + escapeHtml(p.name) + '</span>' +
+        '<div class="metrics">' +
+        '<div class="stat-metric"><span class="value">' + p.applyCount + '</span><span class="unit">적용</span></div>' +
+        '<div class="stat-metric"><span class="value">' + p.obsLinkCount + '</span><span class="unit">OBS</span></div>' +
+        '</div>' +
+        '<span class="date">' + dateText + '</span>' +
+        '</div>';
+    }).join('') + '</div>';
   }
 
   // ═══════════════════════════════════════════════════════════════
