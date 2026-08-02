@@ -537,6 +537,7 @@
     <li><span class="chip">soop-stock-market/index.html</span> — <code>&lt;nav class="topnav"&gt;</code>/<code>.topnav-btn</code> 마크업이 devbar와 이름부터 다르므로, 공통 로직을 적용하려면 클래스명 통일 또는 별도 어댑터가 필요</li>
   </ul>
   <div class="callout"><b>권한 위임 후보로도 적합 — 실제로 채택됨</b> — 링크 목록 수정은 신원·재화에 영향이 없는 낮은 리스크 작업이라는 판단대로, 07번 "위임 권한 카탈로그 채우기"의 첫 항목(<code>devbarEdit</code>)으로 실제 구현했다. <code>setDevbarLink</code>/<code>deleteDevbarLink</code>가 이제 관리자 또는 이 권한을 받은 인증 스트리머 둘 다 호출할 수 있다.</div>
+  <div class="callout warn"><b>실행 결과 — soop-stock-market의 topnav만 넘침 처리가 없었다</b> — devbarLinks로 링크가 계속 늘어날 수 있는 구조가 된 뒤 사용자 요청으로 재점검한 결과, StreamBet-Market(<code>js/devbar.js</code>)·interior-3d-viewer(인라인 마퀴)는 이미 넘칠 때 자동 스크롤되지만 <strong>soop-stock-market의 topnav만 이 처리가 아예 없었다</strong>(480px 이하에서 라벨 텍스트를 숨기는 미디어 쿼리 하나가 유일한 대응이었음 — 실제 오버플로 자체는 그냥 잘리거나 가로 스크롤이 생겼다). <code>.topnav-right</code>를 새 <code>.topnav-viewport</code>(overflow:hidden)로 감싸고 나머지 두 저장소와 동일한 마퀴 로직(트랙 복제 + <code>translateX(-50%)</code> 무한루프, resize 시 재계산, <code>prefers-reduced-motion</code>이면 가로 스크롤로 대체)을 그대로 이식해 통일했다.</div>
 </section>
 
 <section>
