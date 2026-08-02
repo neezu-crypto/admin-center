@@ -506,6 +506,15 @@ const sendTestDiscordNotification = onCall(async (request) => {
 // 유일하게 관리자가 CLI로 직접 RTDB를 만져야 처리되는 사각지대라, 가장 먼저
 // 연결하는 트리거. RTDB 트리거는 프로젝트 전체에 걸리므로, interior-3d-viewer의
 // 코드를 전혀 건드리지 않고 admin-center가 이 경로를 그대로 감시할 수 있다.
+// 19번(세션 빠른 이동) 완료로 admin-center의 각 카드에 고유 앵커 id가 생겨서,
+// 24번 설계 당시 미뤄뒀던 딥링크를 이제 붙일 수 있다 - URL 프래그먼트만 그
+// id로 맞추면 별도 라우팅 없이 해당 카드로 바로 스크롤된다(admin-center
+// 쪽에서 location.hash를 읽어 스크롤하는 처리 필요, index.html 참고).
+const ADMIN_CENTER_URL = 'https://neezu-crypto.github.io/admin-center/';
+function deepLink(anchorId) {
+  return ADMIN_CENTER_URL + '#' + anchorId;
+}
+
 const notifyPresetMergeFailure = onValueCreated('/presetMergeFailures/{entryId}', async (event) => {
   const data = event.data.val() || {};
   const oldUid = data.oldUid || '(알 수 없음)';
@@ -516,7 +525,8 @@ const notifyPresetMergeFailure = onValueCreated('/presetMergeFailures/{entryId}'
     '이전 uid: `' + oldUid + '`\n' +
     '새 uid: `' + newUid + '`\n' +
     '사유: ' + reason + '\n' +
-    '⚠️ 현재는 관리자가 CLI로 직접 처리해야 합니다.'
+    '⚠️ 현재는 관리자가 CLI로 직접 처리해야 합니다.\n' +
+    deepLink('section-review-queue')
   );
 });
 
@@ -537,26 +547,26 @@ function formatRequestSummary(data) {
   return parts.length ? parts.join(' · ') : '(상세 정보 없음)';
 }
 
-function makeQueueTrigger(path, label) {
+function makeQueueTrigger(path, label, anchorId) {
   return onValueCreated(path, async (event) => {
     const data = event.data.val() || {};
-    await sendDiscordNotification('🔔 **' + label + '**\n' + formatRequestSummary(data));
+    await sendDiscordNotification('🔔 **' + label + '**\n' + formatRequestSummary(data) + '\n' + deepLink(anchorId));
   });
 }
 
-const notifyMarketReport            = makeQueueTrigger('/bettingMarket/marketReports/{id}', '새 마켓 신고 (배팅시장)');
-const notifyNicknameReport          = makeQueueTrigger('/bettingMarket/nicknameReports/{id}', '새 닉네임 신고 (배팅시장)');
-const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyRequests/{id}', '새 인증 신청 (배팅시장)');
-const notifyStockVerifyRequest      = makeQueueTrigger('/streamerVerificationRequests/{id}', '새 인증 신청 (주식시장)');
-const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)');
-const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)');
-const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)');
-const notifyPinRequest              = makeQueueTrigger('/pinRequests/{id}', '새 고정노출 신청 (주식시장)');
-const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}', '새 중계방 신청 (주식시장)');
-const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)');
-const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)');
-const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)');
-const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)');
+const notifyMarketReport            = makeQueueTrigger('/bettingMarket/marketReports/{id}', '새 마켓 신고 (배팅시장)', 'section-review-queue');
+const notifyNicknameReport          = makeQueueTrigger('/bettingMarket/nicknameReports/{id}', '새 닉네임 신고 (배팅시장)', 'section-review-queue');
+const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyRequests/{id}', '새 인증 신청 (배팅시장)', 'section-verification');
+const notifyStockVerifyRequest      = makeQueueTrigger('/streamerVerificationRequests/{id}', '새 인증 신청 (주식시장)', 'section-verification');
+const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)', 'section-purchase-approval');
+const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)', 'section-purchase-approval');
+const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)', 'section-purchase-approval');
+const notifyPinRequest              = makeQueueTrigger('/pinRequests/{id}', '새 고정노출 신청 (주식시장)', 'section-purchase-approval');
+const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}', '새 중계방 신청 (주식시장)', 'section-purchase-approval');
+const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval');
+const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval');
+const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
+const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)', 'section-listing-request');
 // cardBannerRequests(soop-stock-market)는 관리자 승인 단계 없이 즉시 적용되는
 // 흐름이라(14번에서 이미 확인) 검수 알림 대상이 아니다 — 의도적으로 제외.
 

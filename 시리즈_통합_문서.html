@@ -442,7 +442,7 @@
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 디스코드 웹훅 검수 알림</td>
-      <td>13개 큐 트리거 + 웹훅 URL 등록(Secret Manager)/테스트 발송 UI까지 배포·커밋·실제 테스트 알림 발송 확인 완료. 24번에 실행 결과 기록</td>
+      <td>14개 큐 트리거 + 웹훅 URL 등록(Secret Manager)/테스트 발송 UI + 딥링크(19번 앵커 재사용)까지 배포·커밋·실제 테스트 알림 발송 확인 완료. 24번에 실행 결과 기록</td>
     </tr>
   </table>
   <h3>권장 작업 순서</h3>
@@ -469,8 +469,7 @@
    15 종목 상장 관리        ✅ listingRequests 승인(종목명 수정)/거절
    18 검수 알람            ✅ 13·14·15를 admin-center 최초로 실시간 onValue 구독 전환,
                             합산 헤더 배지로 표시
-   24 디스코드 웹훅 알림    ✅ 완료 — 13개 큐 트리거 + 웹훅 등록/테스트 UI까지 배포됨.
-                            딥링크(19번 앵커 재사용)만 아직 미반영, 19 완료 후 추가하면 됨
+   24 디스코드 웹훅 알림    ✅ 완료 — 14개 큐 트리거 + 웹훅 등록/테스트 UI + 딥링크까지 전부 배포됨
    → 3단계 전체 완료
 
 4단계 — 권한 위임 준비 (킬스위치 완료, 카탈로그는 08번 이후로 보류)
@@ -1105,8 +1104,9 @@
   <h3>메시지 설계</h3>
   <ul>
     <li>어떤 큐인지(예: "🔔 새 마켓 신고"), 핵심 정보 1~2줄(신청자/사유 등 최소한만 — 민감정보 과다 노출 방지), <strong>admin-center로 바로 가는 링크</strong>를 포함한다</li>
-    <li>딥링크는 19번(세션 빠른 이동)의 앵커 id를 URL 프래그먼트로 재사용하면 별도 라우팅 없이 바로 만들어진다(예: <code>https://neezu-crypto.github.io/admin-center/?section=review#section-report</code>) — 19번을 먼저 설계해둔 게 여기서 그대로 이어진다</li>
+    <li>딥링크는 19번(세션 빠른 이동)의 앵커 id를 URL 프래그먼트로 재사용하면 별도 라우팅 없이 바로 만들어진다(예: <code>https://neezu-crypto.github.io/admin-center/#section-review-queue</code>) — 19번을 먼저 설계해둔 게 여기서 그대로 이어진다</li>
   </ul>
+  <div class="callout"><b>실행 결과 — 딥링크 완료</b> — 19번 완료 후 미뤄뒀던 딥링크를 마저 붙였다. 14개 트리거 각각에 대상 카드의 앵커 id(<code>section-review-queue</code>/<code>section-verification</code>/<code>section-purchase-approval</code>/<code>section-listing-request</code>)를 매핑해 메시지 끝에 <code>https://neezu-crypto.github.io/admin-center/#앵커id</code> 링크를 붙였다. 다만 로그인 전에는 카드가 전부 <code>hidden</code>이라 브라우저 기본 앵커 스크롤이 못 먹으므로, admin-center 쪽에 <code>location.hash</code>를 읽어 역할이 정해져 셸이 보이게 된 시점에 한 번만 수동으로 <code>scrollIntoView</code>하는 처리(<code>handleDeepLink</code>)를 추가했다.</div>
   <h3>보안·운영</h3>
   <ul>
     <li>웹훅 URL은 Firebase Functions v2의 <code>defineSecret</code>으로 관리 — 코드·저장소 어디에도 평문으로 커밋하지 않는다(09번에서 다룬 "민감정보를 코드에 박아두지 않는다"는 원칙과 같은 결)</li>

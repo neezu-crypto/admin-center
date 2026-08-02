@@ -2226,6 +2226,21 @@
       gateMessageEl.textContent = '이 페이지는 관리자 계정 또는 인증된 스트리머 계정으로만 입장할 수 있습니다.';
     }
     renderQuickNav();
+    handleDeepLink();
+  }
+
+  // 24번 — 디스코드 알림에 담긴 딥링크(URL 프래그먼트, 19번 앵커 id 재사용) 처리.
+  // 로그인 전에는 카드가 전부 hidden이라 브라우저 기본 앵커 스크롤이 못 먹으므로,
+  // 역할이 정해져 해당 셸이 보이게 된 시점에 직접 한 번만 스크롤한다.
+  let deepLinkHandled = false;
+  function handleDeepLink() {
+    if (deepLinkHandled || role === 'none') return;
+    const hash = window.location.hash.replace('#', '');
+    if (!hash) return;
+    const target = document.getElementById(hash);
+    if (!target) return;
+    deepLinkHandled = true;
+    setTimeout(function () { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
   }
 
   // 이 페이지는 공개 서비스가 아니라 내부 운영툴이므로, 다른 게임들과 달리 익명
