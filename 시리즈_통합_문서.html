@@ -496,6 +496,14 @@
   <p>각 게임 페이지 상단의 <strong>devbar</strong>(사이트명 + "다른 게임 바로가기" 링크 목록)는 아직 코드에 그대로 박혀있는 정적 HTML이다.</p>
   <div class="callout"><b>실행 결과 — GAME_CATALOG에 종속시키지 않기로 결정</b> — 처음엔 <code>devbarLinks</code>를 06번 <code>GAME_CATALOG</code>(5개 게임 고정)에 묶어서 admin-center가 그 목록을 그대로 재사용하는 방식으로 짰지만, "새 게임이 출시될 때마다 코드를 고쳐 재배포해야 한다"는 문제가 그대로 남는 걸 뒤늦게 깨닫고 뒤집었다. 최종 구조는 <code>devbarLinks</code> 노드에 실제 들어있는 항목만으로 화면을 그리고, admin-center에 "새 링크 추가" 폼을 둬서 <strong>관리자가 코드 배포 없이 그 자리에서 새 게임 항목을 추가·삭제</strong>할 수 있게 했다(<code>setDevbarLink</code>/<code>deleteDevbarLink</code>, gameId는 자유 입력이지만 형식만 검증). 다만 새 게임의 "자기 자신 링크 숨기기"는 그 게임 페이지 쪽 로더 스크립트에 자기 gameId를 지정해야 동작하므로, 새 페이지를 아예 새로 만들 때는 그 한 줄만큼은 여전히 코드가 필요하다 — "이미 만들어진 페이지들 사이의 링크 관리"는 완전히 무배포로, "완전히 새로운 페이지 자체를 만드는 것"은 원래도 코드 작업이 필요한 일이라는 경계는 남아있다.</div>
   <div class="callout"><b>실행 결과 — 부가로 바로잡은 것들</b> — 실제 하드코딩된 값을 재확인하며 발견: interior-3d-viewer(배경시장)는 자기 devbar에 다른 4개를 전부 링크해뒀지만, 정작 다른 어떤 페이지에서도 배경시장으로 가는 링크가 없었다(각자 베낀 사본이라 서로 어긋난 전형적 사례). StreamBet-Market·interior-3d-viewer 두 곳은 "미드나잇 마트런"을 "미트나잇 마트런"으로 오타 낸 채였다(soop-stock-market만 정확). 중앙화하면서 이 두 가지를 함께 바로잡았다.</div>
+  <div class="callout warn"><b>⚠ 새 게임을 온보딩할 때 절대 잊지 말 것 — "자기 자신 링크 숨기기"는 그 새 페이지 쪽에 코드를 넣어야만 동작한다</b>
+    <p>devbarLinks에 새 게임 항목을 추가하는 것 자체는 admin-center UI만으로 무배포로 되지만, <strong>그 새 게임의 페이지가 자기 자신에게 자기 링크를 안 보이게 숨기는 것</strong>은 그 페이지 쪽에 아래 두 가지를 직접 코드로 넣어야 한다 — 안 넣으면 그 페이지 devbar에 "자기 자신으로 가는 링크"가 어색하게 나타난다(에러는 안 나고 그냥 UX만 이상해지므로 눈에 잘 안 띌 수 있다):</p>
+    <ol>
+      <li>기존 3곳(<code>StreamBet-Market/js/devbar-links.js</code>, <code>interior-3d-viewer</code>의 인라인 모듈 스크립트, <code>soop-stock-market/index.html</code>의 인라인 모듈 스크립트)과 동일한 devbar 로더 로직을 새 페이지에도 추가한다 — <code>get(ref(db, 'devbarLinks'))</code>로 조회 → 자기 gameId 제외 → order로 정렬 → DOM에 <code>data-game-id</code> 속성을 붙여 그려 넣기 → 마퀴/오버플로 스크롤 로직이 있다면 <code>resize</code> 이벤트 dispatch로 재계산 트리거.</li>
+      <li>그 로더 코드 안의 <code>SELF_GAME_ID</code>(또는 동등한 상수)를 그 새 게임에 맞는 gameId로 지정한다 — 이 값이 admin-center "devbar 구성"에서 그 게임에 부여한 gameId와 정확히 일치해야 자기 자신이 걸러진다.</li>
+    </ol>
+    <p>반대로 <strong>"이미 존재하는 4개 페이지의 devbar에 새 게임 링크를 추가하는 것"은 완전 무배포</strong>다 — admin-center에서 새 gameId로 링크 하나만 추가하면 기존 4개 페이지가 다음 로드 시 알아서 그 링크를 집어와 그린다(각 페이지의 SELF_GAME_ID와 다른 gameId이기만 하면 자동으로 표시됨). 코드를 만져야 하는 쪽은 오직 "새로 생기는 그 페이지 자신"뿐이다.</p>
+  </div>
   <h3>현재 상태</h3>
   <table>
     <tr><th>저장소</th><th>devbar 위치</th><th>비고</th></tr>
