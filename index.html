@@ -159,6 +159,7 @@
     <div class="sub">시리즈 전체 관리 세션 통합 (준비 중)</div>
   </div>
   <div id="authArea">
+    <span id="reviewAlertBadge" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4); cursor:pointer;" hidden></span>
     <span id="authStatus">확인 중...</span>
     <button id="authBtn" type="button" disabled>Google 로그인</button>
   </div>
@@ -237,6 +238,39 @@
       <div id="visitorAnalyticsView"></div>
     </div>
 
+    <div class="card" id="section-review-queue">
+      <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
+      <p class="hint">
+        실시간 구독입니다(새로고침 불필요). 마켓/닉네임 신고는 배팅시장 기존 함수를, 프리셋 병합 실패는
+        interior-3d-viewer에 신규로 만든 함수를 그대로 호출합니다 — 이 항목이 이 시리즈에서 유일하게
+        CLI로만 처리 가능했던 사각지대였습니다.
+      </p>
+      <h3 class="subhead">마켓 신고</h3>
+      <div id="marketReportList"></div>
+      <h3 class="subhead">닉네임 신고</h3>
+      <div id="nicknameReportList"></div>
+      <h3 class="subhead">프리셋 병합 실패 (배경시장)</h3>
+      <div id="presetMergeFailureList"></div>
+    </div>
+
+    <div class="card" id="section-purchase-approval">
+      <h2>상품 구매 승인 검수 <span id="purchaseApprovalCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
+      <p class="hint">
+        실시간 구독입니다. soop-stock-market의 기존 승인/거절 액션(adminAction)을 그대로 호출합니다.
+        유형마다 승인 시 필요한 값이 달라 승인 버튼을 누르면 필요한 값을 입력창으로 물어봅니다.
+      </p>
+      <div id="purchaseApprovalList"></div>
+    </div>
+
+    <div class="card" id="section-listing-request">
+      <h2>종목 상장 신청 관리 <span id="listingRequestCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
+      <p class="hint">
+        soop-stock-market 전용, 무료 셀프 상장 신청입니다(실시간 구독). 승인 시 오타를 발견하면
+        종목명을 고쳐서 확정할 수 있습니다.
+      </p>
+      <div id="listingRequestList"></div>
+    </div>
+
     <div class="card">
       <h2>인증 스트리머 관리</h2>
       <p class="hint">
@@ -312,6 +346,13 @@
   import {
     getFunctions, httpsCallable,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js';
+  // 18번 — 검수 알람을 실시간 배지로 만들기 위해, 이 페이지도 처음으로 RTDB를
+  // 직접 구독한다(지금까지 admin-center는 "RTDB 직접 안 씀" 원칙이었으나, 13·14·15번
+  // 큐는 05번 관례대로 관리자 uid 기준으로 이미 .read가 열려 있어 직접 구독이
+  // 가능하다 — 쓰기는 여전히 전부 Cloud Functions를 통해서만 한다).
+  import {
+    getDatabase, ref, onValue,
+  } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
 
   // 07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
   // (Auth·인증 스트리머 판별 전부 이 프로젝트 기준). 이 페이지 전용 Web App을 새로
@@ -333,6 +374,7 @@
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const functions = getFunctions(app, 'us-central1');
+  const db = getDatabase(app);
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
   const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
@@ -365,6 +407,17 @@
   const getVisitorAnalyticsFn = httpsCallable(functions, 'getVisitorAnalytics');
   const bmBanAccountFn = httpsCallable(functions, 'banAccount');
   const bmUnbanAccountFn = httpsCallable(functions, 'unbanAccount');
+  // 13번 — 페이지별 검수. 전부 기존 함수 그대로 라우팅(새 로직 없음).
+  const bmDismissMarketReportFn = httpsCallable(functions, 'dismissMarketReport');
+  const bmDismissNicknameReportFn = httpsCallable(functions, 'dismissNicknameReport');
+  const bmBlockNicknameFn = httpsCallable(functions, 'blockNickname');
+  const bmUnblockNicknameFn = httpsCallable(functions, 'unblockNickname');
+  const galleryResolvePresetMergeFailureFn = httpsCallable(functions, 'resolvePresetMergeFailure');
+
+  // 14번 — 상품 구매 승인 검수. 배팅시장 보물상자는 자체 함수, 나머지는 전부
+  // soop-stock-market의 adminAction 디스패치를 그대로 호출한다.
+  const bmApproveChestPurchaseFn = httpsCallable(functions, 'approveChestPurchase');
+  const bmDismissChestPurchaseFn = httpsCallable(functions, 'dismissChestPurchase');
   const searchSeriesUserFn = httpsCallable(functions, 'searchSeriesUser');
   const getPurchaseOverviewFn = httpsCallable(functions, 'getPurchaseOverview');
 
@@ -407,6 +460,15 @@
   const statsAnomalyEl = document.getElementById('statsAnomaly');
   const visitorAnalyticsRefreshBtn = document.getElementById('visitorAnalyticsRefreshBtn');
   const visitorAnalyticsViewEl = document.getElementById('visitorAnalyticsView');
+  const reviewAlertBadgeEl = document.getElementById('reviewAlertBadge');
+  const reviewQueueCountTagEl = document.getElementById('reviewQueueCountTag');
+  const marketReportListEl = document.getElementById('marketReportList');
+  const nicknameReportListEl = document.getElementById('nicknameReportList');
+  const presetMergeFailureListEl = document.getElementById('presetMergeFailureList');
+  const purchaseApprovalCountTagEl = document.getElementById('purchaseApprovalCountTag');
+  const purchaseApprovalListEl = document.getElementById('purchaseApprovalList');
+  const listingRequestCountTagEl = document.getElementById('listingRequestCountTag');
+  const listingRequestListEl = document.getElementById('listingRequestList');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
@@ -1035,6 +1097,387 @@
     visitorAnalyticsViewEl.innerHTML = html;
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // 13·14·15·18번 — 실시간 검수 큐 + 통합 배지
+  //
+  // 13/14/15의 큐 노드는 09번 관례대로 관리자 uid 기준으로 .read가 열려
+  // 있으므로, 여기서만 예외적으로 RTDB를 직접 onValue 구독한다(쓰기는
+  // 여전히 전부 기존 Cloud Functions를 통해서만 한다).
+  // ═══════════════════════════════════════════════════════════════
+  let marketReports = {};
+  let nicknameReports = {};
+  let presetMergeFailures = {};
+  let listingRequests = {};
+  const purchaseQueueData = {}; // path -> RTDB raw object
+
+  // banner/pin/relayRoom 신청은 최근 리팩터로 검수 없이 즉시 승인되도록 바뀌어
+  // (status: "approved"가 신청 즉시 기록됨) 사실상 이 큐에 절대 나타나지 않는다.
+  // 그래도 과거 데이터나 향후 정책 변경에 대비해 승인/거절 처리 자체는 남겨둔다.
+  const PURCHASE_QUEUE_SOURCES = [
+    { path: 'bettingMarket/chestPurchaseRequests', label: '보물상자 구매(배팅시장)', kind: 'bmChest' },
+    { path: 'chartBannerRequests', label: '차트 배너 신청', kind: 'chartBanner' },
+    { path: 'treasureChestRequests', label: '보물상자 구매 신청', kind: 'treasureChest' },
+    { path: 'cashChargeRequests', label: '자산 충전 신청', kind: 'cashCharge' },
+    { path: 'unfreezeDonationRequests', label: '동결 해제(후원) 신청', kind: 'unfreezeDonation' },
+    { path: 'bannerRequests', label: '배너 신청', kind: 'banner' },
+    { path: 'pinRequests', label: '고정노출 신청', kind: 'pin' },
+    { path: 'relayRoomRequests', label: '중계방 신청', kind: 'relayRoom' },
+  ];
+
+  let reviewSubscriptionsStarted = false;
+  function startReviewQueueSubscriptions() {
+    if (reviewSubscriptionsStarted) return;
+    reviewSubscriptionsStarted = true;
+
+    onValue(ref(db, 'bettingMarket/marketReports'), function (snap) {
+      marketReports = snap.val() || {};
+      renderMarketReportList();
+      updateReviewAlertBadge();
+    });
+    onValue(ref(db, 'bettingMarket/nicknameReports'), function (snap) {
+      nicknameReports = snap.val() || {};
+      renderNicknameReportList();
+      updateReviewAlertBadge();
+    });
+    onValue(ref(db, 'presetMergeFailures'), function (snap) {
+      presetMergeFailures = snap.val() || {};
+      renderPresetMergeFailureList();
+      updateReviewAlertBadge();
+    });
+    onValue(ref(db, 'listingRequests'), function (snap) {
+      listingRequests = snap.val() || {};
+      renderListingRequestList();
+      updateReviewAlertBadge();
+    });
+    PURCHASE_QUEUE_SOURCES.forEach(function (src) {
+      onValue(ref(db, src.path), function (snap) {
+        purchaseQueueData[src.path] = snap.val() || {};
+        renderPurchaseApprovalList();
+        updateReviewAlertBadge();
+      });
+    });
+  }
+
+  function setCountTag(el, count) {
+    if (count > 0) {
+      el.textContent = String(count);
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+
+  function countPendingListingRequests() {
+    return Object.values(listingRequests).filter(function (r) { return r.status === 'pending'; }).length;
+  }
+
+  function countPendingPurchaseEntries() {
+    let count = 0;
+    PURCHASE_QUEUE_SOURCES.forEach(function (src) {
+      const data = purchaseQueueData[src.path] || {};
+      Object.keys(data).forEach(function (id) {
+        const rec = data[id];
+        if (src.kind === 'bmChest') { count += 1; return; } // status 필드 없음 - 존재 = 대기중
+        if (rec.status === 'pending') count += 1;
+      });
+    });
+    return count;
+  }
+
+  function updateReviewAlertBadge() {
+    const reviewCount = Object.keys(marketReports).length + Object.keys(nicknameReports).length + Object.keys(presetMergeFailures).length;
+    const purchaseCount = countPendingPurchaseEntries();
+    const listingCount = countPendingListingRequests();
+
+    setCountTag(reviewQueueCountTagEl, reviewCount);
+    setCountTag(purchaseApprovalCountTagEl, purchaseCount);
+    setCountTag(listingRequestCountTagEl, listingCount);
+
+    const total = reviewCount + purchaseCount + listingCount;
+    if (total > 0) {
+      reviewAlertBadgeEl.textContent = '검수 대기 ' + total;
+      reviewAlertBadgeEl.hidden = false;
+    } else {
+      reviewAlertBadgeEl.hidden = true;
+    }
+  }
+
+  reviewAlertBadgeEl.addEventListener('click', function () {
+    document.getElementById('section-review-queue').scrollIntoView({ behavior: 'smooth' });
+  });
+
+  // ─── 마켓 신고 ───
+  function renderMarketReportList() {
+    const entries = Object.keys(marketReports)
+      .map(function (id) { return Object.assign({ id: id }, marketReports[id]); })
+      .sort(function (a, b) { return (a.reportedAt || 0) - (b.reportedAt || 0); });
+    if (!entries.length) { marketReportListEl.innerHTML = '<div class="empty-state">대기 중인 신고가 없습니다.</div>'; return; }
+    marketReportListEl.innerHTML = '';
+    entries.forEach(function (r) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.innerHTML =
+        '<div class="verif-info"><b>' + escapeHtml(r.marketTitle || r.marketId) + '</b>' +
+        '<span>' + escapeHtml(r.reason) + (r.detail ? ' · ' + escapeHtml(r.detail) : '') + '</span></div>' +
+        '<div class="verif-actions"><button class="reject" type="button">확인 완료</button></div>';
+      row.querySelector('.reject').addEventListener('click', function () {
+        bmDismissMarketReportFn({ reportId: r.id }).catch(function (err) {
+          console.error('신고 확인 처리 실패:', err);
+          window.alert('처리에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      marketReportListEl.appendChild(row);
+    });
+  }
+
+  // ─── 닉네임 신고 ───
+  function renderNicknameReportList() {
+    const entries = Object.keys(nicknameReports)
+      .map(function (id) { return Object.assign({ id: id }, nicknameReports[id]); })
+      .sort(function (a, b) { return (a.reportedAt || 0) - (b.reportedAt || 0); });
+    if (!entries.length) { nicknameReportListEl.innerHTML = '<div class="empty-state">대기 중인 신고가 없습니다.</div>'; return; }
+    nicknameReportListEl.innerHTML = '';
+    entries.forEach(function (r) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.innerHTML =
+        '<div class="verif-info"><b>' + escapeHtml(r.nickname) + '</b>' +
+        '<span>' + escapeHtml(r.reason) + (r.detail ? ' · ' + escapeHtml(r.detail) : '') + '</span></div>' +
+        '<div class="verif-actions">' +
+        '<button class="approve" type="button">차단</button>' +
+        '<button class="reject" type="button">무시</button>' +
+        '</div>';
+      row.querySelector('.approve').addEventListener('click', function () {
+        if (!window.confirm('"' + r.nickname + '" 닉네임을 차단할까요?')) return;
+        bmBlockNicknameFn({ reportId: r.id }).catch(function (err) {
+          console.error('닉네임 차단 실패:', err);
+          window.alert('차단에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      row.querySelector('.reject').addEventListener('click', function () {
+        bmDismissNicknameReportFn({ reportId: r.id }).catch(function (err) {
+          console.error('신고 무시 실패:', err);
+          window.alert('처리에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      nicknameReportListEl.appendChild(row);
+    });
+  }
+
+  // ─── 프리셋 병합 실패 (배경시장) ───
+  function renderPresetMergeFailureList() {
+    const entries = Object.keys(presetMergeFailures)
+      .map(function (id) { return Object.assign({ id: id }, presetMergeFailures[id]); })
+      .sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+    if (!entries.length) { presetMergeFailureListEl.innerHTML = '<div class="empty-state">대기 중인 실패 항목이 없습니다.</div>'; return; }
+    presetMergeFailureListEl.innerHTML = '';
+    entries.forEach(function (f) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      const verifiedText = f.verified ? '티켓으로 검증됨' : '미검증(클라이언트 자체 신고 — 수동 확인 필요)';
+      row.innerHTML =
+        '<div class="verif-info"><b>' + escapeHtml(f.reason || '알 수 없는 사유') + '</b>' +
+        '<span>oldUid: ' + escapeHtml(String(f.oldUid || '-').slice(0, 10)) +
+        ' → newUid: ' + escapeHtml(String(f.newUid || '-').slice(0, 10)) +
+        ' · ' + verifiedText + (f.detail ? ' · ' + escapeHtml(f.detail) : '') + '</span></div>' +
+        '<div class="verif-actions">' +
+        '<button class="approve" type="button">이전 실행</button>' +
+        '<button class="reject" type="button">무시</button>' +
+        '</div>';
+      row.querySelector('.approve').addEventListener('click', function () {
+        if (!f.oldUid || !f.newUid) {
+          window.alert('oldUid/newUid 정보가 부족해 자동 이전할 수 없습니다. 무시 후 CLI로 직접 확인해주세요.');
+          return;
+        }
+        if (!window.confirm('이 프리셋 소유권을 ' + f.oldUid + ' → ' + f.newUid + '로 이전할까요?')) return;
+        galleryResolvePresetMergeFailureFn({ entryId: f.id, action: 'transfer' }).catch(function (err) {
+          console.error('프리셋 병합 이전 실패:', err);
+          window.alert('이전에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      row.querySelector('.reject').addEventListener('click', function () {
+        galleryResolvePresetMergeFailureFn({ entryId: f.id, action: 'dismiss' }).catch(function (err) {
+          console.error('프리셋 병합 무시 실패:', err);
+          window.alert('처리에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      presetMergeFailureListEl.appendChild(row);
+    });
+  }
+
+  // ─── 상품 구매 승인 검수 ───
+  function formatPurchaseEntryDetail(e) {
+    const bits = [];
+    switch (e._kind) {
+      case 'bmChest':
+        bits.push('수량 ' + e.qty + (e.bonusQty ? '(+보너스 ' + e.bonusQty + ')' : ''));
+        bits.push('별풍선 ' + (e.totalBalloons || 0));
+        break;
+      case 'chartBanner':
+        bits.push('종목: ' + (e.stockName || e.stockId));
+        bits.push((e.days || 0) + '일');
+        bits.push('결제액 ' + (e.chargedAmount || 0).toLocaleString());
+        break;
+      case 'treasureChest':
+        bits.push('상자 ' + e.chestCount + (e.bonusChestCount ? '(+보너스 ' + e.bonusChestCount + ')' : ''));
+        bits.push('soopId: ' + e.soopId);
+        break;
+      case 'cashCharge':
+        bits.push('soopId: ' + e.soopId);
+        break;
+      case 'unfreezeDonation':
+        bits.push('종목: ' + (e.stockName || e.stockId));
+        bits.push('soopId: ' + e.soopId);
+        break;
+      case 'banner':
+        bits.push((e.days || 0) + '일 · 결제액 ' + (e.chargedAmount || 0).toLocaleString());
+        break;
+      case 'pin':
+        bits.push('종목: ' + e.stockName + ' · ' + (e.hours || 0) + '시간');
+        break;
+      case 'relayRoom':
+        bits.push((e.hours || 0) + '시간 · 결제액 ' + (e.chargedAmount || 0).toLocaleString());
+        break;
+    }
+    return bits.join(' · ');
+  }
+
+  function renderPurchaseApprovalList() {
+    let entries = [];
+    PURCHASE_QUEUE_SOURCES.forEach(function (src) {
+      const data = purchaseQueueData[src.path] || {};
+      Object.keys(data).forEach(function (id) {
+        const rec = data[id];
+        if (src.kind !== 'bmChest' && rec.status !== 'pending') return;
+        entries.push(Object.assign({ id: id, _kind: src.kind, _label: src.label }, rec));
+      });
+    });
+    entries.sort(function (a, b) { return (a.requestedAt || 0) - (b.requestedAt || 0); });
+
+    if (!entries.length) { purchaseApprovalListEl.innerHTML = '<div class="empty-state">대기 중인 구매 신청이 없습니다.</div>'; return; }
+    purchaseApprovalListEl.innerHTML = '';
+    entries.forEach(function (e) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.innerHTML =
+        '<div class="verif-info"><b>' + escapeHtml(e.nickname || e.requesterUid || e.uid || '') +
+        '<span class="source-tag stockMarket">' + escapeHtml(e._label) + '</span></b>' +
+        '<span>' + escapeHtml(formatPurchaseEntryDetail(e)) + '</span></div>' +
+        '<div class="verif-actions">' +
+        '<button class="approve" type="button">승인</button>' +
+        '<button class="reject" type="button">거절</button>' +
+        '</div>';
+      row.querySelector('.approve').addEventListener('click', function () { approvePurchaseEntry(e); });
+      row.querySelector('.reject').addEventListener('click', function () { rejectPurchaseEntry(e); });
+      purchaseApprovalListEl.appendChild(row);
+    });
+  }
+
+  function approvePurchaseEntry(e) {
+    let call;
+    if (e._kind === 'bmChest') {
+      call = bmApproveChestPurchaseFn({ requestId: e.id });
+    } else if (e._kind === 'banner') {
+      const days = window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
+      if (days === null) return;
+      const nickname = window.prompt('닉네임(오타 수정 시에만 변경):', e.nickname || '');
+      if (nickname === null) return;
+      call = smAdminActionFn({ action: 'approveBannerRequest', payload: { requestId: e.id, days: days, nickname: nickname } });
+    } else if (e._kind === 'chartBanner') {
+      const days = window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
+      if (days === null) return;
+      const nickname = window.prompt('닉네임(오타 수정 시에만 변경):', e.nickname || '');
+      if (nickname === null) return;
+      const bannerImg = window.prompt('배너 이미지 URL(변경 시에만 입력):', e.bannerImg || '');
+      if (bannerImg === null) return;
+      const promoLink = window.prompt('홍보 링크(변경 시에만 입력):', e.promoLink || '');
+      if (promoLink === null) return;
+      call = smAdminActionFn({ action: 'approveChartBannerRequest', payload: { requestId: e.id, days: days, nickname: nickname, bannerImg: bannerImg, promoLink: promoLink } });
+    } else if (e._kind === 'pin') {
+      const hours = window.prompt('고정노출 시간(시간 단위)을 입력하세요:', String(e.hours || 24));
+      if (hours === null) return;
+      const stockName = window.prompt('종목명(오타 수정 시에만 변경):', e.stockName || '');
+      if (stockName === null) return;
+      call = smAdminActionFn({ action: 'approvePinRequest', payload: { requestId: e.id, hours: hours, stockName: stockName } });
+    } else if (e._kind === 'relayRoom') {
+      const hours = window.prompt('중계방 홍보 시간(시간 단위)을 입력하세요:', String(e.hours || 24));
+      if (hours === null) return;
+      const nickname = window.prompt('닉네임(오타 수정 시에만 변경):', e.nickname || '');
+      if (nickname === null) return;
+      call = smAdminActionFn({ action: 'approveRelayRoomRequest', payload: { requestId: e.id, hours: hours, nickname: nickname } });
+    } else if (e._kind === 'treasureChest') {
+      call = smAdminActionFn({ action: 'approveTreasureChestRequest', payload: { requestId: e.id } });
+    } else if (e._kind === 'cashCharge') {
+      const amount = window.prompt('지급할 금액을 입력하세요(방송에서 확인한 실제 후원 금액):', '');
+      if (amount === null) return;
+      call = smAdminActionFn({ action: 'approveCashChargeRequest', payload: { requestId: e.id, amount: amount } });
+    } else if (e._kind === 'unfreezeDonation') {
+      call = smAdminActionFn({ action: 'approveUnfreezeDonationRequest', payload: { requestId: e.id } });
+    } else {
+      return;
+    }
+    call.catch(function (err) {
+      console.error('구매 승인 실패:', err);
+      window.alert('승인에 실패했습니다: ' + (err && err.message ? err.message : err));
+    });
+  }
+
+  const PURCHASE_REJECT_ACTION = {
+    banner:           'rejectBannerRequest',
+    chartBanner:      'rejectChartBannerRequest',
+    pin:              'rejectPinRequest',
+    relayRoom:        'rejectRelayRoomRequest',
+    treasureChest:    'rejectTreasureChestRequest',
+    cashCharge:       'rejectCashChargeRequest',
+    unfreezeDonation: 'rejectUnfreezeDonationRequest',
+  };
+
+  function rejectPurchaseEntry(e) {
+    const call = e._kind === 'bmChest'
+      ? bmDismissChestPurchaseFn({ requestId: e.id })
+      : smAdminActionFn({ action: PURCHASE_REJECT_ACTION[e._kind], payload: { requestId: e.id } });
+    call.catch(function (err) {
+      console.error('구매 거절 실패:', err);
+      window.alert('거절에 실패했습니다: ' + (err && err.message ? err.message : err));
+    });
+  }
+
+  // ─── 종목 상장 신청 관리 ───
+  function renderListingRequestList() {
+    const entries = Object.keys(listingRequests)
+      .map(function (id) { return Object.assign({ id: id }, listingRequests[id]); })
+      .filter(function (r) { return r.status === 'pending'; })
+      .sort(function (a, b) { return (a.requestedAt || 0) - (b.requestedAt || 0); });
+    if (!entries.length) { listingRequestListEl.innerHTML = '<div class="empty-state">대기 중인 상장 신청이 없습니다.</div>'; return; }
+    listingRequestListEl.innerHTML = '';
+    entries.forEach(function (r) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.innerHTML =
+        '<div class="verif-info"><b>' + escapeHtml(r.stockName) + '</b>' +
+        '<span>uid: ' + escapeHtml(String(r.requesterUid || '').slice(0, 10)) + '</span></div>' +
+        '<div class="verif-actions">' +
+        '<button class="approve" type="button">승인</button>' +
+        '<button class="reject" type="button">거절</button>' +
+        '</div>';
+      row.querySelector('.approve').addEventListener('click', function () {
+        const stockName = window.prompt('상장할 종목명(오타 수정 시에만 변경):', r.stockName || '');
+        if (stockName === null) return;
+        smAdminActionFn({ action: 'approveListingRequest', payload: { requestId: r.id, stockName: stockName } }).catch(function (err) {
+          console.error('상장 승인 실패:', err);
+          window.alert('승인에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      row.querySelector('.reject').addEventListener('click', function () {
+        smAdminActionFn({ action: 'rejectListingRequest', payload: { requestId: r.id } }).catch(function (err) {
+          console.error('상장 거절 실패:', err);
+          window.alert('거절에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      listingRequestListEl.appendChild(row);
+    });
+  }
+
   function render() {
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
@@ -1072,7 +1515,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); }
   });
 </script>
 </body>
