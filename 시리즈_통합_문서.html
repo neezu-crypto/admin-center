@@ -375,14 +375,14 @@
       <td>4개 저장소·Functions/클라이언트/RTDB 규칙 3개 계층 전부 uid 기반(<code>adminCenter/adminUids</code>)으로 전환·배포·커밋 완료. 09번에 실행 결과 기록</td>
     </tr>
     <tr>
-      <td><strong>중간</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong> (interior-3d-viewer 제외)</td>
       <td>통합 관리 센터 — 페이지별 접속자 분석</td>
-      <td>시간당 최고 동시 접속자 수 + 페이지별/합산 스파크라인 차트. 10번에서 상세 설계</td>
+      <td>presence를 앱별 네임스페이스로 전환(배팅시장·주식시장), 5분마다 자동 샘플링해 시간당 최고치 저장·조회. 표 형태로 단순화(차트 라이브러리 미도입). 10번에 실행 결과 기록</td>
     </tr>
     <tr>
-      <td><strong>중간</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 전체 통계 요약·이상 거래 모니터링</td>
-      <td>오늘/누적/재무 건전성/일간·주간·월간 통계 + 이상 거래 모니터링. 11번에서 상세 설계</td>
+      <td>기존 함수(getAdminDashboardStats 등) 그대로 호출해 병합 표시. 이상 거래는 1단계(리스트 나열)만, soop-stock-market 쪽 상응 기능 없어 배팅시장만 표시. 11번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -460,7 +460,8 @@
 2단계 — 모니터링 (읽기 전용이라 상대적으로 안전)
    주식시장 감사 로그 확장 ✅ 완료(뮤테이션 39개 자동 기록)
    12 구매 현황           ✅ 완료(getPurchaseOverview, 필드명 오류 다수 수정)
-   10 접속자 분석, 11 전체 통계 — 남음
+   10 접속자 분석 ✅ 완료(interior-3d-viewer 제외), 11 전체 통계 ✅ 완료
+   → 2단계 전체 완료
 
 3단계 — 검수·승인 큐
    13 페이지별 검수, 14 구매 승인 검수, 15 종목 상장 관리
