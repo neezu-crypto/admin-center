@@ -274,6 +274,57 @@ const setSeriesConfig = onCall(async (request) => {
   return { ok: true };
 });
 
+// 08번 — devbar(각 페이지 상단 "다른 게임 바로가기" 링크) 통합 관리. 지금까지 이
+// 링크 목록은 페이지마다(StreamBet-Market 1곳, interior-3d-viewer 3곳, soop-stock-market
+// 1곳) 하드코딩된 사본이라 링크 하나 바꾸려면 5개 파일을 일일이 고쳐야 했다. 이제
+// devbarLinks RTDB 노드(공개 읽기)를 각 페이지가 직접 조회하고, 이 함수들이 그 값을
+// 쓰는(write) 유일한 통로다. 노드가 비어있거나 네트워크 실패 시 각 페이지는 기존
+// 하드코딩된 링크를 그대로 폴백으로 쓴다(devbar가 통째로 사라지는 사고 방지 - 각
+// 페이지 쪽 구현).
+//
+// 06번 GAME_CATALOG에 종속시키지 않고 gameId를 자유 입력받는다 — 새 게임이 나올
+// 때마다 GAME_CATALOG 배열을 코드로 고치고 재배포해야 하는 게 아니라, 관리자가
+// UI에서 바로 새 항목을 추가할 수 있어야 한다는 요구사항 때문. GAME_CATALOG는
+// 콘텐츠 동결(seriesConfig)·접속자 분석 등 다른 기능이 여전히 쓰므로 그대로 둔다.
+const DEVBAR_URL_RE = /^https:\/\/\S+$/;
+const DEVBAR_GAME_ID_RE = /^[a-zA-Z0-9_-]{1,40}$/;
+
+const setDevbarLink = onCall(async (request) => {
+  await requireAdmin(request);
+  const { gameId, label, url, order } = request.data || {};
+  const trimmedGameId = String(gameId || '').trim();
+  if (!DEVBAR_GAME_ID_RE.test(trimmedGameId)) {
+    throw new HttpsError('invalid-argument', 'gameId는 영문/숫자/-/_ 조합 1~40자여야 합니다.');
+  }
+  const trimmedLabel = String(label || '').trim();
+  const trimmedUrl = String(url || '').trim();
+  if (!trimmedLabel || trimmedLabel.length > 30) {
+    throw new HttpsError('invalid-argument', '표시 이름을 1~30자로 입력해주세요.');
+  }
+  if (!DEVBAR_URL_RE.test(trimmedUrl)) {
+    throw new HttpsError('invalid-argument', 'https:// 로 시작하는 올바른 URL을 입력해주세요.');
+  }
+  const orderNum = parseInt(order, 10);
+  if (!Number.isFinite(orderNum)) {
+    throw new HttpsError('invalid-argument', '순서 값이 올바르지 않습니다.');
+  }
+  const db = getDatabase();
+  await db.ref('devbarLinks/' + trimmedGameId).set({ label: trimmedLabel, url: trimmedUrl, order: orderNum });
+  await logToAdminAuditLog(db, request, 'devbar 링크 저장', trimmedGameId + ' → ' + trimmedUrl);
+  return { ok: true };
+});
+
+const deleteDevbarLink = onCall(async (request) => {
+  await requireAdmin(request);
+  const { gameId } = request.data || {};
+  const trimmedGameId = String(gameId || '').trim();
+  if (!trimmedGameId) throw new HttpsError('invalid-argument', 'gameId가 필요합니다.');
+  const db = getDatabase();
+  await db.ref('devbarLinks/' + trimmedGameId).remove();
+  await logToAdminAuditLog(db, request, 'devbar 링크 삭제', trimmedGameId);
+  return { ok: true };
+});
+
 // 24번 — 디스코드 웹훅 검수 알림. 웹훅 URL은 비밀번호와 동급인 민감정보라
 // RTDB가 아니라 Secret Manager에 저장한다(05번에서 겪은 RTDB 규칙 동기화
 // 실수 사고를 이 값에는 반복하지 않기 위함). 시크릿 컨테이너 자체는
@@ -593,6 +644,8 @@ module.exports = {
   getAdminCenterState,
   setAdminCenterPermission,
   revokeAllStreamerPermissions,
+  setDevbarLink,
+  deleteDevbarLink,
   listStreamerVerificationOverview,
   listAuditLogOverview,
   getSeriesConfig,

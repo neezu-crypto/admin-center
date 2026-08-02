@@ -365,9 +365,9 @@
       <td>인증 경로에 따라 이 업적이 지급되거나 안 되거나 하는 사소한 불일치. 사용자 경험에 미치는 영향이 작아 지금까지 우선순위에서 밀려남 — 다른 작업 하는 김에 같이 처리하는 정도로 충분</td>
     </tr>
     <tr>
-      <td><strong>중간</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>devbar 구성을 통합 관리 센터에서 관리</td>
-      <td>지금은 각 페이지에 하드코딩된 정적 링크 목록. 08번에서 상세 설계</td>
+      <td><code>devbarLinks</code> RTDB 노드(공개 읽기)를 4개 페이지가 직접 조회, admin-center에서 새 게임 링크를 코드 배포 없이 추가/수정/삭제. 08번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -478,8 +478,9 @@
    위임 권한 카탈로그 채우기 → 08번(devbar) 구현 후 첫 후보 재검토(사용자 확인)
    (되돌릴 방법 없이 권한부터 뿌리지 않도록 이 순서 고정)
 
-5단계 — 이미 잘 되는 것 넓히기 / 편의 기능
-   08 devbar 구성, 17 채팅, 22 게시글 홍보 현황,
+5단계 — 이미 잘 되는 것 넓히기 / 편의 기능 (진행 중)
+   08 devbar 구성           ✅ 완료 — devbarLinks 노드 + 새 링크 추가 UI(무배포 확장 가능)
+   17 채팅, 22 게시글 홍보 현황,
    19 세션 빠른 이동        → 카드가 어느 정도 쌓인 뒤라야 목차의 진가가 생긴다
    21 배팅시장 마켓 관리    → 이 목록에서 실익이 가장 낮다고 21번에서 이미 밝힘
 
@@ -491,8 +492,10 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">08</span><h2>devbar를 통합 관리 센터에서 관리하기 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">08</span><h2>devbar를 통합 관리 센터에서 관리하기 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>각 게임 페이지 상단의 <strong>devbar</strong>(사이트명 + "다른 게임 바로가기" 링크 목록)는 아직 코드에 그대로 박혀있는 정적 HTML이다.</p>
+  <div class="callout"><b>실행 결과 — GAME_CATALOG에 종속시키지 않기로 결정</b> — 처음엔 <code>devbarLinks</code>를 06번 <code>GAME_CATALOG</code>(5개 게임 고정)에 묶어서 admin-center가 그 목록을 그대로 재사용하는 방식으로 짰지만, "새 게임이 출시될 때마다 코드를 고쳐 재배포해야 한다"는 문제가 그대로 남는 걸 뒤늦게 깨닫고 뒤집었다. 최종 구조는 <code>devbarLinks</code> 노드에 실제 들어있는 항목만으로 화면을 그리고, admin-center에 "새 링크 추가" 폼을 둬서 <strong>관리자가 코드 배포 없이 그 자리에서 새 게임 항목을 추가·삭제</strong>할 수 있게 했다(<code>setDevbarLink</code>/<code>deleteDevbarLink</code>, gameId는 자유 입력이지만 형식만 검증). 다만 새 게임의 "자기 자신 링크 숨기기"는 그 게임 페이지 쪽 로더 스크립트에 자기 gameId를 지정해야 동작하므로, 새 페이지를 아예 새로 만들 때는 그 한 줄만큼은 여전히 코드가 필요하다 — "이미 만들어진 페이지들 사이의 링크 관리"는 완전히 무배포로, "완전히 새로운 페이지 자체를 만드는 것"은 원래도 코드 작업이 필요한 일이라는 경계는 남아있다.</div>
+  <div class="callout"><b>실행 결과 — 부가로 바로잡은 것들</b> — 실제 하드코딩된 값을 재확인하며 발견: interior-3d-viewer(배경시장)는 자기 devbar에 다른 4개를 전부 링크해뒀지만, 정작 다른 어떤 페이지에서도 배경시장으로 가는 링크가 없었다(각자 베낀 사본이라 서로 어긋난 전형적 사례). StreamBet-Market·interior-3d-viewer 두 곳은 "미드나잇 마트런"을 "미트나잇 마트런"으로 오타 낸 채였다(soop-stock-market만 정확). 중앙화하면서 이 두 가지를 함께 바로잡았다.</div>
   <h3>현재 상태</h3>
   <table>
     <tr><th>저장소</th><th>devbar 위치</th><th>비고</th></tr>

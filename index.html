@@ -304,6 +304,16 @@
     </div>
 
     <div class="card">
+      <h2>devbar 구성</h2>
+      <p class="hint">
+        각 페이지 상단 devbar("다른 게임 바로가기")에 표시되는 링크입니다. 여기서 저장하면
+        모든 페이지에 공통으로 반영됩니다(각 페이지는 자기 자신에 대한 링크는 자동으로
+        숨깁니다). 조회 실패 시 각 페이지는 기존에 하드코딩된 링크를 그대로 보여줍니다.
+      </p>
+      <div id="devbarLinksList"></div>
+    </div>
+
+    <div class="card">
       <h2>디스코드 웹훅 검수 알림</h2>
       <p class="hint">
         검수 대기 항목(신고·인증 신청·구매 승인·상장 신청·프리셋 병합 실패 등)이 생기면 지정한 디스코드 채널로 알림을 보냅니다.
@@ -355,7 +365,7 @@
   // 큐는 05번 관례대로 관리자 uid 기준으로 이미 .read가 열려 있어 직접 구독이
   // 가능하다 — 쓰기는 여전히 전부 Cloud Functions를 통해서만 한다).
   import {
-    getDatabase, ref, onValue,
+    getDatabase, ref, onValue, get,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
 
   // 07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
@@ -382,6 +392,8 @@
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
   const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
   const revokeAllStreamerPermissionsFn = httpsCallable(functions, 'revokeAllStreamerPermissions');
+  const setDevbarLinkFn = httpsCallable(functions, 'setDevbarLink');
+  const deleteDevbarLinkFn = httpsCallable(functions, 'deleteDevbarLink');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
@@ -449,6 +461,7 @@
   const auditRefreshBtn = document.getElementById('auditRefreshBtn');
   const auditLogListEl = document.getElementById('auditLogList');
   const seriesConfigListEl = document.getElementById('seriesConfigList');
+  const devbarLinksListEl = document.getElementById('devbarLinksList');
   const discordWebhookStatusEl = document.getElementById('discordWebhookStatus');
   const discordWebhookInputEl = document.getElementById('discordWebhookInput');
   const discordWebhookSaveBtn = document.getElementById('discordWebhookSaveBtn');
@@ -802,6 +815,108 @@
       });
       seriesConfigListEl.appendChild(row);
     });
+  }
+
+  // 08번 — devbar 구성. GAME_CATALOG에 종속시키지 않고 devbarLinks 노드에 실제
+  // 있는 항목만으로 화면을 그린다 — 새 게임이 나오면 "새 링크 추가" 폼으로 관리자가
+  // 바로 항목을 늘릴 수 있어야 하기 때문(코드 배포 없이 계속 추가 가능). devbarLinks
+  // 노드는 .read:true라 Cloud Function 없이 클라이언트가 직접 조회한다(쓰기/삭제만
+  // setDevbarLink/deleteDevbarLink를 거침).
+  let devbarLinksData = {};
+
+  async function refreshDevbarLinks() {
+    devbarLinksListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const linksSnap = await get(ref(db, 'devbarLinks'));
+      devbarLinksData = linksSnap.val() || {};
+    } catch (e) {
+      console.error('devbar 링크 조회 실패:', e);
+      devbarLinksListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+      return;
+    }
+    renderDevbarLinksList();
+  }
+
+  const DEVBAR_INPUT_STYLE = 'background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:6px 8px; border-radius:6px; font-size:12.5px;';
+
+  function renderDevbarLinksList() {
+    devbarLinksListEl.innerHTML = '';
+    const entries = Object.keys(devbarLinksData)
+      .map(function (id) { return Object.assign({ id: id }, devbarLinksData[id]); })
+      .sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+
+    if (!entries.length) {
+      devbarLinksListEl.appendChild(Object.assign(document.createElement('div'), {
+        className: 'empty-state', textContent: '등록된 링크가 없습니다. 아래에서 추가하세요.',
+      }));
+    }
+    entries.forEach(function (link) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.style.flexWrap = 'wrap';
+      const labelId = 'devbarLabel-' + link.id;
+      const urlId = 'devbarUrl-' + link.id;
+      const orderId = 'devbarOrder-' + link.id;
+      row.innerHTML =
+        '<div class="verif-info" style="flex:1 1 100%;"><b>gameId: ' + escapeHtml(link.id) + '</b></div>' +
+        '<div style="display:flex; gap:6px; flex-wrap:wrap; flex:1 1 100%; margin-top:6px;">' +
+        '<input id="' + labelId + '" placeholder="표시 이름" value="' + escapeHtml(link.label || '') + '" style="flex:1; min-width:120px; ' + DEVBAR_INPUT_STYLE + '">' +
+        '<input id="' + urlId + '" placeholder="https://..." value="' + escapeHtml(link.url || '') + '" style="flex:2; min-width:200px; ' + DEVBAR_INPUT_STYLE + '">' +
+        '<input id="' + orderId + '" type="number" placeholder="순서" value="' + (link.order != null ? link.order : 0) + '" style="width:64px; ' + DEVBAR_INPUT_STYLE + '">' +
+        '<button class="perm-refresh-btn" type="button">저장</button>' +
+        '<button class="perm-refresh-btn" type="button" style="border-color:#e2554f; color:#e2554f;">삭제</button>' +
+        '</div>';
+      const buttons = row.querySelectorAll('button');
+      buttons[0].addEventListener('click', function () {
+        const label = document.getElementById(labelId).value;
+        const url = document.getElementById(urlId).value;
+        const order = document.getElementById(orderId).value;
+        setDevbarLinkFn({ gameId: link.id, label: label, url: url, order: order }).then(function () {
+          refreshDevbarLinks();
+        }).catch(function (err) {
+          console.error('devbar 링크 저장 실패:', err);
+          window.alert('저장에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      buttons[1].addEventListener('click', function () {
+        if (!window.confirm('"' + link.id + '" 링크를 삭제할까요? 모든 페이지에서 즉시 사라집니다.')) return;
+        deleteDevbarLinkFn({ gameId: link.id }).then(function () {
+          refreshDevbarLinks();
+        }).catch(function (err) {
+          console.error('devbar 링크 삭제 실패:', err);
+          window.alert('삭제에 실패했습니다: ' + (err && err.message ? err.message : err));
+        });
+      });
+      devbarLinksListEl.appendChild(row);
+    });
+
+    // 새 게임 출시 시 코드 배포 없이 바로 링크를 늘릴 수 있는 추가 폼.
+    const addRow = document.createElement('div');
+    addRow.className = 'verif-row';
+    addRow.style.flexWrap = 'wrap';
+    addRow.innerHTML =
+      '<div class="verif-info" style="flex:1 1 100%;"><b>새 링크 추가</b>' +
+      '<span>gameId는 영문/숫자/-/_ 조합(예: newGame) — 각 페이지의 devbar 로더 스크립트에 이 id를 자기 자신 제외 대상으로 넣어줘야 그 페이지에서 자기 링크가 자동으로 숨겨집니다.</span></div>' +
+      '<div style="display:flex; gap:6px; flex-wrap:wrap; flex:1 1 100%; margin-top:6px;">' +
+      '<input id="devbarNewGameId" placeholder="gameId (예: newGame)" style="flex:1; min-width:120px; ' + DEVBAR_INPUT_STYLE + '">' +
+      '<input id="devbarNewLabel" placeholder="표시 이름" style="flex:1; min-width:120px; ' + DEVBAR_INPUT_STYLE + '">' +
+      '<input id="devbarNewUrl" placeholder="https://..." style="flex:2; min-width:200px; ' + DEVBAR_INPUT_STYLE + '">' +
+      '<input id="devbarNewOrder" type="number" placeholder="순서" value="' + entries.length + '" style="width:64px; ' + DEVBAR_INPUT_STYLE + '">' +
+      '<button class="perm-refresh-btn" type="button">추가</button>' +
+      '</div>';
+    addRow.querySelector('button').addEventListener('click', function () {
+      const gameId = document.getElementById('devbarNewGameId').value;
+      const label = document.getElementById('devbarNewLabel').value;
+      const url = document.getElementById('devbarNewUrl').value;
+      const order = document.getElementById('devbarNewOrder').value;
+      setDevbarLinkFn({ gameId: gameId, label: label, url: url, order: order }).then(function () {
+        refreshDevbarLinks();
+      }).catch(function (err) {
+        console.error('devbar 링크 추가 실패:', err);
+        window.alert('추가에 실패했습니다: ' + (err && err.message ? err.message : err));
+      });
+    });
+    devbarLinksListEl.appendChild(addRow);
   }
 
   // 24번 — 디스코드 웹훅 URL 설정. RTDB가 아니라 Secret Manager에 저장되며(서버
@@ -1553,7 +1668,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshDevbarLinks(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); }
   });
 </script>
 </body>
