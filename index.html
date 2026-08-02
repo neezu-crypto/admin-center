@@ -198,9 +198,35 @@
   }
   .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid #d9a441; outline-offset: 2px; }
   .toggle-switch input:disabled + .toggle-slider { opacity: .5; cursor: not-allowed; }
+
+  /* 19번 — 세션 빠른 이동. main(960px, 가운데 정렬)의 우측 여백이 충분한
+     넓은 화면에서만 노출한다(soop-stock-market의 #admin-quicknav와 동일한 취지). */
+  .quicknav {
+    display: none; position: fixed; right: 16px; top: 90px;
+    max-height: calc(100vh - 110px); overflow-y: auto;
+    flex-direction: column; gap: 2px; background: #15181d; border: 1px solid #262b33;
+    border-radius: 12px; padding: 8px; z-index: 200; width: 176px;
+  }
+  .quicknav.visible { display: flex; }
+  .quicknav-title { font-size: 11px; font-weight: 800; color: #5f6672; padding: 4px 10px 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .quicknav button {
+    background: transparent; color: #8b93a1; border: none; padding: 7px 10px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 600; text-align: left; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  }
+  .quicknav button:hover { background: #1c2027; color: #d9a441; }
+  .quicknav::-webkit-scrollbar { width: 4px; }
+  .quicknav::-webkit-scrollbar-thumb { background: #d9a441; border-radius: 10px; }
+  @media (max-width: 1400px) {
+    .quicknav { display: none !important; }
+  }
 </style>
 </head>
 <body>
+
+<!-- 19번 — 세션 빠른 이동. soop-stock-market의 #admin-quicknav 패턴을 그대로
+     이식(고정 위치, 넓은 화면에서만 노출, 클릭 시 스크롤). -->
+<nav id="quicknav" class="quicknav"></nav>
 
 <header>
   <div>
@@ -224,7 +250,7 @@
 
   <!-- 관리자 전용 화면 -->
   <div id="adminShell" hidden>
-    <div class="card">
+    <div class="card" id="section-bootstrap">
       <h2>관리자 uid 등록 (1회성)</h2>
       <p class="hint">
         09번 — 관리자 판별을 이메일 문자열 비교에서 uid 기반 공유 노드로 옮기는 작업의 첫 단계입니다.
@@ -233,7 +259,7 @@
       <button id="bootstrapAdminUidBtn" class="perm-refresh-btn" type="button">내 uid 등록하기</button>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-user-search">
       <h2>유저 검색/상세 조회</h2>
       <p class="hint">
         닉네임·SOOP 아이디·uid로 검색합니다(부분 일치). 후보를 선택하면 배팅시장·주식시장의 기존 조회 함수를
@@ -255,7 +281,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-stats">
       <h2>전체 통계 요약·이상 거래 모니터링</h2>
       <p class="hint">
         각 게임의 기존 통계 함수를 그대로 호출해 모은 화면입니다(새로 계산하지 않음). 이상 거래 모니터링은
@@ -277,7 +303,7 @@
       <div id="statsAnomaly"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-visitor-analytics">
       <h2>페이지별 접속자 분석</h2>
       <p class="hint">
         시간당 최고 동시 접속자 수(최근 24시간)입니다. interior-3d-viewer(배경시장)는 아직 접속자 집계
@@ -320,7 +346,7 @@
       <div id="listingRequestList"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-verification">
       <h2>인증 스트리머 관리</h2>
       <p class="hint">
         스트리머 주식시장·스트리머 배팅시장 양쪽의 인증 대기 신청과 공유 인증 목록을 한 화면에서 봅니다.
@@ -333,7 +359,7 @@
       <div id="verificationVerifiedList"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-audit-log">
       <h2>감사 로그</h2>
       <p class="hint">
         배팅시장의 기존 처리 내역과 주식시장의 관리 처리 내역(현재는 스트리머 인증 관련
@@ -343,7 +369,7 @@
       <div id="auditLogList"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-content-freeze">
       <h2>게임 콘텐츠 동결 상태</h2>
       <p class="hint">
         "동결"은 서비스 점검(다운)이 아니라, 그 게임의 신규 콘텐츠 개발을 잠시 멈추고
@@ -352,7 +378,7 @@
       <div id="seriesConfigList"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-devbar">
       <h2>devbar 구성</h2>
       <p class="hint">
         각 페이지 상단 devbar("다른 게임 바로가기")에 표시되는 링크입니다. 여기서 저장하면
@@ -362,7 +388,7 @@
       <div id="devbarLinksList"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-promoted-content">
       <h2>게시글 홍보 현황</h2>
       <p class="hint">
         결제·승인 없이 관리자가 "이 스트리머 게시판에 이미 홍보글을 올렸음"을 스스로
@@ -374,7 +400,7 @@
       <div id="promotedContentList" style="margin-top:12px;"></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-discord-webhook">
       <h2>디스코드 웹훅 검수 알림</h2>
       <p class="hint">
         검수 대기 항목(신고·인증 신청·구매 승인·상장 신청·프리셋 병합 실패 등)이 생기면 지정한 디스코드 채널로 알림을 보냅니다.
@@ -389,7 +415,7 @@
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="section-permission-delegation">
       <h2>인증 스트리머 권한 위임</h2>
       <p class="hint">
         여기서 체크한 권한은 <b>인증된 스트리머 전원에게 동일하게</b> 부여됩니다(스트리머별 개별 설정이 아님).
@@ -405,7 +431,7 @@
 
   <!-- 인증 스트리머 화면 -->
   <div id="streamerShell" hidden>
-    <div class="card">
+    <div class="card" id="section-granted-permissions">
       <h2>부여받은 권한</h2>
       <p class="hint">관리자가 인증 스트리머 전체에게 부여한 권한만 여기서 사용할 수 있습니다.</p>
       <div id="permissionViewList"></div>
@@ -416,7 +442,7 @@
        배포한 sendAdminChatMessage/bettingMarket-adminChat을 그대로 재사용한다(06번
        원칙 — 새 채널을 따로 만들지 않음). -->
   <div id="sharedShell" hidden>
-    <div class="card">
+    <div class="card" id="section-chat">
       <h2>관리자·인증 스트리머 채팅</h2>
       <p class="hint">
         StreamBet-Market 관리 탭의 채팅과 동일한 채널입니다(대화가 그대로 이어집니다).
@@ -533,6 +559,7 @@
   const authStatusEl = document.getElementById('authStatus');
   const authBtnEl = document.getElementById('authBtn');
   const roleBadgeEl = document.getElementById('roleBadge');
+  const quicknavEl = document.getElementById('quicknav');
   const gateEl = document.getElementById('gate');
   const gateMessageEl = document.getElementById('gateMessage');
   const gateLoginBtn = document.getElementById('gateLoginBtn');
@@ -1858,6 +1885,46 @@
     });
   }
 
+  // 19번 — 세션 빠른 이동. soop-stock-market의 QUICKNAV_ITEMS/renderQuickNav
+  // 패턴을 그대로 이식했다 - 카드가 추가/제거될 때마다 이 배열도 사람이 같이
+  // 고쳐야 한다(자동으로 늘어나지 않음, soop-stock-market도 동일한 한계).
+  const QUICKNAV_ITEMS = [
+    { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
+    { id: 'section-user-search', label: '🔍 유저 검색/조회', role: 'admin' },
+    { id: 'section-stats', label: '📊 전체 통계', role: 'admin' },
+    { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin' },
+    { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin' },
+    { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
+    { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
+    { id: 'section-verification', label: '🎙️ 인증 스트리머 관리', role: 'admin' },
+    { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin' },
+    { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin' },
+    { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin' },
+    { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
+    { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin' },
+    { id: 'section-permission-delegation', label: '🗝️ 권한 위임', role: 'admin' },
+    { id: 'section-granted-permissions', label: '🗝️ 부여받은 권한', role: 'streamer' },
+    { id: 'section-chat', label: '💬 채팅', role: 'shared' },
+  ];
+
+  function renderQuickNav() {
+    if (role !== 'admin' && role !== 'streamer') {
+      quicknavEl.classList.remove('visible');
+      quicknavEl.innerHTML = '';
+      return;
+    }
+    const items = QUICKNAV_ITEMS.filter(function (item) { return item.role === role || item.role === 'shared'; });
+    quicknavEl.innerHTML = '<div class="quicknav-title">🧭 빠른 이동</div>' +
+      items.map(function (item) { return '<button type="button" data-target="' + item.id + '">' + item.label + '</button>'; }).join('');
+    quicknavEl.querySelectorAll('button[data-target]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const target = document.getElementById(btn.dataset.target);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+    quicknavEl.classList.add('visible');
+  }
+
   function render() {
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
@@ -1877,6 +1944,7 @@
     } else {
       gateMessageEl.textContent = '이 페이지는 관리자 계정 또는 인증된 스트리머 계정으로만 입장할 수 있습니다.';
     }
+    renderQuickNav();
   }
 
   // 이 페이지는 공개 서비스가 아니라 내부 운영툴이므로, 다른 게임들과 달리 익명

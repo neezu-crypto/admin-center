@@ -420,9 +420,9 @@
       <td>13·14·15번 카드를 (admin-center 최초로) 실시간 <code>onValue</code> 구독으로 전환하고, 세 큐의 대기 건수를 합쳐 헤더 배지(클릭 시 스크롤 이동)로 표시. 18번에 실행 결과 기록</td>
     </tr>
     <tr>
-      <td><strong>중간</strong></td>
+      <td><strong style="color:#3fb689;">완료</strong></td>
       <td>통합 관리 센터 — 세션 빠른 이동</td>
-      <td>soop-stock-market 관리자 페이지의 우측 고정 목차 패널을 이식. 08~18번 카드가 다 쌓이면 admin-center도 같은 문제(카드 과다)를 겪게 됨. 19번에서 상세 설계</td>
+      <td>soop-stock-market 관리자 페이지의 우측 고정 목차 패널을 이식, 카드 16개에 역할별(admin/streamer/shared) 필터링 적용. 19번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong>높음</strong></td>
@@ -482,8 +482,8 @@
    08 devbar 구성           ✅ 완료 — devbarLinks 노드 + 새 링크 추가 UI(무배포 확장 가능)
    17 채팅                  ✅ 완료 — 기존 채널 재사용, 새 함수/RTDB 노드 없이 UI만 추가
    22 게시글 홍보 현황      ✅ 완료 — GAME_CATALOG 기반 확장, StreamBet-Market도 새 함수로 이전
-   19 세션 빠른 이동        → 카드가 어느 정도 쌓인 뒤라야 목차의 진가가 생긴다
-   21 배팅시장 마켓 관리    → 이 목록에서 실익이 가장 낮다고 21번에서 이미 밝힘
+   19 세션 빠른 이동        ✅ 완료 — soop-stock-market 패턴 이식, 카드 16개 역할별 필터링
+   21 배팅시장 마켓 관리    → 이 목록에서 실익이 가장 낮다고 21번에서 이미 밝힘 (남은 유일한 5단계 항목)
 
 6단계 — 보류·미정 (사용자가 명시적으로 미룬 것 포함)
    콘텐츠 동결 실제 연동(보류 지시됨), 미드나잇 마트런/절대광고 온보딩(보류 지시됨),
@@ -945,8 +945,9 @@
 </section>
 
 <section>
-  <div class="sec-head"><span class="sec-num">19</span><h2>통합 관리 센터 — 세션 빠른 이동 (설계)</h2></div>
+  <div class="sec-head"><span class="sec-num">19</span><h2>통합 관리 센터 — 세션 빠른 이동 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
   <p>목표: 카드가 계속 늘어나는 통합 관리 센터에, 페이지 우측에 고정된 채로 클릭하면 해당 섹션으로 바로 스크롤 이동하는 목차 패널을 둔다.</p>
+  <div class="callout"><b>실행 결과</b> — soop-stock-market의 <code>QUICKNAV_ITEMS</code>/<code>renderQuickNav</code> 패턴을 그대로 이식했다. 지금까지 흩어져 있던 카드 16개(관리자 전용 14개 + 인증 스트리머 전용 1개 + 17번에서 만든 공용 채팅 1개) 전부에 고유 id를 새로 붙이고, 각 항목에 <code>role: 'admin'|'streamer'|'shared'</code>를 태그해 현재 역할에 맞는 항목만 필터링해 보여준다(관리자는 admin+shared, 인증 스트리머는 streamer+shared). 색상 팔레트만 admin-center 기존 다크+골드 톤에 맞게 조정했고, 넓은 화면(1400px 초과)에서만 노출·클릭 시 <code>scrollIntoView</code>로 이동하는 동작은 원본과 동일하다.</div>
   <h3>현재 상태 — soop-stock-market에 이미 있는 패턴</h3>
   <p>soop-stock-market 관리자 페이지의 <code>#admin-quicknav</code>: 화면 우측에 고정된 내비게이션으로, <code>QUICKNAV_ITEMS</code> 배열(섹션 id·라벨 <strong>27개</strong>를 하드코딩)을 <code>renderQuickNav()</code>가 버튼 목록으로 그리고, 클릭하면 <code>scrollIntoView({ behavior: 'smooth', block: 'start' })</code>로 이동한다. 좁은 화면에서는 <code>@media</code> 쿼리로 아예 숨김 처리. 관리자 로그인 성공 시 한 번 렌더링되는 정적인 목차다.</p>
   <p>StreamBet-Market·interior-3d-viewer·admin-center엔 이런 전체 목차가 없다. StreamBet-Market의 <code>admin-alerts.js</code>(18번)도 클릭 시 스크롤 이동은 하지만, 그건 <strong>대기 항목이 있는 6개 검수 섹션에 한정된 배지</strong>이지 전체 섹션을 나열하는 목차가 아니다.</p>
