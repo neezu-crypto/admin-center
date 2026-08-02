@@ -390,6 +390,106 @@ const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', 
 // cardBannerRequests(soop-stock-market)는 관리자 승인 단계 없이 즉시 적용되는
 // 흐름이라(14번에서 이미 확인) 검수 알림 대상이 아니다 — 의도적으로 제외.
 
+// 16번 — 유저 검색. StreamBet-Market의 adminLookupUser는 닉네임 "정확히 일치"만
+// 지원하고, soop-stock-market의 getUserDetail은 uid만 받는다(닉네임 검색 자체가
+// 없음) — 이 부분 검색(prefix)이 어디에도 없던 진짜 신규 기능이다. 결과는 후보
+// uid 목록만 반환하고, 실제 상세 조회는 클라이언트가 각 게임의 기존 함수를
+// 그대로 호출한다(06번 원칙 - 새 조회 로직을 중복 구현하지 않음).
+const searchSeriesUser = onCall(async (request) => {
+  await requireAdmin(request);
+  const query = String((request.data || {}).query || '').trim();
+  if (!query) throw new HttpsError('invalid-argument', '검색어를 입력해 주세요.');
+
+  const db = getDatabase();
+  const endKey = query + '';
+  const [profileSnap, verifiedNickSnap, verifiedSoopSnap] = await Promise.all([
+    db.ref('bettingMarket/profiles').orderByChild('nickname').startAt(query).endAt(endKey).limitToFirst(20).get(),
+    db.ref('streamerVerifications').orderByChild('nickname').startAt(query).endAt(endKey).limitToFirst(20).get(),
+    db.ref('streamerVerifications').orderByChild('soopId').startAt(query).endAt(endKey).limitToFirst(20).get(),
+  ]);
+
+  const results = new Map(); // uid -> candidate (uid로 중복 제거)
+  const profiles = profileSnap.val() || {};
+  Object.keys(profiles).forEach(function (uid) {
+    results.set(uid, { uid: uid, nickname: profiles[uid].nickname || '', soopId: profiles[uid].soopId || '', source: 'bettingMarket' });
+  });
+  [verifiedNickSnap, verifiedSoopSnap].forEach(function (snap) {
+    const val = snap.val() || {};
+    Object.keys(val).forEach(function (id) {
+      const entry = val[id];
+      if (!entry.uid) return;
+      if (!results.has(entry.uid)) {
+        results.set(entry.uid, { uid: entry.uid, nickname: entry.nickname || '', soopId: entry.soopId || '', source: 'streamerVerifications' });
+      }
+    });
+  });
+
+  // uid 자체를 검색어로 넣은 경우 — 프로필/인증 기록이 전혀 없는 uid(예: 주식시장만
+  // 이용한 유저)라도 그대로 후보에 넣어준다. 16번에서 지적한 한계(주식시장 전용
+  // 유저는 이름으로 못 찾음)를 완전히 없애진 못하지만, uid를 이미 아는 경우엔 검색이 된다.
+  if (!results.has(query)) {
+    results.set(query, { uid: query, nickname: '', soopId: '', source: 'uid' });
+  }
+
+  return { candidates: Array.from(results.values()).slice(0, 20) };
+});
+
+// 12번 — 유저 상품 구매 현황. 게임마다 구매 기록 노드가 다 다르므로(12번 표 참고),
+// 여기서는 그 노드들을 그대로 읽어 정규화해서 합칠 뿐 새 계산은 하지 않는다(06번 원칙).
+// uid가 주어지면 그 유저의 기록만 필터링, 없으면 게임별 최근 N건을 반환한다.
+const PURCHASE_OVERVIEW_LIMIT = 100;
+// 필드명은 전부 각 게임의 실제 쓰기 코드를 직접 읽어서 확인한 값이다(추측 금지 -
+// 특히 uidField는 소스마다 uid/requesterUid로 갈려서 틀리면 그 유형 전체가
+// 조용히 결과에서 빠진다).
+const PURCHASE_SOURCES = [
+  { path: 'bettingMarket/skinPurchases', gameId: 'bettingMarket', itemType: 'skin', uidField: 'uid', labelField: 'skinName', amountField: 'price' },
+  { path: 'bettingMarket/chestPurchaseRequests', gameId: 'bettingMarket', itemType: 'chest_purchase', uidField: 'uid', labelField: null, amountField: null },
+  { path: 'bettingMarket/chestOpenLog', gameId: 'bettingMarket', itemType: 'chest_open', uidField: 'uid', labelField: null, amountField: 'prize' },
+  { path: 'bannerRequests', gameId: 'stockMarket', itemType: 'banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'chargedAmount' },
+  { path: 'chartBannerRequests', gameId: 'stockMarket', itemType: 'chart_banner', uidField: 'requesterUid', labelField: 'stockName', amountField: 'chargedAmount' },
+  { path: 'pinRequests', gameId: 'stockMarket', itemType: 'pin', uidField: 'requesterUid', labelField: 'stockName', amountField: 'chargedAmount' },
+  { path: 'relayRoomRequests', gameId: 'stockMarket', itemType: 'relay_room', uidField: 'requesterUid', labelField: 'nickname', amountField: 'chargedAmount' },
+  { path: 'treasureChestRequests', gameId: 'stockMarket', itemType: 'treasure_chest', uidField: 'requesterUid', labelField: null, amountField: null },
+  { path: 'cashChargeRequests', gameId: 'stockMarket', itemType: 'cash_charge', uidField: 'requesterUid', labelField: 'nickname', amountField: null },
+  { path: 'unfreezeDonationRequests', gameId: 'stockMarket', itemType: 'unfreeze_donation', uidField: 'requesterUid', labelField: 'stockName', amountField: null },
+  { path: 'playTimePurchases', gameId: 'stockMarket', itemType: 'play_time', uidField: 'uid', labelField: null, amountField: 'chargedAmount' },
+  { path: 'lotteryPurchases', gameId: 'stockMarket', itemType: 'lottery', uidField: 'uid', labelField: null, amountField: 'chargedAmount' },
+];
+
+const getPurchaseOverview = onCall(async (request) => {
+  await requireAdmin(request);
+  const uidFilter = String((request.data || {}).uid || '').trim();
+  const db = getDatabase();
+
+  const snaps = await Promise.all(PURCHASE_SOURCES.map(function (src) { return db.ref(src.path).get(); }));
+
+  let entries = [];
+  snaps.forEach(function (snap, i) {
+    const src = PURCHASE_SOURCES[i];
+    const val = snap.val() || {};
+    Object.keys(val).forEach(function (id) {
+      const rec = val[id];
+      const uid = rec[src.uidField];
+      if (!uid) return;
+      if (uidFilter && uid !== uidFilter) return;
+      entries.push({
+        id: id,
+        gameId: src.gameId,
+        itemType: src.itemType,
+        uid: uid,
+        nickname: rec.nickname || '',
+        label: src.labelField ? (rec[src.labelField] || '') : '',
+        amount: src.amountField ? (rec[src.amountField] || 0) : null,
+        at: rec.purchasedAt || rec.requestedAt || rec.openedAt || rec.createdAt || 0,
+      });
+    });
+  });
+
+  entries.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+  if (!uidFilter) entries = entries.slice(0, PURCHASE_OVERVIEW_LIMIT);
+  return { entries: entries };
+});
+
 module.exports = {
   getAdminCenterState,
   setAdminCenterPermission,
@@ -415,4 +515,6 @@ module.exports = {
   notifyCashChargeRequest,
   notifyUnfreezeDonationRequest,
   notifyListingRequest,
+  searchSeriesUser,
+  getPurchaseOverview,
 };

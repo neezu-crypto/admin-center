@@ -184,6 +184,28 @@
     </div>
 
     <div class="card">
+      <h2>유저 검색/상세 조회</h2>
+      <p class="hint">
+        닉네임·SOOP 아이디·uid로 검색합니다(부분 일치). 후보를 선택하면 배팅시장·주식시장의 기존 조회 함수를
+        그대로 호출해 한 화면에 모아 보여줍니다 — 12번(구매 현황)도 함께 표시됩니다.
+      </p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+        <input id="userSearchInput" type="text" placeholder="닉네임/SOOP 아이디/uid 입력"
+          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius:6px; font-size:12.5px;">
+        <button id="userSearchBtn" class="perm-refresh-btn" type="button">검색</button>
+      </div>
+      <div id="userSearchResults"></div>
+      <div id="userDetailView" hidden>
+        <h3 class="subhead">기본 정보 (배팅시장)</h3>
+        <div id="userDetailBasic"></div>
+        <h3 class="subhead">주식시장</h3>
+        <div id="userDetailStock"></div>
+        <h3 class="subhead">구매 이력</h3>
+        <div id="userDetailPurchases"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>인증 스트리머 관리</h2>
       <p class="hint">
         스트리머 주식시장·스트리머 배팅시장 양쪽의 인증 대기 신청과 공유 인증 목록을 한 화면에서 봅니다.
@@ -298,6 +320,13 @@
   const bmRejectVerificationFn = httpsCallable(functions, 'rejectVerification');
   const bmRevokeVerificationFn = httpsCallable(functions, 'revokeVerification');
   const smAdminActionFn = httpsCallable(functions, 'adminAction');
+  // 16번/20번 — 유저 검색/상세조회/정지. adminLookupUser·banAccount·unbanAccount는
+  // StreamBet-Market이 이미 배포한 함수를 그대로 호출한다(새 로직 아님).
+  const bmAdminLookupUserFn = httpsCallable(functions, 'adminLookupUser');
+  const bmBanAccountFn = httpsCallable(functions, 'banAccount');
+  const bmUnbanAccountFn = httpsCallable(functions, 'unbanAccount');
+  const searchSeriesUserFn = httpsCallable(functions, 'searchSeriesUser');
+  const getPurchaseOverviewFn = httpsCallable(functions, 'getPurchaseOverview');
 
   // 다음 단계에서 기존 관리 세션 기능을 하나씩 여기 추가하고, 그 key를 실제 기능
   // 노출/활성화 조건(권한 있는 스트리머에게만 보이기 등)으로 사용한다.
@@ -324,6 +353,13 @@
   const discordWebhookInputEl = document.getElementById('discordWebhookInput');
   const discordWebhookSaveBtn = document.getElementById('discordWebhookSaveBtn');
   const discordWebhookTestBtn = document.getElementById('discordWebhookTestBtn');
+  const userSearchInputEl = document.getElementById('userSearchInput');
+  const userSearchBtn = document.getElementById('userSearchBtn');
+  const userSearchResultsEl = document.getElementById('userSearchResults');
+  const userDetailViewEl = document.getElementById('userDetailView');
+  const userDetailBasicEl = document.getElementById('userDetailBasic');
+  const userDetailStockEl = document.getElementById('userDetailStock');
+  const userDetailPurchasesEl = document.getElementById('userDetailPurchases');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
@@ -682,6 +718,152 @@
       bootstrapAdminUidBtn.disabled = false;
     });
   });
+
+  // 16번 — 유저 검색. searchSeriesUser(admin-center 자체 함수, 부분 검색)로
+  // 후보 uid 목록을 얻고, 실제 상세 조회는 각 게임의 기존 함수를 그대로 호출한다.
+  async function runUserSearch() {
+    const query = userSearchInputEl.value.trim();
+    if (!query) return;
+    userSearchResultsEl.innerHTML = '<div class="empty-state">검색 중...</div>';
+    userDetailViewEl.hidden = true;
+    try {
+      const result = await searchSeriesUserFn({ query: query });
+      renderUserSearchResults(result.data.candidates || []);
+    } catch (e) {
+      console.error('유저 검색 실패:', e);
+      userSearchResultsEl.innerHTML = '<div class="empty-state">검색에 실패했습니다.</div>';
+    }
+  }
+  userSearchBtn.addEventListener('click', runUserSearch);
+  userSearchInputEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') runUserSearch(); });
+
+  const SEARCH_SOURCE_LABEL = { bettingMarket: '배팅시장 프로필', streamerVerifications: '인증 기록', uid: 'uid 직접 검색' };
+  function renderUserSearchResults(candidates) {
+    if (!candidates.length) {
+      userSearchResultsEl.innerHTML = '<div class="empty-state">검색 결과가 없습니다.</div>';
+      return;
+    }
+    userSearchResultsEl.innerHTML = '';
+    candidates.forEach(function (c) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      row.style.cursor = 'pointer';
+      row.innerHTML =
+        '<div class="verif-info"><b>' + escapeHtml(c.nickname || '(닉네임 정보 없음)') + '</b>' +
+        '<span>uid: ' + escapeHtml(String(c.uid).slice(0, 12)) +
+        (c.soopId ? ' · SOOP: ' + escapeHtml(c.soopId) : '') +
+        ' · ' + escapeHtml(SEARCH_SOURCE_LABEL[c.source] || c.source) + '</span></div>';
+      row.addEventListener('click', function () { loadUserDetail(c.uid); });
+      userSearchResultsEl.appendChild(row);
+    });
+  }
+
+  // 세 게임의 기존 조회 함수를 병렬로 호출해서 화면 하나에 모은다(06번 원칙 -
+  // 새 계산 없이 기존 함수를 그대로 라우팅). 하나가 실패해도(예: 그 uid가
+  // 주식시장 계정이 없는 경우) 나머지는 그대로 보여준다.
+  async function loadUserDetail(uid) {
+    userDetailViewEl.hidden = false;
+    userDetailBasicEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    userDetailStockEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    userDetailPurchasesEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+
+    const [bmResult, smResult, purchaseResult] = await Promise.allSettled([
+      bmAdminLookupUserFn({ query: uid }),
+      smAdminActionFn({ action: 'getUserDetail', payload: { uid: uid } }),
+      getPurchaseOverviewFn({ uid: uid }),
+    ]);
+
+    renderUserDetailBasic(uid, bmResult);
+    renderUserDetailStock(smResult);
+    renderUserDetailPurchases(purchaseResult);
+  }
+
+  function renderUserDetailBasic(uid, bmResult) {
+    if (bmResult.status !== 'fulfilled') {
+      userDetailBasicEl.innerHTML = '<div class="empty-state">배팅시장 조회 실패(계정이 없을 수 있음): ' + escapeHtml(String(bmResult.reason && bmResult.reason.message || bmResult.reason)) + '</div>';
+      return;
+    }
+    const data = bmResult.value.data || {};
+    const profile = data.profile || {};
+    const wallet = data.wallet || {};
+    const banned = data.banned;
+    userDetailBasicEl.innerHTML =
+      '<div class="verif-row">' +
+      '<div class="verif-info"><b>' + escapeHtml(profile.nickname || '(프로필 없음)') + '</b>' +
+      '<span>uid: ' + escapeHtml(uid) + ' · 잔액: ' + Math.round(wallet.balance || 0).toLocaleString('ko-KR') + '원' +
+      (banned ? ' · 🚫 정지됨(' + escapeHtml(banned.reason || '') + ')' : '') + '</span></div>' +
+      '<div class="verif-actions">' +
+      (banned
+        ? '<button class="approve" id="userUnbanBtn" type="button">정지 해제</button>'
+        : '<button class="reject" id="userBanBtn" type="button">정지</button>') +
+      '</div></div>';
+
+    const banBtn = document.getElementById('userBanBtn');
+    if (banBtn) banBtn.addEventListener('click', function () {
+      const reason = window.prompt('정지 사유를 입력해 주세요:');
+      if (!reason) return;
+      banBtn.disabled = true;
+      bmBanAccountFn({ uid: uid, reason: reason }).then(function () {
+        loadUserDetail(uid);
+      }).catch(function (err) {
+        window.alert('정지 실패: ' + (err && err.message ? err.message : err));
+        banBtn.disabled = false;
+      });
+    });
+    const unbanBtn = document.getElementById('userUnbanBtn');
+    if (unbanBtn) unbanBtn.addEventListener('click', function () {
+      if (!window.confirm('정지를 해제할까요?')) return;
+      unbanBtn.disabled = true;
+      bmUnbanAccountFn({ uid: uid }).then(function () {
+        loadUserDetail(uid);
+      }).catch(function (err) {
+        window.alert('해제 실패: ' + (err && err.message ? err.message : err));
+        unbanBtn.disabled = false;
+      });
+    });
+  }
+
+  function renderUserDetailStock(smResult) {
+    if (smResult.status !== 'fulfilled') {
+      userDetailStockEl.innerHTML = '<div class="empty-state">주식시장 조회 실패(계정이 없을 수 있음)</div>';
+      return;
+    }
+    const data = smResult.value.data || {};
+    const holdingsCount = (data.holdings || []).length;
+    userDetailStockEl.innerHTML =
+      '<div class="verif-row"><div class="verif-info"><b>현금 ' + Math.round(data.cash || 0).toLocaleString('ko-KR') + '원</b>' +
+      '<span>보유 종목 ' + holdingsCount + '개 · 실현손익 ' + Math.round(data.realizedPL || 0).toLocaleString('ko-KR') + '원' +
+      (data.streamerVerified ? ' · 인증 스트리머' : '') + '</span></div></div>';
+  }
+
+  const PURCHASE_ITEM_LABEL = {
+    skin: '스킨 구매', chest_purchase: '보물상자 구매 신청', chest_open: '보물상자 개봉', banner: '배너 신청', chart_banner: '차트 배너 신청',
+    pin: '고정노출 신청', relay_room: '중계방 신청', treasure_chest: '보물상자 구매', cash_charge: '자산 충전 신청',
+    play_time: '플레이타임 충전', lottery: '복권 구매', unfreeze_donation: '동결 해제(후원) 신청',
+  };
+  function renderUserDetailPurchases(purchaseResult) {
+    if (purchaseResult.status !== 'fulfilled') {
+      userDetailPurchasesEl.innerHTML = '<div class="empty-state">구매 이력 조회에 실패했습니다.</div>';
+      return;
+    }
+    const entries = purchaseResult.value.data.entries || [];
+    if (!entries.length) {
+      userDetailPurchasesEl.innerHTML = '<div class="empty-state">구매 이력이 없습니다.</div>';
+      return;
+    }
+    userDetailPurchasesEl.innerHTML = '';
+    entries.forEach(function (e) {
+      const row = document.createElement('div');
+      row.className = 'audit-row';
+      const timeText = e.at ? new Date(e.at).toLocaleString('ko-KR') : '';
+      row.innerHTML =
+        '<div class="audit-main"><b>' + escapeHtml(PURCHASE_ITEM_LABEL[e.itemType] || e.itemType) + '</b>' +
+        '<span class="source-tag ' + e.gameId + '">' + escapeHtml(SOURCE_LABEL[e.gameId] || e.gameId) + '</span></div>' +
+        (e.label ? '<span class="audit-detail">' + escapeHtml(e.label) + (e.amount ? ' · ' + Math.round(e.amount).toLocaleString('ko-KR') + '원' : '') + '</span>' : '') +
+        '<span class="audit-time">' + timeText + '</span>';
+      userDetailPurchasesEl.appendChild(row);
+    });
+  }
 
   function render() {
     gateEl.hidden = role !== 'none';
