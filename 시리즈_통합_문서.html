@@ -1190,7 +1190,30 @@
       <td>"구현 후 검증 필수" 지침, Cloud Functions 전체배포 위험 경고(<code>--only functions:이름</code>으로만 배포, 다른 저장소가 이미 배포해둔 함수를 삭제 대상으로 착각하지 않도록)를 반드시 포함시킨다 — 이미 4개 저장소 전부에 이 지침이 있다.</td>
     </tr>
   </table>
-  <div class="callout"><b>지금 시리즈 안에서 이 체크리스트가 아직 안 끝난 사례</b> — 미드나잇 마트런·절대 광고를 클릭하지 마는 devbar에 서로 링크는 걸려 있지만(4번 항목만 충족), 1·2·5·6·7번은 전혀 안 돼 있는 "같은 오리진에 있을 뿐인 독립 게임" 상태다(07번 표에 "미정"으로 남아있음).</div>
+  <div class="callout"><b>지금 시리즈 안에서 이 체크리스트가 아직 안 끝난 사례</b> — 미드나잇 마트런·절대 광고를 클릭하지 마는 devbar에 서로 링크는 걸려 있지만(4번 항목만 충족), 1·2·5·6·7번은 전혀 안 돼 있는 "같은 오리진에 있을 뿐인 독립 게임" 상태다(07번 표에 "보류"로 남아있음 — 사용자가 명시적으로 보류 지시).</div>
+</section>
+
+<section>
+  <div class="sec-head"><span class="sec-num">26</span><h2>통합 관리 센터 — 배경시장 갤러리 통계 <span class="chip" style="color:#3fb689;border-color:rgba(63,182,137,0.4);">완료</span></h2></div>
+  <p>목표: interior-3d-viewer(배경시장)의 공개 갤러리 프리셋별 "적용"·"OBS 링크 복사" 클릭 횟수를 통합 관리 센터에서 볼 수 있게 한다.</p>
+  <h3>현재 상태 — 클릭은 있었지만 집계는 없었다</h3>
+  <p>공개 갤러리(<code>presetGallery</code>)의 "적용"·"OBS" 버튼은 이미 있었지만 둘 다 <strong>순수 클라이언트 동작</strong>이었다 — 적용은 <code>window.location.href</code> 이동 또는 <code>applyConfig()</code> 호출, OBS는 <code>copyToClipboard()</code>뿐이고 서버를 전혀 거치지 않았다. 그래서 "이 프리셋이 몇 번 쓰였는지"를 아무도 알 수 없었다.</p>
+  <h3>구현한 구조</h3>
+  <div class="flow">1) interior-3d-viewer에 집계 전용 함수 2개 신설
+   incrementPresetApplyCount({ presetId }) / incrementPresetObsLinkCount({ presetId })
+   → 로그인한 누구나(익명 포함) 호출 가능 - 결제·소유권과 무관한 단순 카운터
+   → presetGallery/{id}/stats/{applyCount,obsLinkCount}에 ServerValue.increment로 누적
+   → updatePreset은 .update()라 config/name/updatedAt만 건드림 - stats는 안전
+
+2) 갤러리 "적용"/"OBS" 버튼 클릭 시 이 함수를 fire-and-forget으로 호출
+   → 통계 갱신 실패로 실제 적용·복사 동작이 막히면 안 되므로 결과를 기다리지 않고 무시
+   → 로컬 프리셋(localStorage) 목록의 동일 버튼은 대상 아님 - 게임 서버에
+     남는 개념이 없어 집계할 presetId 자체가 없음
+
+3) admin-center에 새 함수 getGalleryStats() (관리자 전용)
+   → presetGallery를 Admin SDK로 통째로 읽어 프리셋별 이름·적용·OBS 횟수·게시일 반환
+   → 06번 원칙 그대로: interior-3d-viewer 쪽에 새 조회 화면을 만들지 않음</div>
+  <div class="callout"><b>RTDB 규칙 변경이 필요 없었다</b> — <code>presetGallery</code>는 이미 <code>.read:true</code>(공개 읽기)·<code>$presetId: {.write:false}</code>(Functions 전용 쓰기)였다. <code>stats</code>는 그 안에 얹은 새 하위 필드일 뿐이라 기존 규칙이 그대로 적용된다 - 쓰기는 여전히 Functions 전용, 읽기는 admin-center를 포함해 이미 누구나 가능했다.</div>
 </section>
 
 </div>

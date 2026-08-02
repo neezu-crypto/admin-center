@@ -756,7 +756,31 @@ const getVisitorAnalytics = onCall(async (request) => {
   return { apps: results };
 });
 
+// 배경시장(interior-3d-viewer) 갤러리 통계 — 공개 갤러리 프리셋별 "적용"/"OBS 링크
+// 복사" 클릭 횟수. presetGallery는 interior-3d-viewer가 소유한 노드지만, Admin
+// SDK는 그 저장소의 RTDB 규칙과 무관하게 항상 읽을 수 있다(06번 원칙과 동일하게,
+// 새 로직을 그 저장소에 또 만들지 않고 이미 있는 데이터를 그대로 읽기만 한다).
+const getGalleryStats = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const snap = await db.ref('presetGallery').get();
+  const data = snap.val() || {};
+  const presets = Object.keys(data).map(function (id) {
+    const entry = data[id];
+    const stats = entry.stats || {};
+    return {
+      id: id,
+      name: entry.name || '(이름 없음)',
+      applyCount: stats.applyCount || 0,
+      obsLinkCount: stats.obsLinkCount || 0,
+      createdAt: entry.createdAt || 0,
+    };
+  }).sort(function (a, b) { return (b.applyCount + b.obsLinkCount) - (a.applyCount + a.obsLinkCount); });
+  return { presets: presets };
+});
+
 module.exports = {
+  getGalleryStats,
   getAdminCenterState,
   setAdminCenterPermission,
   revokeAllStreamerPermissions,

@@ -332,6 +332,16 @@
       <div id="visitorAnalyticsView"></div>
     </div>
 
+    <div class="card" id="section-gallery-stats">
+      <h2>배경시장 갤러리 통계</h2>
+      <p class="hint">
+        공개 갤러리 프리셋별 "적용"·"OBS 링크 복사" 클릭 횟수입니다. 결제와 무관한
+        단순 사용량 집계이며, 많이 쓰인 순으로 정렬됩니다.
+      </p>
+      <button id="galleryStatsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="galleryStatsList" style="margin-top:12px;"></div>
+    </div>
+
     <div class="card" id="section-review-queue">
       <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
       <p class="hint">
@@ -582,6 +592,7 @@
   const bmGetAnomalyMonitorFn = httpsCallable(functions, 'getAnomalyMonitor');
   const bmGetExchangeLogFn = httpsCallable(functions, 'getExchangeLog');
   const getVisitorAnalyticsFn = httpsCallable(functions, 'getVisitorAnalytics');
+  const getGalleryStatsFn = httpsCallable(functions, 'getGalleryStats');
   const bmBanAccountFn = httpsCallable(functions, 'banAccount');
   const bmUnbanAccountFn = httpsCallable(functions, 'unbanAccount');
   // 13번 — 페이지별 검수. 전부 기존 함수 그대로 라우팅(새 로직 없음).
@@ -654,6 +665,8 @@
   const statsAnomalyEl = document.getElementById('statsAnomaly');
   const visitorAnalyticsRefreshBtn = document.getElementById('visitorAnalyticsRefreshBtn');
   const visitorAnalyticsViewEl = document.getElementById('visitorAnalyticsView');
+  const galleryStatsRefreshBtn = document.getElementById('galleryStatsRefreshBtn');
+  const galleryStatsListEl = document.getElementById('galleryStatsList');
   const reviewAlertBadgeEl = document.getElementById('reviewAlertBadge');
   const reviewQueueCountTagEl = document.getElementById('reviewQueueCountTag');
   const marketReportListEl = document.getElementById('marketReportList');
@@ -1500,6 +1513,40 @@
     visitorAnalyticsViewEl.innerHTML = html;
   }
 
+  // 배경시장(interior-3d-viewer) 갤러리 통계 — 단발성 조회(다른 통계 카드와 동일한
+  // 트레이드오프). interior-3d-viewer에는 새 화면을 만들지 않고 admin-center에서만 본다.
+  async function refreshGalleryStats() {
+    galleryStatsListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await getGalleryStatsFn();
+      renderGalleryStats(result.data.presets || []);
+    } catch (e) {
+      console.error('갤러리 통계 조회 실패:', e);
+      galleryStatsListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+  galleryStatsRefreshBtn.addEventListener('click', refreshGalleryStats);
+
+  function renderGalleryStats(presets) {
+    if (!presets.length) {
+      galleryStatsListEl.innerHTML = '<div class="empty-state">게시된 프리셋이 없습니다.</div>';
+      return;
+    }
+    let html = '<table style="width:100%; font-size:12px; border-collapse:collapse;">' +
+      '<tr style="color:#8b93a1; text-align:left;"><th>프리셋</th><th>적용</th><th>OBS 링크</th><th>게시일</th></tr>';
+    presets.forEach(function (p) {
+      const dateText = p.createdAt ? new Date(p.createdAt).toLocaleDateString('ko-KR') : '-';
+      html += '<tr>' +
+        '<td style="padding:6px 4px;">' + escapeHtml(p.name) + '</td>' +
+        '<td style="padding:6px 4px;">' + p.applyCount + '회</td>' +
+        '<td style="padding:6px 4px;">' + p.obsLinkCount + '회</td>' +
+        '<td style="padding:6px 4px; color:#5f6672;">' + dateText + '</td>' +
+        '</tr>';
+    });
+    html += '</table>';
+    galleryStatsListEl.innerHTML = html;
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // 13·14·15·18번 — 실시간 검수 큐 + 통합 배지
   //
@@ -2182,6 +2229,7 @@
     { id: 'section-user-search', label: '🔍 유저 검색/조회', role: 'admin' },
     { id: 'section-stats', label: '📊 전체 통계', role: 'admin' },
     { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin' },
+    { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
@@ -2279,7 +2327,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
     if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
   });
 </script>
