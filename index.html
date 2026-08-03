@@ -38,8 +38,9 @@
   header .sub { font-size: 11px; color: #8b93a1; margin-top: 2px; }
   #authArea { display: flex; align-items: center; gap: 10px; font-size: 13px; }
   #authArea button {
-    background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
+    background: linear-gradient(180deg, #20252d 0%, #171a20 100%); border: 1px solid #262b33; color: #eef0f2;
     padding: 7px 13px; border-radius: 14px; font-size: 12.5px; cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
   }
   #authArea button:hover { border-color: var(--accent); }
   main { max-width: 960px; margin: 0 auto; padding: 48px 22px 80px; position: relative; z-index: 5; }
@@ -65,10 +66,11 @@
   #gate h2 { color: var(--ink); }
   #gate p { color: var(--ink-soft); font-size: 13.5px; max-width: 380px; line-height: 1.7; }
   #gate button {
-    margin-top: 18px; background: #e8462c; color: #fff6f2; border: none;
-    padding: 11px 22px; border-radius: 7px; font-weight: 700; font-size: 13.5px; cursor: pointer;
+    margin-top: 18px; background: linear-gradient(180deg, #ff6a48 0%, #e8462c 100%); color: #fff6f2; border: none;
+    padding: 11px 22px; border-radius: 12px; font-weight: 700; font-size: 13.5px; cursor: pointer;
+    box-shadow: 0 10px 20px -8px rgba(232,70,44,0.5);
   }
-  #gate button:hover { background: #ff6a48; }
+  #gate button:hover { background: linear-gradient(180deg, #ff7d5e 0%, #ff6a48 100%); }
   .empty-state { font-size: 12.5px; color: #5f6672; text-align: center; padding: 24px 0; grid-column: 1 / -1; }
   .perm-row {
     display: flex; align-items: center; gap: 10px; padding: 10px 0;
@@ -99,8 +101,9 @@
   }
   h2.card-group-header:first-child { margin-top: 0; }
   .perm-refresh-btn {
-    background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
-    padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+    background: linear-gradient(180deg, #20252d 0%, #171a20 100%); border: 1px solid #262b33; color: #eef0f2;
+    padding: 6px 12px; border-radius: 12px; font-size: 12px; cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
   }
   .perm-refresh-btn:hover { border-color: #e8462c; }
   /* 1줄당 3명씩 보이는 그리드(StreamBet-Market 관리 탭의 "인증된 스트리머" 그리드와
@@ -126,9 +129,9 @@
   .source-tag.stockMarket { background: rgba(63,137,182,0.14); color: #3f9bb6; border: 1px solid rgba(63,137,182,0.35); }
   .verif-actions { display: flex; gap: 6px; }
   .verif-actions button {
-    flex: 1; font-size: 11.5px; font-weight: 700; border-radius: 6px; padding: 6px 11px; cursor: pointer;
+    flex: 1; font-size: 11.5px; font-weight: 700; border-radius: 12px; padding: 6px 11px; cursor: pointer;
   }
-  .verif-actions button.approve { background: #3fb689; color: #05170f; border: none; }
+  .verif-actions button.approve { background: linear-gradient(180deg, #4fd19c 0%, #3fb689 100%); color: #05170f; border: none; }
   .verif-actions button.reject { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button.revoke { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button:disabled { opacity: .4; cursor: not-allowed; }
@@ -229,7 +232,7 @@
   .admin-chat-input-row { display: flex; gap: 8px; }
   .admin-chat-input-row input {
     flex: 1; background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
-    padding: 8px 10px; border-radius: 6px; font-size: 12.5px;
+    padding: 8px 10px; border-radius: 12px; font-size: 12.5px;
   }
 
   /* 22번 — 게시글 홍보 현황 칩 목록 */
@@ -259,7 +262,7 @@
   .market-outcome-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
   .market-outcome-option {
     display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-    border: 1px solid #262b33; border-radius: 6px; font-size: 12.5px; cursor: pointer;
+    border: 1px solid #262b33; border-radius: 12px; font-size: 12.5px; cursor: pointer;
   }
   .market-outcome-option.selected { border-color: #e8462c; background: rgba(232,70,44,0.08); }
   .market-outcome-option input[type="radio"] { accent-color: #e8462c; }
@@ -267,7 +270,7 @@
   .market-reason-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
   .market-reason-row select {
     background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
-    padding: 6px 8px; border-radius: 6px; font-size: 12px; max-width: 220px;
+    padding: 6px 8px; border-radius: 12px; font-size: 12px; max-width: 220px;
   }
   /* 마켓 관리·검수 카드의 액션 줄 — 브라우저 기본 버튼이 그대로 노출돼 있던 부분을
      .verif-actions와 같은 언어로 통일 (다만 이 줄은 flex-wrap이 필요해 별도 클래스로 둠) */
@@ -277,12 +280,13 @@
   }
   .market-action-row .override-label input[type="checkbox"] { accent-color: #e8462c; }
   .market-action-row button, .market-reason-row button {
-    background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
-    padding: 6px 13px; border-radius: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+    background: linear-gradient(180deg, #20252d 0%, #171a20 100%); border: 1px solid #262b33; color: #eef0f2;
+    padding: 6px 13px; border-radius: 12px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
   }
   .market-action-row button:hover, .market-reason-row button:hover { border-color: #e8462c; }
-  .market-action-row button.primary { background: #e8462c; color: #fff6f2; border: none; }
-  .market-action-row button.primary:hover { background: #ff6a48; }
+  .market-action-row button.primary { background: linear-gradient(180deg, #ff6a48 0%, #e8462c 100%); color: #fff6f2; border: none; }
+  .market-action-row button.primary:hover { background: linear-gradient(180deg, #ff7d5e 0%, #ff6a48 100%); }
   .market-action-row button.danger, .market-reason-row button.danger {
     background: none; border: 1px solid #e2554f; color: #e2554f;
   }
@@ -395,7 +399,7 @@
       <span id="banAccountsMigrateStatus" class="hint" style="margin:0 0 10px; display:block;"></span>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
         <input id="userSearchInput" type="text" placeholder="닉네임/SOOP 아이디/uid 입력"
-          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius:6px; font-size:12.5px;">
+          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius: 12px; font-size:12.5px;">
         <button id="userSearchBtn" class="perm-refresh-btn" type="button">검색</button>
       </div>
       <div id="userSearchResults"></div>
@@ -431,7 +435,7 @@
         관리자는 이 목록과 무관하게 항상 모든 권한을 가집니다.
       </p>
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
-        <button id="killswitchBtn" type="button" style="background:none; border:1px solid #e2554f; color:#e2554f; border-radius:6px; padding:6px 12px; font-size:12.5px; cursor:pointer;">즉시 회수 킬스위치</button>
+        <button id="killswitchBtn" type="button" style="background:none; border:1px solid #e2554f; color:#e2554f; border-radius: 12px; padding:6px 12px; font-size:12.5px; cursor:pointer;">즉시 회수 킬스위치</button>
         <span id="killswitchStatus" class="hint" style="margin:0;"></span>
       </div>
       <div id="permissionEditList"></div>
@@ -502,7 +506,7 @@
       <div id="discordWebhookStatus" class="hint" style="margin-bottom:10px;">확인 중...</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <input id="discordWebhookInput" type="text" placeholder="https://discord.com/api/webhooks/..."
-          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius:6px; font-size:12.5px;">
+          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius: 12px; font-size:12.5px;">
         <button id="discordWebhookSaveBtn" class="perm-refresh-btn" type="button">저장</button>
         <button id="discordWebhookTestBtn" class="perm-refresh-btn" type="button">테스트 알림 보내기</button>
       </div>
@@ -650,6 +654,8 @@
   </div>
 </main>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
   import {
@@ -1215,7 +1221,7 @@
     renderDevbarLinksList();
   }
 
-  const DEVBAR_INPUT_STYLE = 'background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:6px 8px; border-radius:6px; font-size:12.5px;';
+  const DEVBAR_INPUT_STYLE = 'background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:6px 8px; border-radius: 12px; font-size:12.5px;';
 
   function renderDevbarLinksList() {
     devbarLinksListEl.innerHTML = '';
@@ -1331,7 +1337,7 @@
       section.innerHTML =
         '<h3 class="subhead">' + escapeHtml(g.name) + '</h3>' +
         '<div style="display:flex; gap:6px; margin-bottom:8px;">' +
-        '<input id="' + inputId + '" placeholder="예: 스트리머 닉네임" maxlength="40" style="flex:1; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius:6px; font-size:12.5px;">' +
+        '<input id="' + inputId + '" placeholder="예: 스트리머 닉네임" maxlength="40" style="flex:1; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius: 12px; font-size:12.5px;">' +
         '<button class="perm-refresh-btn" type="button">추가</button>' +
         '</div>' +
         '<div class="promoted-chip-list">' + chipsHtml + '</div>';
@@ -2572,6 +2578,26 @@
     quicknavEl.classList.add('visible');
   }
 
+  // 참고 디자인(CodePen GSAP 랜딩 템플릿)의 스크롤 등장 연출을 세션 카드에 이식.
+  // hidden 셸이 열릴 때마다(render()가 여러 번 호출될 수 있음) 아직 초기화 안 된
+  // 카드만 골라 1회성으로 애니메이션을 붙이고, 방금 보이게 된 카드의 위치를
+  // ScrollTrigger가 다시 잴 수 있도록 매번 refresh()한다.
+  function revealCardsOnScroll() {
+    if (typeof gsap === 'undefined' || typeof ScrollTrigger === 'undefined') return;
+    gsap.registerPlugin(ScrollTrigger);
+    document.querySelectorAll('.card:not([data-reveal-init])').forEach(function (card) {
+      card.setAttribute('data-reveal-init', '1');
+      gsap.fromTo(card,
+        { opacity: 0, y: 26 },
+        {
+          opacity: 1, y: 0, duration: 0.55, ease: 'power2.out',
+          scrollTrigger: { trigger: card, start: 'top 90%', toggleActions: 'play none none none' },
+        }
+      );
+    });
+    ScrollTrigger.refresh();
+  }
+
   function render() {
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
@@ -2608,6 +2634,7 @@
     }
     renderQuickNav();
     handleDeepLink();
+    revealCardsOnScroll();
   }
 
   // 24번 — 디스코드 알림에 담긴 딥링크(URL 프래그먼트, 19번 앵커 id 재사용) 처리.
