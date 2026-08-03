@@ -15,6 +15,13 @@
     --page-1: #f2f0ec; --page-2: #e8e5df; --page-3: #ddd9d0;
     --tile: linear-gradient(180deg, #16161a 0%, #0b0b0d 100%);
     --tile-border: rgba(0,0,0,0.6);
+    --card: linear-gradient(180deg, #fcfaf7 0%, #ece8de 100%);
+    --card-border: rgba(20,20,22,0.07);
+    --card-shadow: 0 22px 40px -16px rgba(40,30,10,0.22), 0 8px 16px -4px rgba(40,30,10,0.08),
+      inset 0 1px 0 rgba(255,255,255,0.8), inset 0 -3px 6px rgba(60,50,30,0.1);
+    --sub: linear-gradient(180deg, #f6f2ea 0%, #ece6d7 100%);
+    --sub-border: rgba(20,20,22,0.12);
+    --sub-hi: inset 0 1px 0 rgba(255,255,255,0.7), inset 0 -2px 4px rgba(60,50,30,0.08);
     --ink: #1c1a17; --ink-soft: #4a463f; --ink-mute: #837e73;
     --accent: #e8462c; --accent-hover: #ff6a48; --on-accent: #fff6f2;
   }
@@ -45,17 +52,14 @@
   #authArea button:hover { border-color: var(--accent); }
   main { max-width: 960px; margin: 0 auto; padding: 48px 22px 80px; position: relative; z-index: 5; }
   .card {
-    background: var(--tile); border: 1px solid var(--tile-border); border-radius: 20px;
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 20px;
     padding: 26px 28px; margin-bottom: 24px;
-    box-shadow:
-      0 24px 44px -20px rgba(20,10,0,0.45),
-      0 8px 16px -8px rgba(20,10,0,0.28),
-      inset 0 1px 0 rgba(255,255,255,0.06),
-      inset 0 -3px 8px rgba(0,0,0,0.5);
+    box-shadow: var(--card-shadow);
+    color: var(--ink);
     position: relative;
   }
   .card h2 { font-size: 14px; margin: 0 0 6px; font-weight: 700; }
-  .card p.hint { font-size: 12.5px; color: #8b93a1; margin: 0 0 16px; line-height: 1.6; }
+  .card p.hint { font-size: 12.5px; color: var(--ink-soft); margin: 0 0 16px; line-height: 1.6; }
   .role-badge {
     display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
     padding: 3px 9px; border-radius: 20px; margin-left: 8px; vertical-align: middle;
@@ -71,21 +75,21 @@
     box-shadow: 0 10px 20px -8px rgba(232,70,44,0.5);
   }
   #gate button:hover { background: linear-gradient(180deg, #ff7d5e 0%, #ff6a48 100%); }
-  .empty-state { font-size: 12.5px; color: #5f6672; text-align: center; padding: 24px 0; grid-column: 1 / -1; }
+  .empty-state { font-size: 12.5px; color: var(--ink-mute); text-align: center; padding: 24px 0; grid-column: 1 / -1; }
   .perm-row {
     display: flex; align-items: center; gap: 10px; padding: 10px 0;
-    border-bottom: 1px solid #1c2027; font-size: 13px;
+    border-bottom: 1px solid var(--sub-border); font-size: 13px;
   }
   .perm-row:last-child { border-bottom: none; }
   .perm-row label { flex: 1; cursor: pointer; }
-  .perm-row .perm-desc { display: block; font-size: 11.5px; color: #5f6672; margin-top: 2px; }
+  .perm-row .perm-desc { display: block; font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
   .perm-granted-tag {
     font-size: 10.5px; font-weight: 700; color: #3fb689;
     background: rgba(63,182,137,0.14); border: 1px solid rgba(63,182,137,0.35);
     padding: 2px 8px; border-radius: 20px;
   }
   [hidden] { display: none !important; }
-  h3.subhead { font-size: 12.5px; color: #8b93a1; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  h3.subhead { font-size: 12.5px; color: var(--ink-soft); margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
   /* 23번 — 카드 19개 시대의 페이지 구조. 카드(h2)보다 한 단계 위, 문서 전체
      내비게이션 역할의 그룹 제목 — subhead(카드 안 소제목)와 확실히 구분되도록
      코랄 점(eyebrow dot) + 밑줄로 표시한다. */
@@ -101,9 +105,9 @@
   }
   h2.card-group-header:first-child { margin-top: 0; }
   .perm-refresh-btn {
-    background: linear-gradient(180deg, #20252d 0%, #171a20 100%); border: 1px solid #262b33; color: #eef0f2;
+    background: linear-gradient(180deg, #ffffff 0%, #f1ecdf 100%); border: 1px solid var(--sub-border); color: var(--ink);
     padding: 6px 12px; border-radius: 12px; font-size: 12px; cursor: pointer;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    box-shadow: var(--sub-hi);
   }
   .perm-refresh-btn:hover { border-color: #e8462c; }
   /* 1줄당 3명씩 보이는 그리드(StreamBet-Market 관리 탭의 "인증된 스트리머" 그리드와
@@ -116,11 +120,11 @@
   }
   .verif-row {
     display: flex; flex-direction: column; gap: 8px; min-width: 0;
-    padding: 12px; border: 1px solid #262b33; border-radius: 14px;
-    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); font-size: 13px;
+    padding: 12px; border: 1px solid var(--sub-border); border-radius: 14px;
+    background: var(--sub); box-shadow: var(--sub-hi); font-size: 13px;
   }
   .verif-info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .verif-info span { display: block; font-size: 11.5px; color: #5f6672; margin-top: 2px; }
+  .verif-info span { display: block; font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
   .source-tag {
     font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px;
     margin-left: 6px; vertical-align: middle;
@@ -144,59 +148,59 @@
     #auditLogList { grid-template-columns: 1fr; }
   }
   .audit-row {
-    padding: 10px 12px; border: 1px solid #262b33; border-radius: 14px;
-    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); font-size: 12.5px; min-width: 0;
+    padding: 10px 12px; border: 1px solid var(--sub-border); border-radius: 14px;
+    background: var(--sub); box-shadow: var(--sub-hi); font-size: 12.5px; min-width: 0;
   }
-  .audit-row .audit-main { color: #eef0f2; }
+  .audit-row .audit-main { color: var(--ink); }
   .audit-row .audit-main b { font-weight: 700; }
   .audit-row .audit-detail {
-    display: block; color: #8b93a1; margin-top: 2px;
+    display: block; color: var(--ink-soft); margin-top: 2px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: "Geist Mono", ui-monospace, monospace; }
+  .audit-row .audit-time { display: block; font-size: 10.5px; color: var(--ink-mute); margin-top: 3px; font-family: "Geist Mono", ui-monospace, monospace; }
 
   /* 통계 섹션 공용 — 브라우저 기본 표 대신 쓰는 정돈된 테이블 껍데기.
      얼룩무늬 + 우측 정렬 숫자로 raw <table>보다 스캔하기 쉽게 만든다. */
-  .stat-table-wrap { border: 1px solid #262b33; border-radius: 14px; overflow: hidden; }
+  .stat-table-wrap { border: 1px solid var(--sub-border); border-radius: 14px; overflow: hidden; }
   .stat-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .stat-table th {
-    text-align: right; color: #5f6672; font-weight: 700; font-size: 10.5px;
+    text-align: right; color: var(--ink-mute); font-weight: 700; font-size: 10.5px;
     text-transform: uppercase; letter-spacing: .03em; padding: 9px 12px;
-    border-bottom: 1px solid #262b33; background: #1c2027;
+    border-bottom: 1px solid var(--sub-border); background: #f1ecdf;
   }
   .stat-table th:first-child, .stat-table td:first-child { text-align: left; }
-  .stat-table td { text-align: right; padding: 8px 12px; color: #eef0f2; }
-  .stat-table td:first-child { color: #8b93a1; }
-  .stat-table tbody tr:nth-child(even) { background: #1c2027; }
-  .stat-table tbody tr:hover { background: #21262e; }
+  .stat-table td { text-align: right; padding: 8px 12px; color: var(--ink); }
+  .stat-table td:first-child { color: var(--ink-soft); }
+  .stat-table tbody tr:nth-child(even) { background: #f6f2e9; }
+  .stat-table tbody tr:hover { background: #ece5d3; }
 
   /* 통계 섹션 공용 — "이름 + 지표 여러 개" 목록(갤러리 통계 등)을 verif-row와
      같은 카드 행 언어로 표현 */
   .stat-row-list { display: flex; flex-direction: column; gap: 6px; }
   .stat-row-item {
     display: flex; align-items: center; gap: 14px;
-    padding: 10px 12px; border: 1px solid #262b33; border-radius: 14px; background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    padding: 10px 12px; border: 1px solid var(--sub-border); border-radius: 14px; background: var(--sub); box-shadow: var(--sub-hi);
   }
   .stat-row-item .name {
-    flex: 1 1 auto; min-width: 0; font-size: 13px; color: #eef0f2;
+    flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--ink);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .stat-row-item .metrics { display: flex; gap: 18px; flex-shrink: 0; }
   .stat-metric { text-align: center; min-width: 40px; }
   .stat-metric .value { display: block; font-size: 13.5px; font-weight: 700; color: #e8462c; }
-  .stat-metric .unit { display: block; font-size: 10px; color: #5f6672; margin-top: 1px; }
-  .stat-row-item .date { flex-shrink: 0; min-width: 68px; text-align: right; font-size: 11px; color: #5f6672; }
+  .stat-metric .unit { display: block; font-size: 10px; color: var(--ink-mute); margin-top: 1px; }
+  .stat-row-item .date { flex-shrink: 0; min-width: 68px; text-align: right; font-size: 11px; color: var(--ink-mute); }
 
   /* 10번 — 페이지별 접속자 분석. 시간대별 최고 접속자 수를 표 대신
      앱별 스파크라인 카드로 보여준다(추세를 표보다 한눈에 파악하기 위함) */
   .sparkline-card {
-    border: 1px solid #262b33; border-radius: 14px; background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    border: 1px solid var(--sub-border); border-radius: 14px; background: var(--sub); box-shadow: var(--sub-hi);
     padding: 14px 16px; margin-bottom: 8px;
   }
   .sparkline-card:last-child { margin-bottom: 0; }
   .sparkline-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-  .sparkline-head .app-name { font-size: 13px; font-weight: 700; color: #eef0f2; }
-  .sparkline-head .peak { font-size: 11.5px; color: #8b93a1; white-space: nowrap; }
+  .sparkline-head .app-name { font-size: 13px; font-weight: 700; color: var(--ink); }
+  .sparkline-head .peak { font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
   .sparkline-head .peak b { color: #e8462c; font-size: 13.5px; font-weight: 700; }
   .sparkline-svg { display: block; width: 100%; height: 46px; }
 
@@ -215,10 +219,10 @@
   .admin-chat-avatar { object-fit: cover; }
   .admin-chat-avatar-fallback {
     display: flex; align-items: center; justify-content: center;
-    background: #262b33; color: #8b93a1; font-size: 12px; font-weight: 700;
+    background: #e6dfd0; color: var(--ink-soft); font-size: 12px; font-weight: 700;
   }
   .admin-chat-bubble {
-    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); border: 1px solid #262b33; border-radius: 14px;
+    background: var(--sub); box-shadow: var(--sub-hi); border: 1px solid var(--sub-border); border-radius: 14px;
     padding: 8px 10px; font-size: 12.5px; max-width: 80%; min-width: 0;
   }
   .admin-chat-msg-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; flex-wrap: wrap; }
@@ -228,23 +232,24 @@
   }
   .admin-chat-role.admin { background: rgba(232,70,44,0.14); color: #e8462c; border: 1px solid rgba(232,70,44,0.35); }
   .admin-chat-role.streamer { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
-  .admin-chat-msg-text { color: #eef0f2; word-break: break-word; }
+  .admin-chat-msg-text { color: var(--ink); word-break: break-word; }
   .admin-chat-input-row { display: flex; gap: 8px; }
   .admin-chat-input-row input {
-    flex: 1; background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
+    flex: 1; background: #f5f1e8; border: 1px solid var(--sub-border); color: var(--ink);
     padding: 8px 10px; border-radius: 12px; font-size: 12.5px;
+    box-shadow: inset 0 1px 3px rgba(20,20,22,0.06);
   }
 
   /* 22번 — 게시글 홍보 현황 칩 목록 */
   .promoted-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
   .promoted-chip {
     display: inline-flex; align-items: center; gap: 6px;
-    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); border: 1px solid #262b33; border-radius: 999px;
-    padding: 5px 6px 5px 12px; font-size: 12px; color: #eef0f2;
+    background: var(--sub); box-shadow: var(--sub-hi); border: 1px solid var(--sub-border); border-radius: 999px;
+    padding: 5px 6px 5px 12px; font-size: 12px; color: var(--ink);
   }
-  .promoted-chip-date { color: #5f6672; font-size: 10.5px; }
+  .promoted-chip-date { color: var(--ink-mute); font-size: 10.5px; }
   .promoted-chip button {
-    background: none; border: none; color: #8b93a1; cursor: pointer;
+    background: none; border: none; color: var(--ink-soft); cursor: pointer;
     font-size: 14px; line-height: 1; padding: 2px 6px; border-radius: 50%;
   }
   .promoted-chip button:hover { color: #e2554f; background: rgba(226,85,79,0.14); }
@@ -262,27 +267,27 @@
   .market-outcome-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
   .market-outcome-option {
     display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-    border: 1px solid #262b33; border-radius: 12px; font-size: 12.5px; cursor: pointer;
+    border: 1px solid var(--sub-border); border-radius: 12px; font-size: 12.5px; cursor: pointer;
   }
   .market-outcome-option.selected { border-color: #e8462c; background: rgba(232,70,44,0.08); }
   .market-outcome-option input[type="radio"] { accent-color: #e8462c; }
   .market-countdown { color: #e8462c; font-size: 11.5px; display: block; margin: 4px 0; }
   .market-reason-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
   .market-reason-row select {
-    background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
+    background: #f5f1e8; border: 1px solid var(--sub-border); color: var(--ink);
     padding: 6px 8px; border-radius: 12px; font-size: 12px; max-width: 220px;
   }
   /* 마켓 관리·검수 카드의 액션 줄 — 브라우저 기본 버튼이 그대로 노출돼 있던 부분을
      .verif-actions와 같은 언어로 통일 (다만 이 줄은 flex-wrap이 필요해 별도 클래스로 둠) */
   .market-action-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .market-action-row .override-label {
-    font-size: 11.5px; color: #8b93a1; display: flex; gap: 5px; align-items: center;
+    font-size: 11.5px; color: var(--ink-soft); display: flex; gap: 5px; align-items: center;
   }
   .market-action-row .override-label input[type="checkbox"] { accent-color: #e8462c; }
   .market-action-row button, .market-reason-row button {
-    background: linear-gradient(180deg, #20252d 0%, #171a20 100%); border: 1px solid #262b33; color: #eef0f2;
+    background: linear-gradient(180deg, #ffffff 0%, #f1ecdf 100%); border: 1px solid var(--sub-border); color: var(--ink);
     padding: 6px 13px; border-radius: 12px; font-size: 11.5px; font-weight: 700; cursor: pointer;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    box-shadow: var(--sub-hi);
   }
   .market-action-row button:hover, .market-reason-row button:hover { border-color: #e8462c; }
   .market-action-row button.primary { background: linear-gradient(180deg, #ff6a48 0%, #e8462c 100%); color: #fff6f2; border: none; }
@@ -294,11 +299,11 @@
 
   .game-row {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    padding: 14px 2px; border-bottom: 1px solid #1c2027;
+    padding: 14px 2px; border-bottom: 1px solid var(--sub-border);
   }
   .game-row:last-child { border-bottom: none; }
   .game-info { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .game-info b { font-size: 13.5px; font-weight: 600; color: #eef0f2; }
+  .game-info b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
   .game-status-tag {
     font-size: 10px; font-weight: 700; letter-spacing: .02em; padding: 3px 9px;
     border-radius: 20px; white-space: nowrap; transition: background .15s ease, color .15s ease, border-color .15s ease;
@@ -311,13 +316,13 @@
   .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
   .toggle-slider {
     position: absolute; inset: 0; cursor: pointer; border-radius: 24px;
-    background: #2a2f38; border: 1px solid #3a4049;
+    background: #d9d2c0; border: 1px solid #c7bfab;
     transition: background .18s ease, border-color .18s ease;
   }
   .toggle-slider::before {
     content: ""; position: absolute; height: 16px; width: 16px; left: 3px; top: 2px;
-    background: #cfd4db; border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    background: #ffffff; border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(20,20,22,0.3);
     transition: transform .18s cubic-bezier(.4,0,.2,1), background .18s ease;
   }
   .toggle-switch input:checked + .toggle-slider {
@@ -399,7 +404,7 @@
       <span id="banAccountsMigrateStatus" class="hint" style="margin:0 0 10px; display:block;"></span>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
         <input id="userSearchInput" type="text" placeholder="닉네임/SOOP 아이디/uid 입력"
-          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius: 12px; font-size:12.5px;">
+          style="flex:1; min-width:220px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:7px 10px; border-radius: 12px; font-size:12.5px;">
         <button id="userSearchBtn" class="perm-refresh-btn" type="button">검색</button>
       </div>
       <div id="userSearchResults"></div>
@@ -506,7 +511,7 @@
       <div id="discordWebhookStatus" class="hint" style="margin-bottom:10px;">확인 중...</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <input id="discordWebhookInput" type="text" placeholder="https://discord.com/api/webhooks/..."
-          style="flex:1; min-width:220px; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius: 12px; font-size:12.5px;">
+          style="flex:1; min-width:220px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:7px 10px; border-radius: 12px; font-size:12.5px;">
         <button id="discordWebhookSaveBtn" class="perm-refresh-btn" type="button">저장</button>
         <button id="discordWebhookTestBtn" class="perm-refresh-btn" type="button">테스트 알림 보내기</button>
       </div>
@@ -1221,7 +1226,7 @@
     renderDevbarLinksList();
   }
 
-  const DEVBAR_INPUT_STYLE = 'background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:6px 8px; border-radius: 12px; font-size:12.5px;';
+  const DEVBAR_INPUT_STYLE = 'background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:6px 8px; border-radius: 12px; font-size:12.5px;';
 
   function renderDevbarLinksList() {
     devbarLinksListEl.innerHTML = '';
@@ -1337,7 +1342,7 @@
       section.innerHTML =
         '<h3 class="subhead">' + escapeHtml(g.name) + '</h3>' +
         '<div style="display:flex; gap:6px; margin-bottom:8px;">' +
-        '<input id="' + inputId + '" placeholder="예: 스트리머 닉네임" maxlength="40" style="flex:1; background:#1c2027; border:1px solid #262b33; color:#eef0f2; padding:7px 10px; border-radius: 12px; font-size:12.5px;">' +
+        '<input id="' + inputId + '" placeholder="예: 스트리머 닉네임" maxlength="40" style="flex:1; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:7px 10px; border-radius: 12px; font-size:12.5px;">' +
         '<button class="perm-refresh-btn" type="button">추가</button>' +
         '</div>' +
         '<div class="promoted-chip-list">' + chipsHtml + '</div>';
@@ -1735,7 +1740,7 @@
       '<div class="verif-row"><div class="verif-info"><b>오늘 — 출석 ' + (d.attendance.claimedCount || 0) + '명(' + won(d.attendance.totalPaidToday) + ') · 셀프상품 매출 ' + won(d.purchase.todayRevenue) + '(' + d.purchase.todayCount + '건)</b>' +
       '<span>누적 — 셀프상품 매출 ' + won(d.purchase.totalRevenue) + '(' + d.purchase.totalCount + '건) · 복권 판매 ' + d.lottery.totalSold + '장/순수익 ' + won(d.lottery.netRevenue) + '</span>' +
       '<span>회원 — 전체 ' + d.users.totalUsers + '명(계정보호 ' + d.users.protectedUsers + ' · 미보호 ' + d.users.anonUsers + ') · 손익랭킹 등록 ' + d.profitRankingEntryCount + '건</span>' +
-      '<span style="color:#5f6672;">재무 건전성(발행량/준비금) 개념은 이 게임엔 아직 없음 — 09번 문서 참고</span></div></div>';
+      '<span style="color:var(--ink-mute);">재무 건전성(발행량/준비금) 개념은 이 게임엔 아직 없음 — 09번 문서 참고</span></div></div>';
   }
 
   const GRANULARITY_LABEL = { day: '일간', week: '주간', month: '월간' };
