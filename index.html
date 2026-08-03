@@ -5,45 +5,70 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="robots" content="noindex, nofollow">
 <title>통합 관리 센터</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
 <style>
   * { box-sizing: border-box; }
+  :root {
+    --page-1: #f2f0ec; --page-2: #e8e5df; --page-3: #ddd9d0;
+    --tile: linear-gradient(180deg, #16161a 0%, #0b0b0d 100%);
+    --tile-border: rgba(0,0,0,0.6);
+    --ink: #1c1a17; --ink-soft: #4a463f; --ink-mute: #837e73;
+    --accent: #e8462c; --accent-hover: #ff6a48; --on-accent: #fff6f2;
+  }
   body {
     margin: 0; min-height: 100vh;
-    background: #0b0d10; color: #eef0f2;
-    font-family: "Pretendard", "Apple SD Gothic Neo", -apple-system, sans-serif;
+    background: radial-gradient(120% 70% at 50% 0%, var(--page-1) 0%, var(--page-2) 60%, var(--page-3) 100%);
+    color: #eef0f2;
+    font-family: "Geist", "Pretendard", "Apple SD Gothic Neo", -apple-system, sans-serif;
+  }
+  .grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 500; opacity: .05; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.1  0 0 0 0 0.1  0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   }
   header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 22px; border-bottom: 1px solid #262b33; background: #15181d;
+    padding: 16px 26px; background: var(--tile); color: #eef0f2;
+    box-shadow: 0 14px 30px -14px rgba(20,10,0,0.35), inset 0 -1px 0 rgba(255,255,255,0.05);
+    position: relative; z-index: 5;
   }
   header h1 { font-size: 16px; margin: 0; font-weight: 700; }
   header .sub { font-size: 11px; color: #8b93a1; margin-top: 2px; }
   #authArea { display: flex; align-items: center; gap: 10px; font-size: 13px; }
   #authArea button {
     background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
-    padding: 7px 13px; border-radius: 6px; font-size: 12.5px; cursor: pointer;
+    padding: 7px 13px; border-radius: 14px; font-size: 12.5px; cursor: pointer;
   }
-  #authArea button:hover { border-color: #d9a441; }
-  main { max-width: 960px; margin: 0 auto; padding: 40px 22px; }
+  #authArea button:hover { border-color: var(--accent); }
+  main { max-width: 960px; margin: 0 auto; padding: 48px 22px 80px; position: relative; z-index: 5; }
   .card {
-    background: #15181d; border: 1px solid #262b33; border-radius: 10px;
-    padding: 22px; margin-bottom: 20px;
+    background: var(--tile); border: 1px solid var(--tile-border); border-radius: 20px;
+    padding: 26px 28px; margin-bottom: 24px;
+    box-shadow:
+      0 24px 44px -20px rgba(20,10,0,0.45),
+      0 8px 16px -8px rgba(20,10,0,0.28),
+      inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 -3px 8px rgba(0,0,0,0.5);
+    position: relative;
   }
-  .card h2 { font-size: 14px; margin: 0 0 6px; }
+  .card h2 { font-size: 14px; margin: 0 0 6px; font-weight: 700; }
   .card p.hint { font-size: 12.5px; color: #8b93a1; margin: 0 0 16px; line-height: 1.6; }
   .role-badge {
     display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
     padding: 3px 9px; border-radius: 20px; margin-left: 8px; vertical-align: middle;
   }
-  .role-badge.admin { background: rgba(217,164,65,0.14); color: #d9a441; border: 1px solid rgba(217,164,65,0.35); }
+  .role-badge.admin { background: rgba(232,70,44,0.14); color: #e8462c; border: 1px solid rgba(232,70,44,0.35); }
   .role-badge.streamer { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
   #gate { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; text-align: center; }
-  #gate p { color: #8b93a1; font-size: 13.5px; max-width: 380px; line-height: 1.7; }
+  #gate h2 { color: var(--ink); }
+  #gate p { color: var(--ink-soft); font-size: 13.5px; max-width: 380px; line-height: 1.7; }
   #gate button {
-    margin-top: 18px; background: #d9a441; color: #1a1200; border: none;
+    margin-top: 18px; background: #e8462c; color: #fff6f2; border: none;
     padding: 11px 22px; border-radius: 7px; font-weight: 700; font-size: 13.5px; cursor: pointer;
   }
-  #gate button:hover { background: #e6b453; }
+  #gate button:hover { background: #ff6a48; }
   .empty-state { font-size: 12.5px; color: #5f6672; text-align: center; padding: 24px 0; grid-column: 1 / -1; }
   .perm-row {
     display: flex; align-items: center; gap: 10px; padding: 10px 0;
@@ -61,18 +86,23 @@
   h3.subhead { font-size: 12.5px; color: #8b93a1; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
   /* 23번 — 카드 19개 시대의 페이지 구조. 카드(h2)보다 한 단계 위, 문서 전체
      내비게이션 역할의 그룹 제목 — subhead(카드 안 소제목)와 확실히 구분되도록
-     골드 강조색 + 밑줄로 표시한다. */
+     코랄 점(eyebrow dot) + 밑줄로 표시한다. */
   h2.card-group-header {
-    font-size: 13px; font-weight: 800; color: #d9a441; text-transform: uppercase;
+    font-size: 13px; font-weight: 800; color: var(--ink); text-transform: uppercase;
     letter-spacing: .06em; margin: 36px 0 12px; padding-bottom: 8px;
-    border-bottom: 1px solid #262b33;
+    border-bottom: 1px solid rgba(20,20,22,0.35);
+    display: flex; align-items: center; gap: 8px;
+  }
+  h2.card-group-header::before {
+    content: ""; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    background: var(--accent); box-shadow: 0 0 0 4px rgba(232,70,44,0.16);
   }
   h2.card-group-header:first-child { margin-top: 0; }
   .perm-refresh-btn {
     background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
     padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
   }
-  .perm-refresh-btn:hover { border-color: #d9a441; }
+  .perm-refresh-btn:hover { border-color: #e8462c; }
   /* 1줄당 3명씩 보이는 그리드(StreamBet-Market 관리 탭의 "인증된 스트리머" 그리드와
      동일한 패턴). 대기 신청·인증된 스트리머 목록 둘 다 같은 카드형 레이아웃을 쓴다. */
   #verificationPendingList, #verificationVerifiedList {
@@ -83,8 +113,8 @@
   }
   .verif-row {
     display: flex; flex-direction: column; gap: 8px; min-width: 0;
-    padding: 12px; border: 1px solid #262b33; border-radius: 8px;
-    background: #191d24; font-size: 13px;
+    padding: 12px; border: 1px solid #262b33; border-radius: 14px;
+    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); font-size: 13px;
   }
   .verif-info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .verif-info span { display: block; font-size: 11.5px; color: #5f6672; margin-top: 2px; }
@@ -92,7 +122,7 @@
     font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px;
     margin-left: 6px; vertical-align: middle;
   }
-  .source-tag.bettingMarket { background: rgba(217,164,65,0.14); color: #d9a441; border: 1px solid rgba(217,164,65,0.35); }
+  .source-tag.bettingMarket { background: rgba(232,70,44,0.14); color: #e8462c; border: 1px solid rgba(232,70,44,0.35); }
   .source-tag.stockMarket { background: rgba(63,137,182,0.14); color: #3f9bb6; border: 1px solid rgba(63,137,182,0.35); }
   .verif-actions { display: flex; gap: 6px; }
   .verif-actions button {
@@ -111,8 +141,8 @@
     #auditLogList { grid-template-columns: 1fr; }
   }
   .audit-row {
-    padding: 10px 12px; border: 1px solid #262b33; border-radius: 8px;
-    background: #191d24; font-size: 12.5px; min-width: 0;
+    padding: 10px 12px; border: 1px solid #262b33; border-radius: 14px;
+    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); font-size: 12.5px; min-width: 0;
   }
   .audit-row .audit-main { color: #eef0f2; }
   .audit-row .audit-main b { font-weight: 700; }
@@ -120,11 +150,11 @@
     display: block; color: #8b93a1; margin-top: 2px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: ui-monospace, monospace; }
+  .audit-row .audit-time { display: block; font-size: 10.5px; color: #5f6672; margin-top: 3px; font-family: "Geist Mono", ui-monospace, monospace; }
 
   /* 통계 섹션 공용 — 브라우저 기본 표 대신 쓰는 정돈된 테이블 껍데기.
      얼룩무늬 + 우측 정렬 숫자로 raw <table>보다 스캔하기 쉽게 만든다. */
-  .stat-table-wrap { border: 1px solid #262b33; border-radius: 8px; overflow: hidden; }
+  .stat-table-wrap { border: 1px solid #262b33; border-radius: 14px; overflow: hidden; }
   .stat-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .stat-table th {
     text-align: right; color: #5f6672; font-weight: 700; font-size: 10.5px;
@@ -134,7 +164,7 @@
   .stat-table th:first-child, .stat-table td:first-child { text-align: left; }
   .stat-table td { text-align: right; padding: 8px 12px; color: #eef0f2; }
   .stat-table td:first-child { color: #8b93a1; }
-  .stat-table tbody tr:nth-child(even) { background: #191d24; }
+  .stat-table tbody tr:nth-child(even) { background: #1c2027; }
   .stat-table tbody tr:hover { background: #21262e; }
 
   /* 통계 섹션 공용 — "이름 + 지표 여러 개" 목록(갤러리 통계 등)을 verif-row와
@@ -142,7 +172,7 @@
   .stat-row-list { display: flex; flex-direction: column; gap: 6px; }
   .stat-row-item {
     display: flex; align-items: center; gap: 14px;
-    padding: 10px 12px; border: 1px solid #262b33; border-radius: 8px; background: #191d24;
+    padding: 10px 12px; border: 1px solid #262b33; border-radius: 14px; background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
   }
   .stat-row-item .name {
     flex: 1 1 auto; min-width: 0; font-size: 13px; color: #eef0f2;
@@ -150,21 +180,21 @@
   }
   .stat-row-item .metrics { display: flex; gap: 18px; flex-shrink: 0; }
   .stat-metric { text-align: center; min-width: 40px; }
-  .stat-metric .value { display: block; font-size: 13.5px; font-weight: 700; color: #d9a441; }
+  .stat-metric .value { display: block; font-size: 13.5px; font-weight: 700; color: #e8462c; }
   .stat-metric .unit { display: block; font-size: 10px; color: #5f6672; margin-top: 1px; }
   .stat-row-item .date { flex-shrink: 0; min-width: 68px; text-align: right; font-size: 11px; color: #5f6672; }
 
   /* 10번 — 페이지별 접속자 분석. 시간대별 최고 접속자 수를 표 대신
      앱별 스파크라인 카드로 보여준다(추세를 표보다 한눈에 파악하기 위함) */
   .sparkline-card {
-    border: 1px solid #262b33; border-radius: 8px; background: #191d24;
+    border: 1px solid #262b33; border-radius: 14px; background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
     padding: 14px 16px; margin-bottom: 8px;
   }
   .sparkline-card:last-child { margin-bottom: 0; }
   .sparkline-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
   .sparkline-head .app-name { font-size: 13px; font-weight: 700; color: #eef0f2; }
   .sparkline-head .peak { font-size: 11.5px; color: #8b93a1; white-space: nowrap; }
-  .sparkline-head .peak b { color: #d9a441; font-size: 13.5px; font-weight: 700; }
+  .sparkline-head .peak b { color: #e8462c; font-size: 13.5px; font-weight: 700; }
   .sparkline-svg { display: block; width: 100%; height: 46px; }
 
   /* 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market 관리 탭과 동일하게
@@ -185,7 +215,7 @@
     background: #262b33; color: #8b93a1; font-size: 12px; font-weight: 700;
   }
   .admin-chat-bubble {
-    background: #191d24; border: 1px solid #262b33; border-radius: 8px;
+    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); border: 1px solid #262b33; border-radius: 14px;
     padding: 8px 10px; font-size: 12.5px; max-width: 80%; min-width: 0;
   }
   .admin-chat-msg-head { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; flex-wrap: wrap; }
@@ -193,7 +223,7 @@
   .admin-chat-role {
     font-size: 10px; padding: 1px 6px; border-radius: 999px; font-weight: 700;
   }
-  .admin-chat-role.admin { background: rgba(217,164,65,0.14); color: #d9a441; border: 1px solid rgba(217,164,65,0.35); }
+  .admin-chat-role.admin { background: rgba(232,70,44,0.14); color: #e8462c; border: 1px solid rgba(232,70,44,0.35); }
   .admin-chat-role.streamer { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
   .admin-chat-msg-text { color: #eef0f2; word-break: break-word; }
   .admin-chat-input-row { display: flex; gap: 8px; }
@@ -206,7 +236,7 @@
   .promoted-chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
   .promoted-chip {
     display: inline-flex; align-items: center; gap: 6px;
-    background: #191d24; border: 1px solid #262b33; border-radius: 999px;
+    background: linear-gradient(180deg, #1c2027 0%, #14171b 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); border: 1px solid #262b33; border-radius: 999px;
     padding: 5px 6px 5px 12px; font-size: 12px; color: #eef0f2;
   }
   .promoted-chip-date { color: #5f6672; font-size: 10.5px; }
@@ -225,15 +255,15 @@
     font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: 6px;
   }
   .market-status-tag.open { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
-  .market-status-tag.closed, .market-status-tag.pendingSettlement { background: rgba(217,164,65,0.14); color: #d9a441; border: 1px solid rgba(217,164,65,0.35); }
+  .market-status-tag.closed, .market-status-tag.pendingSettlement { background: rgba(232,70,44,0.14); color: #e8462c; border: 1px solid rgba(232,70,44,0.35); }
   .market-outcome-list { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
   .market-outcome-option {
     display: flex; align-items: center; gap: 8px; padding: 6px 10px;
     border: 1px solid #262b33; border-radius: 6px; font-size: 12.5px; cursor: pointer;
   }
-  .market-outcome-option.selected { border-color: #d9a441; background: rgba(217,164,65,0.08); }
-  .market-outcome-option input[type="radio"] { accent-color: #d9a441; }
-  .market-countdown { color: #d9a441; font-size: 11.5px; display: block; margin: 4px 0; }
+  .market-outcome-option.selected { border-color: #e8462c; background: rgba(232,70,44,0.08); }
+  .market-outcome-option input[type="radio"] { accent-color: #e8462c; }
+  .market-countdown { color: #e8462c; font-size: 11.5px; display: block; margin: 4px 0; }
   .market-reason-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
   .market-reason-row select {
     background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
@@ -245,14 +275,14 @@
   .market-action-row .override-label {
     font-size: 11.5px; color: #8b93a1; display: flex; gap: 5px; align-items: center;
   }
-  .market-action-row .override-label input[type="checkbox"] { accent-color: #d9a441; }
+  .market-action-row .override-label input[type="checkbox"] { accent-color: #e8462c; }
   .market-action-row button, .market-reason-row button {
     background: #1c2027; border: 1px solid #262b33; color: #eef0f2;
     padding: 6px 13px; border-radius: 6px; font-size: 11.5px; font-weight: 700; cursor: pointer;
   }
-  .market-action-row button:hover, .market-reason-row button:hover { border-color: #d9a441; }
-  .market-action-row button.primary { background: #d9a441; color: #1a1005; border: none; }
-  .market-action-row button.primary:hover { background: #e6b25a; }
+  .market-action-row button:hover, .market-reason-row button:hover { border-color: #e8462c; }
+  .market-action-row button.primary { background: #e8462c; color: #fff6f2; border: none; }
+  .market-action-row button.primary:hover { background: #ff6a48; }
   .market-action-row button.danger, .market-reason-row button.danger {
     background: none; border: 1px solid #e2554f; color: #e2554f;
   }
@@ -292,7 +322,7 @@
   .toggle-switch input:checked + .toggle-slider::before {
     transform: translateX(18px); background: #fff;
   }
-  .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid #d9a441; outline-offset: 2px; }
+  .toggle-switch input:focus-visible + .toggle-slider { outline: 2px solid #e8462c; outline-offset: 2px; }
   .toggle-switch input:disabled + .toggle-slider { opacity: .5; cursor: not-allowed; }
 
   /* 19번 — 세션 빠른 이동. main(960px, 가운데 정렬)의 우측 여백이 충분한
@@ -300,24 +330,25 @@
   .quicknav {
     display: none; position: fixed; right: 16px; top: 90px;
     max-height: calc(100vh - 110px); overflow-y: auto;
-    flex-direction: column; gap: 2px; background: #15181d; border: 1px solid #262b33;
-    border-radius: 12px; padding: 8px; z-index: 200; width: 176px;
+    flex-direction: column; gap: 2px; background: var(--tile); border: 1px solid var(--tile-border);
+    border-radius: 18px; padding: 8px; z-index: 200; width: 176px;
+    box-shadow: 0 18px 34px -16px rgba(20,10,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
   }
   .quicknav.visible { display: flex; }
   .quicknav-title { font-size: 11px; font-weight: 800; color: #5f6672; padding: 4px 10px 6px; text-transform: uppercase; letter-spacing: .04em; }
   .quicknav-group {
-    font-size: 10px; font-weight: 800; color: #d9a441; padding: 10px 10px 2px;
+    font-size: 10px; font-weight: 800; color: #e8462c; padding: 10px 10px 2px;
     text-transform: uppercase; letter-spacing: .04em;
   }
   .quicknav-group:first-of-type { padding-top: 0; }
   .quicknav button {
-    background: transparent; color: #8b93a1; border: none; padding: 7px 10px; border-radius: 8px;
+    background: transparent; color: #8b93a1; border: none; padding: 7px 10px; border-radius: 14px;
     font-size: 12.5px; font-weight: 600; text-align: left; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; cursor: pointer;
   }
-  .quicknav button:hover { background: #1c2027; color: #d9a441; }
+  .quicknav button:hover { background: #1c2027; color: #e8462c; }
   .quicknav::-webkit-scrollbar { width: 4px; }
-  .quicknav::-webkit-scrollbar-thumb { background: #d9a441; border-radius: 10px; }
+  .quicknav::-webkit-scrollbar-thumb { background: #e8462c; border-radius: 10px; }
   @media (max-width: 1400px) {
     .quicknav { display: none !important; }
   }
@@ -327,6 +358,7 @@
 
 <!-- 19번 — 세션 빠른 이동. soop-stock-market의 #admin-quicknav 패턴을 그대로
      이식(고정 위치, 넓은 화면에서만 노출, 클릭 시 스크롤). -->
+<div class="grain"></div>
 <nav id="quicknav" class="quicknav"></nav>
 
 <header>
@@ -1748,8 +1780,8 @@
     const linePoints = points.join(' ');
     const areaPoints = pad + ',' + (h - pad) + ' ' + linePoints + ' ' + (w - pad) + ',' + (h - pad);
     return '<svg class="sparkline-svg" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">' +
-      '<polyline points="' + areaPoints + '" fill="rgba(217,164,65,0.14)" stroke="none"></polyline>' +
-      '<polyline points="' + linePoints + '" fill="none" stroke="#d9a441" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>' +
+      '<polyline points="' + areaPoints + '" fill="rgba(232,70,44,0.14)" stroke="none"></polyline>' +
+      '<polyline points="' + linePoints + '" fill="none" stroke="#e8462c" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>' +
       '</svg>';
   }
   async function refreshVisitorAnalytics() {
