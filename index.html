@@ -405,59 +405,6 @@
       <div id="permissionEditList"></div>
     </div>
 
-    <h2 class="card-group-header">모니터링</h2>
-    <div class="card" id="section-stats">
-      <h2>전체 통계 요약·이상 거래 모니터링</h2>
-      <p class="hint">
-        각 게임의 기존 통계 함수를 그대로 호출해 모은 화면입니다(새로 계산하지 않음). 이상 거래 모니터링은
-        아직 리스트 나열 수준(1단계)이고, soop-stock-market 쪽엔 상응하는 리스트가 없어 배팅시장만 표시됩니다.
-      </p>
-      <button id="statsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
-      <h3 class="subhead">배팅시장 — 오늘/누적/재무 건전성</h3>
-      <div id="statsBettingSummary"></div>
-      <h3 class="subhead">주식시장 — 오늘/누적</h3>
-      <div id="statsStockSummary"></div>
-      <h3 class="subhead">배팅시장 — 일간·주간·월간</h3>
-      <div style="display:flex; gap:6px; margin-bottom:8px;">
-        <button class="perm-refresh-btn" type="button" data-granularity="day">일간</button>
-        <button class="perm-refresh-btn" type="button" data-granularity="week">주간</button>
-        <button class="perm-refresh-btn" type="button" data-granularity="month">월간</button>
-      </div>
-      <div id="statsTimeseries"></div>
-      <h3 class="subhead">이상 거래 모니터링 (배팅시장, 1단계 — 리스트 나열)</h3>
-      <div id="statsAnomaly"></div>
-    </div>
-
-    <div class="card" id="section-visitor-analytics">
-      <h2>페이지별 접속자 분석</h2>
-      <p class="hint">
-        시간당 최고 동시 접속자 수(최근 24시간)입니다. interior-3d-viewer(배경시장)는 아직 접속자 집계
-        기능 자체가 없어 제외됩니다 — 10번 문서 참고. 5분마다 서버가 자동으로 샘플링합니다.
-      </p>
-      <button id="visitorAnalyticsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
-      <div id="visitorAnalyticsView"></div>
-    </div>
-
-    <div class="card" id="section-gallery-stats">
-      <h2>배경시장 갤러리 통계</h2>
-      <p class="hint">
-        공개 갤러리 프리셋별 "적용"·"OBS 링크 복사" 클릭 횟수입니다. 결제와 무관한
-        단순 사용량 집계이며, 많이 쓰인 순으로 정렬됩니다.
-      </p>
-      <button id="galleryStatsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
-      <div id="galleryStatsList" style="margin-top:12px;"></div>
-    </div>
-
-    <div class="card" id="section-audit-log">
-      <h2>감사 로그</h2>
-      <p class="hint">
-        배팅시장의 기존 처리 내역과 주식시장의 관리 처리 내역(현재는 스트리머 인증 관련
-        액션만 기록 중)을 합쳐서 시간순으로 보여줍니다. 최근 100건.
-      </p>
-      <button id="auditRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
-      <div id="auditLogList"></div>
-    </div>
-
     <h2 class="card-group-header">검수·승인</h2>
     <div class="card" id="section-review-queue">
       <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
@@ -578,6 +525,65 @@
     </div>
   </div>
 
+  <!-- 모니터링 4개 카드는 위임 권한 카탈로그의 두 번째 항목('viewMonitoring').
+       관리자는 항상 보이고, 인증 스트리머는 그 권한이 켜져 있을 때만 보인다
+       (render()에서 토글) — devbarShell과 동일하게 adminShell/streamerShell
+       어느 쪽에도 속하지 않는 독립 래퍼로 뺐다. -->
+  <div id="monitoringShell" hidden>
+    <h2 class="card-group-header">모니터링</h2>
+    <div class="card" id="section-stats">
+      <h2>전체 통계 요약·이상 거래 모니터링</h2>
+      <p class="hint">
+        각 게임의 기존 통계 함수를 그대로 호출해 모은 화면입니다(새로 계산하지 않음). 이상 거래 모니터링은
+        아직 리스트 나열 수준(1단계)이고, soop-stock-market 쪽엔 상응하는 리스트가 없어 배팅시장만 표시됩니다.
+      </p>
+      <button id="statsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <h3 class="subhead">배팅시장 — 오늘/누적/재무 건전성</h3>
+      <div id="statsBettingSummary"></div>
+      <h3 class="subhead">주식시장 — 오늘/누적</h3>
+      <div id="statsStockSummary"></div>
+      <h3 class="subhead">배팅시장 — 일간·주간·월간</h3>
+      <div style="display:flex; gap:6px; margin-bottom:8px;">
+        <button class="perm-refresh-btn" type="button" data-granularity="day">일간</button>
+        <button class="perm-refresh-btn" type="button" data-granularity="week">주간</button>
+        <button class="perm-refresh-btn" type="button" data-granularity="month">월간</button>
+      </div>
+      <div id="statsTimeseries"></div>
+      <h3 class="subhead">이상 거래 모니터링 (배팅시장, 1단계 — 리스트 나열)</h3>
+      <div id="statsAnomaly"></div>
+    </div>
+
+    <div class="card" id="section-visitor-analytics">
+      <h2>페이지별 접속자 분석</h2>
+      <p class="hint">
+        시간당 최고 동시 접속자 수(최근 24시간)입니다. interior-3d-viewer(배경시장)는 아직 접속자 집계
+        기능 자체가 없어 제외됩니다 — 10번 문서 참고. 5분마다 서버가 자동으로 샘플링합니다.
+      </p>
+      <button id="visitorAnalyticsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="visitorAnalyticsView"></div>
+    </div>
+
+    <div class="card" id="section-gallery-stats">
+      <h2>배경시장 갤러리 통계</h2>
+      <p class="hint">
+        공개 갤러리 프리셋별 "적용"·"OBS 링크 복사" 클릭 횟수입니다. 결제와 무관한
+        단순 사용량 집계이며, 많이 쓰인 순으로 정렬됩니다.
+      </p>
+      <button id="galleryStatsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="galleryStatsList" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="card" id="section-audit-log">
+      <h2>감사 로그</h2>
+      <p class="hint">
+        배팅시장의 기존 처리 내역과 주식시장의 관리 처리 내역(현재는 스트리머 인증 관련
+        액션만 기록 중)을 합쳐서 시간순으로 보여줍니다. 최근 100건.
+      </p>
+      <button id="auditRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="auditLogList"></div>
+    </div>
+  </div>
+
   <!-- 17번 — 관리자·인증 스트리머 둘 다 접근하는 공용 화면. StreamBet-Market이 이미
        배포한 sendAdminChatMessage/bettingMarket-adminChat을 그대로 재사용한다(06번
        원칙 — 새 채널을 따로 만들지 않음). -->
@@ -673,6 +679,9 @@
   const bmRejectVerificationFn = httpsCallable(functions, 'rejectVerification');
   const bmRevokeVerificationFn = httpsCallable(functions, 'revokeVerification');
   const smAdminActionFn = httpsCallable(functions, 'adminAction');
+  // 07번 4단계 — adminAction 디스패처 전체를 여는 대신, 위임 권한(viewMonitoring)
+  // 으로 통계 조회만 열어주는 soop-stock-market의 전용 함수를 따로 호출한다.
+  const smGetOverviewStatsForMonitoringFn = httpsCallable(functions, 'getOverviewStatsForMonitoring');
   // 16번/20번 — 유저 검색/상세조회/정지. adminLookupUser·banAccount·unbanAccount는
   // StreamBet-Market이 이미 배포한 함수를 그대로 호출한다(새 로직 아님).
   const bmAdminLookupUserFn = httpsCallable(functions, 'adminLookupUser');
@@ -710,6 +719,7 @@
   // 하고, 여기 key는 그 값과 정확히 일치해야 한다.
   const PERMISSION_CATALOG = [
     { key: 'devbarEdit', label: 'devbar 링크 편집', desc: '각 페이지 상단 devbar에 표시되는 게임 링크를 추가·수정·삭제할 수 있습니다.' },
+    { key: 'viewMonitoring', label: '모니터링 열람', desc: '전체 통계 요약·이상 거래 모니터링, 페이지별 접속자 분석, 배경시장 갤러리 통계, 감사 로그를 볼 수 있습니다(조회 전용, 쓰기 없음).' },
   ];
 
   const authStatusEl = document.getElementById('authStatus');
@@ -723,6 +733,7 @@
   const streamerShellEl = document.getElementById('streamerShell');
   const sharedShellEl = document.getElementById('sharedShell');
   const devbarShellEl = document.getElementById('devbarShell');
+  const monitoringShellEl = document.getElementById('monitoringShell');
   const adminChatMessagesEl = document.getElementById('adminChatMessages');
   const adminChatInputEl = document.getElementById('adminChatInput');
   const adminChatSendBtn = document.getElementById('adminChatSendBtn');
@@ -1595,7 +1606,7 @@
 
     const [dashResult, stockResult, seriesResult, anomalyResult, exchangeResult] = await Promise.allSettled([
       bmGetAdminDashboardStatsFn(),
-      smAdminActionFn({ action: 'getOverviewStats' }),
+      smGetOverviewStatsForMonitoringFn(),
       bmGetStatsTimeseriesFn({ granularity: granularity || 'day' }),
       bmGetAnomalyMonitorFn(),
       bmGetExchangeLogFn(),
@@ -2433,10 +2444,10 @@
     { id: 'section-user-search', label: '🔍 유저 검색/조회', role: 'admin', group: '신원·권한' },
     { id: 'section-verification', label: '🎙️ 인증 스트리머 관리', role: 'admin' },
     { id: 'section-permission-delegation', label: '🗝️ 권한 위임', role: 'admin' },
-    { id: 'section-stats', label: '📊 전체 통계', role: 'admin', group: '모니터링' },
-    { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin' },
-    { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin' },
-    { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin' },
+    { id: 'section-stats', label: '📊 전체 통계', role: 'admin', group: '모니터링', permKey: 'viewMonitoring' },
+    { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin', permKey: 'viewMonitoring' },
+    { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin', permKey: 'viewMonitoring' },
+    { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
@@ -2445,7 +2456,7 @@
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
-    { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin' },
+    { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin', permKey: 'devbarEdit' },
     { id: 'section-granted-permissions', label: '🗝️ 부여받은 권한', role: 'streamer' },
     { id: 'section-chat', label: '💬 채팅', role: 'shared' },
   ];
@@ -2456,10 +2467,10 @@
       quicknavEl.innerHTML = '';
       return;
     }
-    // section-devbar는 07번 4단계 위임 권한 대상이라 role 태그만으로는 못 거른다 —
-    // 관리자는 항상, 인증 스트리머는 devbarEdit 권한이 있을 때만 통과시킨다.
+    // permKey가 있는 항목(devbar 편집, 모니터링)은 위임 권한 대상이라 role 태그만으로는
+    // 못 거른다 — 관리자는 항상, 인증 스트리머는 그 권한이 켜져 있을 때만 통과시킨다.
     const items = QUICKNAV_ITEMS.filter(function (item) {
-      if (item.id === 'section-devbar') return role === 'admin' || !!grantedPermissions.devbarEdit;
+      if (item.permKey) return role === 'admin' || !!grantedPermissions[item.permKey];
       return item.role === role || item.role === 'shared';
     });
     quicknavEl.innerHTML = '<div class="quicknav-title">🧭 빠른 이동</div>' +
@@ -2486,6 +2497,11 @@
     const canEditDevbar = role === 'admin' || (role === 'streamer' && !!grantedPermissions.devbarEdit);
     devbarShellEl.hidden = !canEditDevbar;
     if (canEditDevbar) refreshDevbarLinks();
+    // 모니터링 4개 카드 — 관리자는 항상, 인증 스트리머는 'viewMonitoring' 권한이
+    // 켜져 있을 때만 보인다(devbar 편집과 동일한 독립 래퍼 패턴).
+    const canViewMonitoring = role === 'admin' || (role === 'streamer' && !!grantedPermissions.viewMonitoring);
+    monitoringShellEl.hidden = !canViewMonitoring;
+    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshAuditLog(); }
     roleBadgeEl.hidden = role === 'none';
     if (role === 'admin') {
       roleBadgeEl.textContent = '관리자';
@@ -2535,7 +2551,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshAuditLog(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
     if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
   });
 </script>

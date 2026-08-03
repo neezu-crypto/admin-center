@@ -342,7 +342,7 @@
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
       <td>위임 권한 카탈로그 채우기</td>
-      <td>첫 항목으로 <code>devbarEdit</code>(devbar 링크 편집) 등록. 서버에 실제 강제 로직(<code>requireAdminOrDelegatedPermission</code>)을 새로 만들어 <code>setDevbarLink</code>/<code>deleteDevbarLink</code>에 적용 — <code>PERMISSION_CATALOG</code>는 UI 표시용일 뿐, 실권한은 이 서버 검증이 담당한다. 07번에 실행 결과 기록</td>
+      <td>첫 항목 <code>devbarEdit</code>(devbar 링크 편집)에 이어 두 번째 항목 <code>viewMonitoring</code>(모니터링 열람 — 전체 통계 요약·이상 거래 모니터링/페이지별 접속자 분석/배경시장 갤러리 통계/감사 로그, 조회 전용) 등록. admin-center 자체 함수 3개(<code>listAuditLogOverview</code>/<code>getVisitorAnalytics</code>/<code>getGalleryStats</code>)는 <code>requireAdminOrDelegatedPermission</code>으로 교체하고, soop-stock-market의 통계 조회는 <code>adminAction</code> 디스패처(다른 민감한 액션이 훨씬 많아 통째로 열 수 없음) 대신 전용 함수 <code>getOverviewStatsForMonitoring</code>을 새로 만들어 같은 권한 노드를 공유해서 검증한다. 4개 카드를 <code>adminShell</code>에서 독립 래퍼 <code>monitoringShell</code>로 옮겨 devbar 편집과 동일한 패턴으로 토글. <code>PERMISSION_CATALOG</code>는 UI 표시용일 뿐, 실권한은 서버 검증이 담당한다. 07번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -478,7 +478,7 @@
 
 4단계 — 권한 위임 준비 ✅ 완료
    즉시 회수 킬스위치        ✅ 완료 — revokeAllStreamerPermissions + 실행 기록
-   위임 권한 카탈로그 채우기 ✅ 완료 — 첫 항목 devbarEdit 등록 + 서버 강제 로직 신설
+   위임 권한 카탈로그 채우기 ✅ 완료 — devbarEdit(1번) + viewMonitoring(2번, 모니터링 4개 카드) 등록
    (되돌릴 방법 없이 권한부터 뿌리지 않도록 이 순서 고정 — 킬스위치를 먼저 만들어둔
    덕분에 실제로 권한이 하나 풀린 지금도 문제 생기면 바로 되돌릴 수 있다)
 

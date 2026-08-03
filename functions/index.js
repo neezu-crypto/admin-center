@@ -201,10 +201,10 @@ const listStreamerVerificationOverview = onCall(async (request) => {
 // 통합 관리 센터 — 감사 로그 통합: 배팅시장의 기존 bettingMarket/auditLog와
 // 주식시장의 새 adminAuditLog(이번에 처음 만든 것 - 스트리머 인증 관련 액션만
 // 우선 기록 중, 다른 관리 액션 전체로 넓히는 건 별도 작업)를 합쳐서 시간순으로
-// 보여준다. 관리자 전용.
+// 보여준다. 관리자는 항상, 인증 스트리머는 'viewMonitoring' 위임 권한이 있을 때만.
 const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
-  await requireAdmin(request);
+  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
   const db = getDatabase();
   const [bmLogSnap, smLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').get(),
@@ -735,9 +735,10 @@ const sampleConcurrentUsers = onSchedule('every 5 minutes', async function () {
 });
 
 // 관리 센터 UI가 호출하는 조회 전용 함수 — 앱별 최근 hours시간의 시간당 최고
-// 접속자 수 시계열을 반환한다.
+// 접속자 수 시계열을 반환한다. 관리자는 항상, 인증 스트리머는 'viewMonitoring'
+// 위임 권한이 있을 때만.
 const getVisitorAnalytics = onCall(async (request) => {
-  await requireAdmin(request);
+  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
   const hours = Math.min(Math.max(parseInt((request.data || {}).hours, 10) || 24, 1), 168);
   const db = getDatabase();
   const now = Date.now();
@@ -760,8 +761,9 @@ const getVisitorAnalytics = onCall(async (request) => {
 // 복사" 클릭 횟수. presetGallery는 interior-3d-viewer가 소유한 노드지만, Admin
 // SDK는 그 저장소의 RTDB 규칙과 무관하게 항상 읽을 수 있다(06번 원칙과 동일하게,
 // 새 로직을 그 저장소에 또 만들지 않고 이미 있는 데이터를 그대로 읽기만 한다).
+// 관리자는 항상, 인증 스트리머는 'viewMonitoring' 위임 권한이 있을 때만.
 const getGalleryStats = onCall(async (request) => {
-  await requireAdmin(request);
+  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
   const db = getDatabase();
   const snap = await db.ref('presetGallery').get();
   const data = snap.val() || {};
