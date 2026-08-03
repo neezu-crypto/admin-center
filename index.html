@@ -406,21 +406,6 @@
     </div>
 
     <h2 class="card-group-header">검수·승인</h2>
-    <div class="card" id="section-review-queue">
-      <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
-      <p class="hint">
-        실시간 구독입니다(새로고침 불필요). 마켓/닉네임 신고는 배팅시장 기존 함수를, 프리셋 병합 실패는
-        interior-3d-viewer에 신규로 만든 함수를 그대로 호출합니다 — 이 항목이 이 시리즈에서 유일하게
-        CLI로만 처리 가능했던 사각지대였습니다.
-      </p>
-      <h3 class="subhead">마켓 신고</h3>
-      <div id="marketReportList"></div>
-      <h3 class="subhead">닉네임 신고</h3>
-      <div id="nicknameReportList"></div>
-      <h3 class="subhead">프리셋 병합 실패 (배경시장)</h3>
-      <div id="presetMergeFailureList"></div>
-    </div>
-
     <div class="card" id="section-purchase-approval">
       <h2>상품 구매 승인 검수 <span id="purchaseApprovalCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
       <p class="hint">
@@ -584,6 +569,26 @@
     </div>
   </div>
 
+  <!-- 페이지별 검수 카드는 위임 권한 카탈로그의 세 번째 항목('reviewQueue', 읽기+쓰기).
+       관리자는 항상 보이고, 인증 스트리머는 그 권한이 켜져 있을 때만 보인다(render()에서
+       토글) — devbarShell/monitoringShell과 동일하게 독립 래퍼로 뺐다. -->
+  <div id="reviewQueueShell" hidden>
+    <div class="card" id="section-review-queue">
+      <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
+      <p class="hint">
+        실시간 구독입니다(새로고침 불필요). 마켓/닉네임 신고는 배팅시장 기존 함수를, 프리셋 병합 실패는
+        interior-3d-viewer에 신규로 만든 함수를 그대로 호출합니다 — 이 항목이 이 시리즈에서 유일하게
+        CLI로만 처리 가능했던 사각지대였습니다.
+      </p>
+      <h3 class="subhead">마켓 신고</h3>
+      <div id="marketReportList"></div>
+      <h3 class="subhead">닉네임 신고</h3>
+      <div id="nicknameReportList"></div>
+      <h3 class="subhead">프리셋 병합 실패 (배경시장)</h3>
+      <div id="presetMergeFailureList"></div>
+    </div>
+  </div>
+
   <!-- 17번 — 관리자·인증 스트리머 둘 다 접근하는 공용 화면. StreamBet-Market이 이미
        배포한 sendAdminChatMessage/bettingMarket-adminChat을 그대로 재사용한다(06번
        원칙 — 새 채널을 따로 만들지 않음). -->
@@ -720,6 +725,7 @@
   const PERMISSION_CATALOG = [
     { key: 'devbarEdit', label: 'devbar 링크 편집', desc: '각 페이지 상단 devbar에 표시되는 게임 링크를 추가·수정·삭제할 수 있습니다.' },
     { key: 'viewMonitoring', label: '모니터링 열람', desc: '전체 통계 요약·이상 거래 모니터링, 페이지별 접속자 분석, 배경시장 갤러리 통계, 감사 로그를 볼 수 있습니다(조회 전용, 쓰기 없음).' },
+    { key: 'reviewQueue', label: '페이지별 검수 처리', desc: '마켓 신고·닉네임 신고·배경시장 프리셋 병합 실패 건을 확인하고 직접 처리(확인 완료/차단/이전/무시)할 수 있습니다(읽기+쓰기).' },
   ];
 
   const authStatusEl = document.getElementById('authStatus');
@@ -734,6 +740,7 @@
   const sharedShellEl = document.getElementById('sharedShell');
   const devbarShellEl = document.getElementById('devbarShell');
   const monitoringShellEl = document.getElementById('monitoringShell');
+  const reviewQueueShellEl = document.getElementById('reviewQueueShell');
   const adminChatMessagesEl = document.getElementById('adminChatMessages');
   const adminChatInputEl = document.getElementById('adminChatInput');
   const adminChatSendBtn = document.getElementById('adminChatSendBtn');
@@ -2448,7 +2455,7 @@
     { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin', permKey: 'viewMonitoring' },
-    { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인' },
+    { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인', permKey: 'reviewQueue' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
@@ -2502,6 +2509,11 @@
     const canViewMonitoring = role === 'admin' || (role === 'streamer' && !!grantedPermissions.viewMonitoring);
     monitoringShellEl.hidden = !canViewMonitoring;
     if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshAuditLog(); }
+    // 페이지별 검수(마켓/닉네임 신고, 프리셋 병합 실패) — 관리자는 항상, 인증
+    // 스트리머는 'reviewQueue' 권한이 켜져 있을 때만 보인다(읽기+쓰기 모두 포함).
+    const canManageReviewQueue = role === 'admin' || (role === 'streamer' && !!grantedPermissions.reviewQueue);
+    reviewQueueShellEl.hidden = !canManageReviewQueue;
+    if (canManageReviewQueue) startReviewQueueSubscriptions();
     roleBadgeEl.hidden = role === 'none';
     if (role === 'admin') {
       roleBadgeEl.textContent = '관리자';
@@ -2551,7 +2563,7 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); startReviewQueueSubscriptions(); startMarketManagementSubscription(); }
+    if (role === 'admin') { refreshVerificationOverview(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); startMarketManagementSubscription(); }
     if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
   });
 </script>

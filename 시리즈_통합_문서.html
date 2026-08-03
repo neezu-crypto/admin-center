@@ -342,7 +342,7 @@
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
       <td>위임 권한 카탈로그 채우기</td>
-      <td>첫 항목 <code>devbarEdit</code>(devbar 링크 편집)에 이어 두 번째 항목 <code>viewMonitoring</code>(모니터링 열람 — 전체 통계 요약·이상 거래 모니터링/페이지별 접속자 분석/배경시장 갤러리 통계/감사 로그, 조회 전용) 등록. admin-center 자체 함수 3개(<code>listAuditLogOverview</code>/<code>getVisitorAnalytics</code>/<code>getGalleryStats</code>)는 <code>requireAdminOrDelegatedPermission</code>으로 교체하고, soop-stock-market의 통계 조회는 <code>adminAction</code> 디스패처(다른 민감한 액션이 훨씬 많아 통째로 열 수 없음) 대신 전용 함수 <code>getOverviewStatsForMonitoring</code>을 새로 만들어 같은 권한 노드를 공유해서 검증한다. 4개 카드를 <code>adminShell</code>에서 독립 래퍼 <code>monitoringShell</code>로 옮겨 devbar 편집과 동일한 패턴으로 토글. <code>PERMISSION_CATALOG</code>는 UI 표시용일 뿐, 실권한은 서버 검증이 담당한다. 07번에 실행 결과 기록</td>
+      <td>첫 항목 <code>devbarEdit</code>(devbar 링크 편집), 두 번째 항목 <code>viewMonitoring</code>(모니터링 열람 — 전체 통계 요약·이상 거래 모니터링/페이지별 접속자 분석/배경시장 갤러리 통계/감사 로그, 조회 전용)에 이어 세 번째 항목 <code>reviewQueue</code>(페이지별 검수 처리 — 마켓/닉네임 신고·배경시장 프리셋 병합 실패, 읽기+쓰기) 등록. viewMonitoring 때 admin-center 자체 함수 3개(<code>listAuditLogOverview</code>/<code>getVisitorAnalytics</code>/<code>getGalleryStats</code>)는 <code>requireAdminOrDelegatedPermission</code>으로 교체하고, soop-stock-market의 통계 조회는 <code>adminAction</code> 디스패처(다른 민감한 액션이 훨씬 많아 통째로 열 수 없음) 대신 전용 함수 <code>getOverviewStatsForMonitoring</code>을 새로 만들어 같은 권한 노드를 공유해서 검증했다. reviewQueue는 마켓/닉네임 신고 쪽은 StreamBet-Market의 <code>dismissMarketReport</code>/<code>dismissNicknameReport</code>/<code>blockNickname</code>이 이미 <code>requireAdminOrVerifiedStreamer</code>(인증 스트리머 전원에게 이미 열려 있음)라 손댈 게 없었지만, 프리셋 병합 실패는 interior-3d-viewer의 <code>resolvePresetMergeFailure</code>/<code>listPresetMergeFailures</code>가 순수 관리자 전용이라 이 저장소에도 처음으로 <code>requireAdminOrDelegatedPermission</code>을 새로 만들어 적용했고, RTDB 규칙(<code>presetMergeFailures</code>의 <code>.read</code>)도 3개 저장소 <code>database.rules.json</code>에 동일하게 위임 권한 조건을 추가했다(클라이언트가 이 노드를 실시간 구독으로 직접 읽으므로 함수 가드만으론 부족함). 3개 카드/그룹을 각각 <code>adminShell</code>에서 독립 래퍼(<code>monitoringShell</code>/<code>reviewQueueShell</code>)로 옮겨 devbar 편집과 동일한 패턴으로 토글. <code>PERMISSION_CATALOG</code>는 UI 표시용일 뿐, 실권한은 서버 검증이 담당한다. 07번에 실행 결과 기록</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -478,7 +478,7 @@
 
 4단계 — 권한 위임 준비 ✅ 완료
    즉시 회수 킬스위치        ✅ 완료 — revokeAllStreamerPermissions + 실행 기록
-   위임 권한 카탈로그 채우기 ✅ 완료 — devbarEdit(1번) + viewMonitoring(2번, 모니터링 4개 카드) 등록
+   위임 권한 카탈로그 채우기 ✅ 완료 — devbarEdit(1번)+viewMonitoring(2번)+reviewQueue(3번, 읽기+쓰기) 등록
    (되돌릴 방법 없이 권한부터 뿌리지 않도록 이 순서 고정 — 킬스위치를 먼저 만들어둔
    덕분에 실제로 권한이 하나 풀린 지금도 문제 생기면 바로 되돌릴 수 있다)
 
