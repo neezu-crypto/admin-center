@@ -659,8 +659,17 @@ const PURCHASE_SOURCES = [
 ];
 
 const getPurchaseOverview = onCall(async (request) => {
-  await requireAdmin(request);
   const uidFilter = String((request.data || {}).uid || '').trim();
+  // uid 지정 조회(유저 검색/상세)는 특정 개인의 구매 이력을 그대로 보여주는
+  // 민감한 조회라 관리자 전용으로 유지한다. uid 없이 부르는 전체/유형별 목록
+  // 조회(예: 배팅시장 스킨 구매 내역 카드)만 위임 권한으로도 허용한다.
+  if (uidFilter) await requireAdmin(request);
+  else await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  // itemType 필터 - 배팅시장 스킨 구매 내역처럼 특정 유형만 전체 목록으로 보고
+  // 싶을 때 쓴다. 필터 없이 전체를 불러오면 12개 소스가 하나의 상위 100건
+  // 캡(PURCHASE_OVERVIEW_LIMIT)을 나눠 써서, 빈도가 낮은 유형(스킨 등)이 밀려날
+  // 수 있다 - 그래서 정렬·자르기 전에 유형별로 먼저 걸러낸다.
+  const itemTypeFilter = String((request.data || {}).itemType || '').trim();
   const db = getDatabase();
 
   const snaps = await Promise.all(PURCHASE_SOURCES.map(function (src) { return db.ref(src.path).get(); }));
@@ -668,6 +677,7 @@ const getPurchaseOverview = onCall(async (request) => {
   let entries = [];
   snaps.forEach(function (snap, i) {
     const src = PURCHASE_SOURCES[i];
+    if (itemTypeFilter && src.itemType !== itemTypeFilter) return;
     const val = snap.val() || {};
     Object.keys(val).forEach(function (id) {
       const rec = val[id];

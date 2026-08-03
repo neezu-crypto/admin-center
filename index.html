@@ -567,6 +567,16 @@
       <button id="auditRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <div id="auditLogList"></div>
     </div>
+
+    <div class="card" id="section-skin-purchases">
+      <h2>배팅시장 스킨 구매 내역</h2>
+      <p class="hint">
+        getPurchaseOverview를 itemType='skin'으로 필터링해 호출합니다(새 함수 아님 —
+        12번 유저 상세 조회가 쓰는 함수를 그대로 재사용). 최근 100건.
+      </p>
+      <button id="skinPurchasesRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="skinPurchasesList" style="margin-top:12px;"></div>
+    </div>
   </div>
 
   <!-- 페이지별 검수 카드는 위임 권한 카탈로그의 세 번째 항목('reviewQueue', 읽기+쓰기).
@@ -753,6 +763,8 @@
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
   const auditRefreshBtn = document.getElementById('auditRefreshBtn');
   const auditLogListEl = document.getElementById('auditLogList');
+  const skinPurchasesRefreshBtn = document.getElementById('skinPurchasesRefreshBtn');
+  const skinPurchasesListEl = document.getElementById('skinPurchasesList');
   const seriesConfigListEl = document.getElementById('seriesConfigList');
   const devbarLinksListEl = document.getElementById('devbarLinksList');
   const promotedContentListEl = document.getElementById('promotedContentList');
@@ -1067,6 +1079,39 @@
         (e.detail ? '<span class="audit-detail">' + escapeHtml(e.detail) + '</span>' : '') +
         '<span class="audit-time">' + timeText + '</span>';
       auditLogListEl.appendChild(row);
+    });
+  }
+
+  // 배팅시장 스킨 구매 내역 - 12번 유저 상세 조회가 쓰는 getPurchaseOverview를
+  // itemType='skin'으로 필터링해 그대로 재사용한다(새 계산 없음, 06번 원칙).
+  async function refreshSkinPurchases() {
+    skinPurchasesListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await getPurchaseOverviewFn({ itemType: 'skin' });
+      renderSkinPurchases(result.data.entries || []);
+    } catch (e) {
+      console.error('스킨 구매 내역 조회 실패:', e);
+      skinPurchasesListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+  skinPurchasesRefreshBtn.addEventListener('click', refreshSkinPurchases);
+
+  function renderSkinPurchases(entries) {
+    if (!entries.length) {
+      skinPurchasesListEl.innerHTML = '<div class="empty-state">구매 내역이 없습니다.</div>';
+      return;
+    }
+    skinPurchasesListEl.innerHTML = '';
+    entries.forEach(function (e) {
+      const row = document.createElement('div');
+      row.className = 'audit-row';
+      const timeText = e.at ? new Date(e.at).toLocaleString('ko-KR') : '';
+      row.innerHTML =
+        '<div class="audit-main"><b>' + escapeHtml(e.nickname || e.uid) + '</b> · ' + escapeHtml(e.label || '') +
+        '<span class="source-tag ' + e.gameId + '">' + (SOURCE_LABEL[e.gameId] || e.gameId) + '</span></div>' +
+        (e.amount ? '<span class="audit-detail">' + won(e.amount) + '</span>' : '') +
+        '<span class="audit-time">' + timeText + '</span>';
+      skinPurchasesListEl.appendChild(row);
     });
   }
 
@@ -2455,6 +2500,7 @@
     { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin', permKey: 'viewMonitoring' },
+    { id: 'section-skin-purchases', label: '🎨 스킨 구매 내역', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인', permKey: 'reviewQueue' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
@@ -2508,7 +2554,7 @@
     // 켜져 있을 때만 보인다(devbar 편집과 동일한 독립 래퍼 패턴).
     const canViewMonitoring = role === 'admin' || (role === 'streamer' && !!grantedPermissions.viewMonitoring);
     monitoringShellEl.hidden = !canViewMonitoring;
-    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshAuditLog(); }
+    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshAuditLog(); refreshSkinPurchases(); }
     // 페이지별 검수(마켓/닉네임 신고, 프리셋 병합 실패) — 관리자는 항상, 인증
     // 스트리머는 'reviewQueue' 권한이 켜져 있을 때만 보인다(읽기+쓰기 모두 포함).
     const canManageReviewQueue = role === 'admin' || (role === 'streamer' && !!grantedPermissions.reviewQueue);
