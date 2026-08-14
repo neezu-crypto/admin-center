@@ -791,6 +791,39 @@ const getGalleryStats = onCall(async (request) => {
   return { presets: presets };
 });
 
+// 스트리머 인생게임(streamer-life-game) 통계 — 선택지별/엔딩별 집계 카운터와 전체
+// 시작·완료·공유 수. lifeGame/stats는 그 저장소의 Cloud Function이 선택 제출 시점에
+// ServerValue.increment로 미리 쌓아둔 카운터라(streamer-life-game/functions/index.js),
+// 여기서는 원본 choiceLog를 훑지 않고 그 카운터만 그대로 읽는다 — getGalleryStats와
+// 동일한 원칙(다른 저장소 소유 데이터를 Admin SDK로 읽기만, 새 로직 중복 없음).
+const getLifeGameStats = onCall(async (request) => {
+  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  const db = getDatabase();
+  const snap = await db.ref('lifeGame/stats').get();
+  const data = snap.val() || {};
+  const totals = data.totals || {};
+
+  const choicesRaw = data.choices || {};
+  const choices = [];
+  Object.keys(choicesRaw).forEach(function (stageId) {
+    Object.keys(choicesRaw[stageId] || {}).forEach(function (choiceId) {
+      choices.push({ stageId: stageId, choiceId: choiceId, count: choicesRaw[stageId][choiceId] || 0 });
+    });
+  });
+  choices.sort(function (a, b) { return b.count - a.count; });
+
+  const endingsRaw = data.endings || {};
+  const endings = Object.keys(endingsRaw)
+    .map(function (id) { return { id: id, count: endingsRaw[id] || 0 }; })
+    .sort(function (a, b) { return b.count - a.count; });
+
+  return {
+    totals: { started: totals.started || 0, completed: totals.completed || 0, shared: totals.shared || 0 },
+    choices: choices,
+    endings: endings
+  };
+});
+
 // 20번 2단계 — 정지계정 관리. 게임별 정지(각 게임의 기존 banAccount/unbanAccount)가
 // 기본이고, 여기 두 함수는 신원 단위로 명백히 심각한 사안(다중계정 어뷰징, 결제
 // 사기 등)만 관리자가 명시적으로 "전체 게임 정지"로 격상시키는 전용 통로다(07번
@@ -861,6 +894,7 @@ const migrateBannedAccounts = onCall(async (request) => {
 
 module.exports = {
   getGalleryStats,
+  getLifeGameStats,
   banAccountAllGames,
   unbanAccountAllGames,
   migrateBannedAccounts,

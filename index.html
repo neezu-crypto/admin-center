@@ -60,6 +60,7 @@
   }
   .card h2 { font-size: 14px; margin: 0 0 6px; font-weight: 700; }
   .card p.hint { font-size: 12.5px; color: var(--ink-soft); margin: 0 0 16px; line-height: 1.6; }
+  .sub-heading { font-size: 12px; color: var(--ink-soft); margin: 0 0 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
   .role-badge {
     display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .02em;
     padding: 3px 9px; border-radius: 20px; margin-left: 8px; vertical-align: middle;
@@ -599,6 +600,19 @@
       <div id="galleryStatsList" style="margin-top:12px;"></div>
     </div>
 
+    <div class="card" id="section-lifegame-stats">
+      <h2>인생게임 통계</h2>
+      <p class="hint">
+        스트리머 인생게임(streamer-life-game)의 시작·완료·공유 수와, 선택지·엔딩별
+        누적 선택 횟수입니다. 원본 로그가 아니라 그때그때 서버가 미리 집계해둔
+        카운터를 읽어오는 방식이라 가볍습니다.
+      </p>
+      <button id="lifeGameStatsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="lifeGameStatsTotals" style="margin-top:12px;"></div>
+      <div id="lifeGameStatsEndings" style="margin-top:16px;"></div>
+      <div id="lifeGameStatsChoices" style="margin-top:16px;"></div>
+    </div>
+
     <div class="card" id="section-audit-log">
       <h2>감사 로그</h2>
       <p class="hint">
@@ -752,6 +766,7 @@
   const bmGetExchangeLogFn = httpsCallable(functions, 'getExchangeLog');
   const getVisitorAnalyticsFn = httpsCallable(functions, 'getVisitorAnalytics');
   const getGalleryStatsFn = httpsCallable(functions, 'getGalleryStats');
+  const getLifeGameStatsFn = httpsCallable(functions, 'getLifeGameStats');
   const banAccountAllGamesFn = httpsCallable(functions, 'banAccountAllGames');
   const unbanAccountAllGamesFn = httpsCallable(functions, 'unbanAccountAllGames');
   const migrateBannedAccountsFn = httpsCallable(functions, 'migrateBannedAccounts');
@@ -836,6 +851,10 @@
   const visitorAnalyticsViewEl = document.getElementById('visitorAnalyticsView');
   const galleryStatsRefreshBtn = document.getElementById('galleryStatsRefreshBtn');
   const galleryStatsListEl = document.getElementById('galleryStatsList');
+  const lifeGameStatsRefreshBtn = document.getElementById('lifeGameStatsRefreshBtn');
+  const lifeGameStatsTotalsEl = document.getElementById('lifeGameStatsTotals');
+  const lifeGameStatsEndingsEl = document.getElementById('lifeGameStatsEndings');
+  const lifeGameStatsChoicesEl = document.getElementById('lifeGameStatsChoices');
   const reviewAlertBadgeEl = document.getElementById('reviewAlertBadge');
   const reviewQueueCountTagEl = document.getElementById('reviewQueueCountTag');
   const marketReportListEl = document.getElementById('marketReportList');
@@ -1858,6 +1877,69 @@
     }).join('') + '</div>';
   }
 
+  // 스트리머 인생게임(streamer-life-game) 통계 — 위 갤러리 통계와 동일한 단발성
+  // 조회 패턴. 엔딩 id → 한글 제목은 streamer-life-game/functions/game-data.js의
+  // ENDINGS 배열과 맞춰둔 표시용 매핑이라, 그쪽에서 엔딩을 추가·개명하면 여기도
+  // 같이 갱신해야 한다(id 목록 자체가 바뀌는 일은 드물어서 자동 동기화 없이 둠).
+  const LIFEGAME_ENDING_LABELS = {
+    'all-in-success': '올인 성공형',
+    'all-in-failure': '올인 실패형',
+    'burnout': '번아웃형',
+    'stable': '안정형',
+    'relationship-first': '관계 중심형',
+    'recluse': '은둔형'
+  };
+
+  async function refreshLifeGameStats() {
+    lifeGameStatsTotalsEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    lifeGameStatsEndingsEl.innerHTML = '';
+    lifeGameStatsChoicesEl.innerHTML = '';
+    try {
+      const result = await getLifeGameStatsFn();
+      renderLifeGameStats(result.data || {});
+    } catch (e) {
+      console.error('인생게임 통계 조회 실패:', e);
+      lifeGameStatsTotalsEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+  lifeGameStatsRefreshBtn.addEventListener('click', refreshLifeGameStats);
+
+  function renderLifeGameStats(data) {
+    const totals = data.totals || { started: 0, completed: 0, shared: 0 };
+    lifeGameStatsTotalsEl.innerHTML =
+      '<div class="stat-row-list"><div class="stat-row-item">' +
+      '<span class="name">전체</span>' +
+      '<div class="metrics">' +
+      '<div class="stat-metric"><span class="value">' + totals.started + '</span><span class="unit">시작</span></div>' +
+      '<div class="stat-metric"><span class="value">' + totals.completed + '</span><span class="unit">완료</span></div>' +
+      '<div class="stat-metric"><span class="value">' + totals.shared + '</span><span class="unit">갤러리 공유</span></div>' +
+      '</div></div></div>';
+
+    const endings = data.endings || [];
+    lifeGameStatsEndingsEl.innerHTML = '<h3 class="sub-heading">엔딩 로그</h3>' + (
+      endings.length
+        ? '<div class="stat-row-list">' + endings.map(function (e) {
+            return '<div class="stat-row-item">' +
+              '<span class="name">' + escapeHtml(LIFEGAME_ENDING_LABELS[e.id] || e.id) + '</span>' +
+              '<div class="metrics"><div class="stat-metric"><span class="value">' + e.count + '</span><span class="unit">회</span></div></div>' +
+              '</div>';
+          }).join('') + '</div>'
+        : '<div class="empty-state">아직 완료된 인생이 없습니다.</div>'
+    );
+
+    const choices = data.choices || [];
+    lifeGameStatsChoicesEl.innerHTML = '<h3 class="sub-heading">선택지 로그</h3>' + (
+      choices.length
+        ? '<div class="stat-row-list">' + choices.map(function (c) {
+            return '<div class="stat-row-item">' +
+              '<span class="name">' + escapeHtml(c.stageId) + ' / ' + escapeHtml(c.choiceId) + '</span>' +
+              '<div class="metrics"><div class="stat-metric"><span class="value">' + c.count + '</span><span class="unit">회</span></div></div>' +
+              '</div>';
+          }).join('') + '</div>'
+        : '<div class="empty-state">아직 선택 기록이 없습니다.</div>'
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════════
   // 13·14·15·18번 — 실시간 검수 큐 + 통합 배지
   //
@@ -2542,6 +2624,7 @@
     { id: 'section-stats', label: '📊 전체 통계', role: 'admin', group: '모니터링', permKey: 'viewMonitoring' },
     { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin', permKey: 'viewMonitoring' },
+    { id: 'section-lifegame-stats', label: '📖 인생게임 통계', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-skin-purchases', label: '🎨 스킨 구매 내역', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인', permKey: 'reviewQueue' },
@@ -2617,7 +2700,7 @@
     // 켜져 있을 때만 보인다(devbar 편집과 동일한 독립 래퍼 패턴).
     const canViewMonitoring = role === 'admin' || (role === 'streamer' && !!grantedPermissions.viewMonitoring);
     monitoringShellEl.hidden = !canViewMonitoring;
-    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshAuditLog(); refreshSkinPurchases(); }
+    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshLifeGameStats(); refreshAuditLog(); refreshSkinPurchases(); }
     // 페이지별 검수(마켓/닉네임 신고, 프리셋 병합 실패) — 관리자는 항상, 인증
     // 스트리머는 'reviewQueue' 권한이 켜져 있을 때만 보인다(읽기+쓰기 모두 포함).
     const canManageReviewQueue = role === 'admin' || (role === 'streamer' && !!grantedPermissions.reviewQueue);
