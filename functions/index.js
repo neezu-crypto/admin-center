@@ -592,6 +592,25 @@ const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', 
 // cardBannerRequests(soop-stock-market)는 관리자 승인 단계 없이 즉시 적용되는
 // 흐름이라(14번에서 이미 확인) 검수 알림 대상이 아니다 — 의도적으로 제외.
 
+// 25번 — 인증 스트리머가 주식시장/배팅시장에 접속하면 관리자 디스코드로
+// 알림. verifiedStreamerVisits는 두 앱이 공유하는 큐(soop-stock-market의
+// logStockMarketVisit, StreamBet-Market의 logBettingMarketVisit이 각자
+// 쓴다) - 승인 대기가 필요한 "신청" 큐가 아니라 그냥 접속 로그라 makeQueueTrigger의
+// "🔔 새 O 신청" 문구 대신 별도 메시지를 쓴다. 같은 스트리머가 하루에 여러 번
+// 들어와도 알림이 반복되지 않는 건 각 앱의 로깅 함수가 날짜별 dedup으로 이미
+// 막아준다(여기서는 큐에 실제로 쌓인 항목만 그대로 알리면 됨). 딱히 검토가
+// 필요한 큐가 아니라 admin-center에 대응하는 카드/앵커가 없어 딥링크는 생략.
+const notifyVerifiedStreamerVisit = onValueCreated('/verifiedStreamerVisits/{entryId}', async (event) => {
+  const data = event.data.val() || {};
+  const marketLabel = data.market === 'betting' ? '배팅시장' : '주식시장';
+  const name = data.nickname
+    ? data.nickname + (data.soopId ? ' (@' + data.soopId + ')' : '')
+    : 'uid: ' + (data.uid || '(알 수 없음)');
+  await sendDiscordNotification(
+    '👋 **인증 스트리머 접속 — ' + marketLabel + '**\n' + name + '\n오늘 첫 접속입니다.'
+  );
+});
+
 // 16번 — 유저 검색. StreamBet-Market의 adminLookupUser는 닉네임 "정확히 일치"만
 // 지원하고, soop-stock-market의 getUserDetail은 uid만 받는다(닉네임 검색 자체가
 // 없음) — 이 부분 검색(prefix)이 어디에도 없던 진짜 신규 기능이다. 결과는 후보
@@ -929,6 +948,7 @@ module.exports = {
   notifyCashChargeRequest,
   notifyUnfreezeDonationRequest,
   notifyListingRequest,
+  notifyVerifiedStreamerVisit,
   searchSeriesUser,
   getPurchaseOverview,
   sampleConcurrentUsers,
