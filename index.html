@@ -178,6 +178,9 @@
   /* 통계 섹션 공용 — "이름 + 지표 여러 개" 목록(갤러리 통계 등)을 verif-row와
      같은 카드 행 언어로 표현 */
   .stat-row-list { display: flex; flex-direction: column; gap: 6px; }
+  /* 항목이 많아질 수 있는 목록(인생게임 엔딩·선택지 로그 등)용 - #auditLogList와
+     같은 스크롤박스 관례. 항목이 적을 땐 그냥 안 넘쳐서 스크롤이 안 생긴다. */
+  .stat-row-list-scroll { max-height: 400px; overflow-y: auto; padding-right: 4px; }
   .stat-row-item {
     display: flex; align-items: center; gap: 14px;
     padding: 10px 12px; border: 1px solid var(--sub-border); border-radius: 14px; background: var(--sub); box-shadow: var(--sub-hi);
@@ -1879,15 +1882,30 @@
 
   // 스트리머 인생게임(streamer-life-game) 통계 — 위 갤러리 통계와 동일한 단발성
   // 조회 패턴. 엔딩 id → 한글 제목은 streamer-life-game/functions/game-data.js의
-  // ENDINGS 배열과 맞춰둔 표시용 매핑이라, 그쪽에서 엔딩을 추가·개명하면 여기도
-  // 같이 갱신해야 한다(id 목록 자체가 바뀌는 일은 드물어서 자동 동기화 없이 둠).
+  // ENDINGS 배열 + index.js의 INSTANT_ENDING_BUILDERS(재산·인기·행복·관계
+  // 0이 되면 즉시 종료되는 collapse/bankruptcy/obscurity/despair/isolation
+  // 5종, ENDINGS 배열 밖에 따로 있음)와 맞춰둔 표시용 매핑이라, 그쪽에서
+  // 엔딩을 추가·개명하면 여기도 같이 갱신해야 한다 - 2026-08 한 세션에서만
+  // 6종 → 16종으로 늘어난 적이 있어 "드물다"고 방심하면 안 된다. 매핑에
+  // 없는 id는 화면에 원본 id가 그대로 노출되니(예: "bankruptcy"), 이 목록에
+  // 없는 이름이 보이면 누락 신호로 보고 game-data.js를 다시 대조할 것.
   const LIFEGAME_ENDING_LABELS = {
     'all-in-success': '올인 성공형',
     'all-in-failure': '올인 실패형',
     'burnout': '번아웃형',
     'stable': '안정형',
     'relationship-first': '관계 중심형',
-    'recluse': '은둔형'
+    'recluse': '은둔형',
+    'full-family-legacy': '대를 이은 가족형',
+    'living-with-illness': '평생을 안고 살아온 삶형',
+    'rising-after-the-fall': '다시 일어난 삶형',
+    'solitary-path': '홀로 걸어온 길형',
+    'enduring-companion': '오랜 동행형',
+    'collapse': '쓰러진 삶',
+    'bankruptcy': '파산한 삶',
+    'obscurity': '완전히 잊힌 삶',
+    'despair': '완전히 지쳐버린 삶',
+    'isolation': '완전히 홀로 남은 삶'
   };
 
   async function refreshLifeGameStats() {
@@ -1918,7 +1936,7 @@
     const endings = data.endings || [];
     lifeGameStatsEndingsEl.innerHTML = '<h3 class="sub-heading">엔딩 로그</h3>' + (
       endings.length
-        ? '<div class="stat-row-list">' + endings.map(function (e) {
+        ? '<div class="stat-row-list stat-row-list-scroll">' + endings.map(function (e) {
             return '<div class="stat-row-item">' +
               '<span class="name">' + escapeHtml(LIFEGAME_ENDING_LABELS[e.id] || e.id) + '</span>' +
               '<div class="metrics"><div class="stat-metric"><span class="value">' + e.count + '</span><span class="unit">회</span></div></div>' +
@@ -1930,7 +1948,7 @@
     const choices = data.choices || [];
     lifeGameStatsChoicesEl.innerHTML = '<h3 class="sub-heading">선택지 로그</h3>' + (
       choices.length
-        ? '<div class="stat-row-list">' + choices.map(function (c) {
+        ? '<div class="stat-row-list stat-row-list-scroll">' + choices.map(function (c) {
             return '<div class="stat-row-item">' +
               '<span class="name">' + escapeHtml(c.stageId) + ' / ' + escapeHtml(c.choiceId) + '</span>' +
               '<div class="metrics"><div class="stat-metric"><span class="value">' + c.count + '</span><span class="unit">회</span></div></div>' +
