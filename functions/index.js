@@ -579,7 +579,15 @@ function makeQueueTrigger(path, label, anchorId) {
 const notifyMarketReport            = makeQueueTrigger('/bettingMarket/marketReports/{id}', '새 마켓 신고 (배팅시장)', 'section-review-queue');
 const notifyNicknameReport          = makeQueueTrigger('/bettingMarket/nicknameReports/{id}', '새 닉네임 신고 (배팅시장)', 'section-review-queue');
 const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyRequests/{id}', '새 인증 신청 (배팅시장)', 'section-verification');
-const notifyStockVerifyRequest      = makeQueueTrigger('/streamerVerificationRequests/{id}', '새 인증 신청 (주식시장)', 'section-verification');
+// source 필드(2026-08-22, streamer-life-game 16장 도입, 사용자 승인)로 어느
+// 앱에서 온 신청인지 구분한다 - 이 필드가 생기기 전 신청·기존 주식시장
+// 호출부는 값을 안 보내므로(undefined) '주식시장'으로 폴백
+// (notifyVerifiedStreamerVisit의 marketLabel과 동일한 패턴).
+const notifyStockVerifyRequest = onValueCreated('/streamerVerificationRequests/{id}', async (event) => {
+  const data = event.data.val() || {};
+  const label = data.source === 'life-game' ? '새 인증 신청 (인생게임)' : '새 인증 신청 (주식시장)';
+  await sendDiscordNotification('🔔 **' + label + '**\n' + formatRequestSummary(data) + '\n' + deepLink('section-verification'));
+});
 const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)', 'section-purchase-approval');
 const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)', 'section-purchase-approval');
 const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)', 'section-purchase-approval');
