@@ -493,6 +493,39 @@
       <div id="seriesConfigList"></div>
     </div>
 
+    <div class="card" id="section-lifegame-bots">
+      <h2>인생게임 봇 관리</h2>
+      <p class="hint">
+        실제 사람처럼 자동으로 인생을 진행하는 관리형 봇입니다. 실행은
+        streamer-life-game의 서버 예약 함수(runBotTurns)가 알아서 도는 방식이라
+        이 페이지를 열어둘 필요는 없습니다 — 여기서는 봇 수·1턴당 걸리는 시간(초)·
+        성향 분포만 설정합니다. admin-center에 노출되는 시작/완료/엔딩·선택지
+        통계(위 "인생게임 통계" 카드)에는 봇의 선택이 집계되지 않습니다.
+      </p>
+      <div id="lifeGameBotConfigForm">
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px;">
+          <input type="checkbox" id="lifeGameBotEnabledInput"> 봇 활성화
+        </label>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px;">
+          <label>봇 수
+            <input type="number" id="lifeGameBotCountInput" min="0" max="50" step="1"
+              style="width:80px; margin-left:6px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:6px 8px; border-radius:10px;">
+          </label>
+          <label>1턴당 시간(초)
+            <input type="number" id="lifeGameBotSecondsInput" min="5" max="600" step="1"
+              style="width:80px; margin-left:6px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:6px 8px; border-radius:10px;">
+          </label>
+        </div>
+        <h3 class="sub-heading">성향 분포 (가중치 - 클수록 그 성향의 봇이 더 많이 생성됨)</h3>
+        <div id="lifeGameBotPersonalityInputs" style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px;"></div>
+        <button id="lifeGameBotSaveBtn" class="perm-refresh-btn" type="button">저장</button>
+        <button id="lifeGameBotRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+        <span id="lifeGameBotStatus" class="hint" style="margin-left:8px;"></span>
+      </div>
+      <h3 class="sub-heading" style="margin-top:16px;">현재 활동 중인 봇</h3>
+      <div id="lifeGameBotList"></div>
+    </div>
+
     <div class="card" id="section-promoted-content">
       <h2>게시글 홍보 현황</h2>
       <p class="hint">
@@ -770,6 +803,8 @@
   const getVisitorAnalyticsFn = httpsCallable(functions, 'getVisitorAnalytics');
   const getGalleryStatsFn = httpsCallable(functions, 'getGalleryStats');
   const getLifeGameStatsFn = httpsCallable(functions, 'getLifeGameStats');
+  const getLifeGameBotConfigFn = httpsCallable(functions, 'getLifeGameBotConfig');
+  const setLifeGameBotConfigFn = httpsCallable(functions, 'setLifeGameBotConfig');
   const banAccountAllGamesFn = httpsCallable(functions, 'banAccountAllGames');
   const unbanAccountAllGamesFn = httpsCallable(functions, 'unbanAccountAllGames');
   const migrateBannedAccountsFn = httpsCallable(functions, 'migrateBannedAccounts');
@@ -1958,6 +1993,89 @@
     );
   }
 
+  // 인생게임 관리형 봇(2026-08-30, streamer-life-game 62장) - 봇 수·1턴당 초·성향
+  // 분포 설정. 실행 자체는 streamer-life-game의 예약 함수가 서버에서 도는 방식이라
+  // 이 카드는 순수 설정/현황 화면이고, 저장을 안 해도 봇이 멈추거나 하지 않는다.
+  const LIFEGAME_BOT_PERSONALITY_LABELS = {
+    wholesome: '😇 모범생형',
+    villain: '😈 악당형',
+    explorer: '🧭 호기심 많은 탐험가형',
+    gambler: '🎲 도박꾼형',
+    romantic: '💕 로맨티스트형',
+    workaholic: '💼 워커홀릭형'
+  };
+  const lifeGameBotEnabledInput = document.getElementById('lifeGameBotEnabledInput');
+  const lifeGameBotCountInput = document.getElementById('lifeGameBotCountInput');
+  const lifeGameBotSecondsInput = document.getElementById('lifeGameBotSecondsInput');
+  const lifeGameBotPersonalityInputsEl = document.getElementById('lifeGameBotPersonalityInputs');
+  const lifeGameBotSaveBtn = document.getElementById('lifeGameBotSaveBtn');
+  const lifeGameBotRefreshBtn = document.getElementById('lifeGameBotRefreshBtn');
+  const lifeGameBotStatusEl = document.getElementById('lifeGameBotStatus');
+  const lifeGameBotListEl = document.getElementById('lifeGameBotList');
+
+  function renderLifeGameBotPersonalityInputs(weights) {
+    lifeGameBotPersonalityInputsEl.innerHTML = Object.keys(LIFEGAME_BOT_PERSONALITY_LABELS).map(function (key) {
+      const val = (weights && weights[key]) || 1;
+      return '<label style="display:flex; flex-direction:column; gap:4px; font-size:12.5px;">' +
+        escapeHtml(LIFEGAME_BOT_PERSONALITY_LABELS[key]) +
+        '<input type="number" min="0" step="1" data-personality="' + key + '" value="' + val + '" ' +
+        'style="width:70px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:6px 8px; border-radius:10px;">' +
+        '</label>';
+    }).join('');
+  }
+
+  function renderLifeGameBotList(bots) {
+    if (!bots || !bots.length) {
+      lifeGameBotListEl.innerHTML = '<div class="empty-state">활동 중인 봇이 없습니다.</div>';
+      return;
+    }
+    lifeGameBotListEl.innerHTML = '<div class="stat-row-list stat-row-list-scroll">' + bots.map(function (b) {
+      const lastTurn = b.lastTurnAt ? new Date(b.lastTurnAt).toLocaleString('ko-KR') : '-';
+      return '<div class="stat-row-item">' +
+        '<span class="name">' + escapeHtml(b.uid) + ' · ' + escapeHtml(LIFEGAME_BOT_PERSONALITY_LABELS[b.personality] || b.personality) + '</span>' +
+        '<div class="metrics"><div class="stat-metric"><span class="value" style="font-size:12px;">' + escapeHtml(lastTurn) + '</span><span class="unit">최근 턴</span></div></div>' +
+        '</div>';
+    }).join('') + '</div>';
+  }
+
+  async function refreshLifeGameBotConfig() {
+    lifeGameBotStatusEl.textContent = '불러오는 중...';
+    try {
+      const result = (await getLifeGameBotConfigFn()).data || {};
+      lifeGameBotEnabledInput.checked = !!result.enabled;
+      lifeGameBotCountInput.value = result.botCount || 0;
+      lifeGameBotSecondsInput.value = result.secondsPerTurn || 30;
+      renderLifeGameBotPersonalityInputs(result.personalityWeights);
+      renderLifeGameBotList(result.bots);
+      lifeGameBotStatusEl.textContent = '';
+    } catch (e) {
+      console.error('인생게임 봇 설정 조회 실패:', e);
+      lifeGameBotStatusEl.textContent = '조회에 실패했습니다.';
+    }
+  }
+  lifeGameBotRefreshBtn.addEventListener('click', refreshLifeGameBotConfig);
+
+  lifeGameBotSaveBtn.addEventListener('click', async function () {
+    lifeGameBotStatusEl.textContent = '저장 중...';
+    const personalityWeights = {};
+    lifeGameBotPersonalityInputsEl.querySelectorAll('input[data-personality]').forEach(function (input) {
+      personalityWeights[input.dataset.personality] = Number(input.value) || 0;
+    });
+    try {
+      await setLifeGameBotConfigFn({
+        enabled: lifeGameBotEnabledInput.checked,
+        botCount: Number(lifeGameBotCountInput.value) || 0,
+        secondsPerTurn: Number(lifeGameBotSecondsInput.value) || 30,
+        personalityWeights: personalityWeights
+      });
+      lifeGameBotStatusEl.textContent = '저장했습니다.';
+      await refreshLifeGameBotConfig();
+    } catch (e) {
+      console.error('인생게임 봇 설정 저장 실패:', e);
+      lifeGameBotStatusEl.textContent = '저장에 실패했습니다: ' + (e.message || e);
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════════
   // 13·14·15·18번 — 실시간 검수 큐 + 통합 배지
   //
@@ -2650,6 +2768,7 @@
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
     { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin', group: '콘텐츠·현황' },
+    { id: 'section-lifegame-bots', label: '🤖 인생게임 봇 관리', role: 'admin' },
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
@@ -2729,6 +2848,7 @@
       roleBadgeEl.textContent = '관리자';
       roleBadgeEl.className = 'role-badge admin';
       renderPermissionEditList();
+      refreshLifeGameBotConfig();
     } else if (role === 'streamer') {
       roleBadgeEl.textContent = '인증 스트리머';
       roleBadgeEl.className = 'role-badge streamer';

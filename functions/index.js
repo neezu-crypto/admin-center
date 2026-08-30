@@ -851,6 +851,53 @@ const getLifeGameStats = onCall(async (request) => {
   };
 });
 
+// 인생게임 관리형 봇(2026-08-30, streamer-life-game 62장) — 봇 수·1턴당 초·성향
+// 분포를 관리자가 조절하는 설정 화면. 실제 실행(턴 진행)은 streamer-life-game
+// 저장소의 예약 함수(runBotTurns)가 서버에서 알아서 도는 방식이라, 여기 설정
+// 화면은 lifeGame/botConfig 노드를 읽고/쓰기만 한다 — 페이지를 열어둘 필요 없음.
+const LIFEGAME_BOT_PERSONALITIES = ['wholesome', 'villain', 'explorer', 'gambler', 'romantic', 'workaholic'];
+
+const getLifeGameBotConfig = onCall(async (request) => {
+  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  const db = getDatabase();
+  const [configSnap, botsSnap] = await Promise.all([
+    db.ref('lifeGame/botConfig').get(),
+    db.ref('lifeGame/bots').get()
+  ]);
+  const config = configSnap.val() || {};
+  const bots = botsSnap.val() || {};
+  const personalityWeights = {};
+  LIFEGAME_BOT_PERSONALITIES.forEach(function (p) {
+    personalityWeights[p] = (config.personalityWeights && Number(config.personalityWeights[p])) || 1;
+  });
+  return {
+    enabled: !!config.enabled,
+    botCount: config.botCount || 0,
+    secondsPerTurn: config.secondsPerTurn || 30,
+    personalityWeights: personalityWeights,
+    bots: Object.keys(bots).map(function (uid) {
+      return { uid: uid, personality: bots[uid].personality, createdAt: bots[uid].createdAt || null, lastTurnAt: bots[uid].lastTurnAt || null };
+    })
+  };
+});
+
+const setLifeGameBotConfig = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data || {};
+  const enabled = !!data.enabled;
+  const botCount = Math.max(0, Math.min(50, Math.round(Number(data.botCount) || 0)));
+  const secondsPerTurn = Math.max(5, Math.min(600, Math.round(Number(data.secondsPerTurn) || 30)));
+  const personalityWeights = {};
+  LIFEGAME_BOT_PERSONALITIES.forEach(function (p) {
+    const raw = data.personalityWeights && data.personalityWeights[p];
+    personalityWeights[p] = Math.max(0, Number(raw) || 0);
+  });
+  const db = getDatabase();
+  await db.ref('lifeGame/botConfig').set({ enabled: enabled, botCount: botCount, secondsPerTurn: secondsPerTurn, personalityWeights: personalityWeights, updatedAt: Date.now() });
+  await logToAdminAuditLog(db, request, '인생게임 봇 설정 변경', 'enabled=' + enabled + ', botCount=' + botCount + ', secondsPerTurn=' + secondsPerTurn + 's');
+  return { ok: true };
+});
+
 // 20번 2단계 — 정지계정 관리. 게임별 정지(각 게임의 기존 banAccount/unbanAccount)가
 // 기본이고, 여기 두 함수는 신원 단위로 명백히 심각한 사안(다중계정 어뷰징, 결제
 // 사기 등)만 관리자가 명시적으로 "전체 게임 정지"로 격상시키는 전용 통로다(07번
@@ -922,6 +969,8 @@ const migrateBannedAccounts = onCall(async (request) => {
 module.exports = {
   getGalleryStats,
   getLifeGameStats,
+  getLifeGameBotConfig,
+  setLifeGameBotConfig,
   banAccountAllGames,
   unbanAccountAllGames,
   migrateBannedAccounts,
