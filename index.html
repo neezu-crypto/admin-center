@@ -195,6 +195,25 @@
   .stat-metric .unit { display: block; font-size: 10px; color: var(--ink-mute); margin-top: 1px; }
   .stat-row-item .date { flex-shrink: 0; min-width: 68px; text-align: right; font-size: 11px; color: var(--ink-mute); }
 
+  /* 인생게임 봇 상세 현황 - 펼치고 접기(네이티브 <details>/<summary>, 별도
+     토글 JS 없이 접근성까지 챙길 수 있어서 채택). summary 한 줄엔 요약(이름·
+     나이·성향·직업)만, 펼치면 스탯·현금·장소·가족·지인 등 전체가 보인다. */
+  .bot-detail-card {
+    border: 1px solid var(--sub-border); border-radius: 14px; background: var(--sub);
+    box-shadow: var(--sub-hi); padding: 4px 12px; margin-bottom: 6px;
+  }
+  .bot-detail-card summary {
+    padding: 8px 0; font-size: 13px; color: var(--ink); cursor: pointer;
+    list-style: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .bot-detail-card summary::-webkit-details-marker { display: none; }
+  .bot-detail-card summary::before { content: '▸'; color: var(--ink-mute); font-size: 11px; transition: transform 0.15s; }
+  .bot-detail-card[open] summary::before { transform: rotate(90deg); }
+  .bot-detail-card summary .personality { color: var(--ink-soft); }
+  .bot-detail-body { padding: 4px 0 12px; border-top: 1px solid var(--sub-border); margin-top: 2px; }
+  .bot-detail-row { display: flex; gap: 8px; font-size: 12.5px; color: var(--ink); padding: 4px 0; }
+  .bot-detail-row strong { flex-shrink: 0; min-width: 78px; color: var(--ink-soft); font-weight: 700; }
+
   /* 10번 — 페이지별 접속자 분석. 시간대별 최고 접속자 수를 표 대신
      앱별 스파크라인 카드로 보여준다(추세를 표보다 한눈에 파악하기 위함) */
   .sparkline-card {
@@ -522,8 +541,9 @@
         <button id="lifeGameBotRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
         <span id="lifeGameBotStatus" class="hint" style="margin-left:8px;"></span>
       </div>
-      <h3 class="sub-heading" style="margin-top:16px;">현재 활동 중인 봇</h3>
-      <div id="lifeGameBotList"></div>
+      <h3 class="sub-heading" style="margin-top:16px;">봇 상세 현황 (펼쳐서 확인)</h3>
+      <button id="lifeGameBotDetailRefreshBtn" class="perm-refresh-btn" type="button">상세 새로고침</button>
+      <div id="lifeGameBotDetailList" style="margin-top:10px;"></div>
     </div>
 
     <div class="card" id="section-promoted-content">
@@ -805,6 +825,12 @@
   const getLifeGameStatsFn = httpsCallable(functions, 'getLifeGameStats');
   const getLifeGameBotConfigFn = httpsCallable(functions, 'getLifeGameBotConfig');
   const setLifeGameBotConfigFn = httpsCallable(functions, 'setLifeGameBotConfig');
+  // adminListBotDetails는 admin-center가 아니라 streamer-life-game이 배포한
+  // 함수다(같은 soop-stock-market 프로젝트 공유 - approveVerification 등
+  // 기존 크로스 저장소 호출과 같은 원칙). 직업/장소/루트 같은 파생값은
+  // choiceLog를 되짚어야 나오는 값이라 그 계산 로직을 여기 중복 구현하지
+  // 않고 원본 저장소의 함수를 그대로 부른다.
+  const getLifeGameBotDetailsFn = httpsCallable(functions, 'adminListBotDetails');
   const banAccountAllGamesFn = httpsCallable(functions, 'banAccountAllGames');
   const unbanAccountAllGamesFn = httpsCallable(functions, 'unbanAccountAllGames');
   const migrateBannedAccountsFn = httpsCallable(functions, 'migrateBannedAccounts');
@@ -2011,7 +2037,9 @@
   const lifeGameBotSaveBtn = document.getElementById('lifeGameBotSaveBtn');
   const lifeGameBotRefreshBtn = document.getElementById('lifeGameBotRefreshBtn');
   const lifeGameBotStatusEl = document.getElementById('lifeGameBotStatus');
-  const lifeGameBotListEl = document.getElementById('lifeGameBotList');
+  const lifeGameBotDetailRefreshBtn = document.getElementById('lifeGameBotDetailRefreshBtn');
+  const lifeGameBotDetailListEl = document.getElementById('lifeGameBotDetailList');
+  const LIFEGAME_STAT_LABELS = { wealth: '재산', fame: '인기', happiness: '행복', health: '건강', relationship: '관계' };
 
   function renderLifeGameBotPersonalityInputs(weights) {
     lifeGameBotPersonalityInputsEl.innerHTML = Object.keys(LIFEGAME_BOT_PERSONALITY_LABELS).map(function (key) {
@@ -2024,19 +2052,64 @@
     }).join('');
   }
 
-  function renderLifeGameBotList(bots) {
+  // 목록 항목(각 봇)을 <details>/<summary>로 그려 펼치고 접기를 지원한다.
+  // getLifeGameBotConfig가 주는 personality/lastTurnAt 뿐인 요약 목록과 달리,
+  // adminListBotDetails(streamer-life-game 배포)가 주는 스탯·직업·장소·가족·
+  // 지인·자산·재능·취미·마지막 선택까지 전부 펼쳤을 때 보여준다.
+  function labelListOrNone(items) {
+    return (items && items.length) ? items.map(function (i) { return escapeHtml(i.label || i.id); }).join(', ') : '없음';
+  }
+
+  function renderLifeGameBotDetailList(bots) {
     if (!bots || !bots.length) {
-      lifeGameBotListEl.innerHTML = '<div class="empty-state">활동 중인 봇이 없습니다.</div>';
+      lifeGameBotDetailListEl.innerHTML = '<div class="empty-state">활동 중인 봇이 없습니다.</div>';
       return;
     }
-    lifeGameBotListEl.innerHTML = '<div class="stat-row-list stat-row-list-scroll">' + bots.map(function (b) {
+    lifeGameBotDetailListEl.innerHTML = bots.map(function (b) {
+      const personalityLabel = escapeHtml(LIFEGAME_BOT_PERSONALITY_LABELS[b.personality] || b.personality || '?');
+      if (!b.alive) {
+        return '<details class="bot-detail-card"><summary>' + escapeHtml(b.uid) +
+          ' <span class="personality">' + personalityLabel + '</span>' +
+          ' <span class="hint">(아직 판이 없음 - 다음 실행 때 생성됨)</span></summary></details>';
+      }
+      const statLine = Object.keys(LIFEGAME_STAT_LABELS).map(function (k) {
+        return LIFEGAME_STAT_LABELS[k] + ' ' + (b.stats && typeof b.stats[k] === 'number' ? b.stats[k] : '-');
+      }).join(' · ');
+      const occLabel = b.currentOccupation ? b.currentOccupation.label : '무직';
+      const summary = escapeHtml(b.streamerName || b.uid) + ' (' + escapeHtml(b.ageRange || '?') + ') · ' +
+        '<span class="personality">' + personalityLabel + '</span> · ' + escapeHtml(occLabel) +
+        (b.completed ? ' · <span class="hint">엔딩 도달(다음 실행 때 재시작)</span>' : '');
       const lastTurn = b.lastTurnAt ? new Date(b.lastTurnAt).toLocaleString('ko-KR') : '-';
-      return '<div class="stat-row-item">' +
-        '<span class="name">' + escapeHtml(b.uid) + ' · ' + escapeHtml(LIFEGAME_BOT_PERSONALITY_LABELS[b.personality] || b.personality) + '</span>' +
-        '<div class="metrics"><div class="stat-metric"><span class="value" style="font-size:12px;">' + escapeHtml(lastTurn) + '</span><span class="unit">최근 턴</span></div></div>' +
+      const detail = '<div class="bot-detail-body">' +
+        '<div class="bot-detail-row"><strong>스탯</strong><span>' + statLine + '</span></div>' +
+        '<div class="bot-detail-row"><strong>현금</strong><span>' + Math.round(b.cashHoldings || 0).toLocaleString('ko-KR') + '원</span></div>' +
+        '<div class="bot-detail-row"><strong>현재 장소</strong><span>' + escapeHtml(b.currentLocation ? b.currentLocation.label : '-') + '</span></div>' +
+        (b.currentRoute ? '<div class="bot-detail-row"><strong>진행 루트</strong><span>' + escapeHtml(b.currentRoute.label) + '</span></div>' : '') +
+        '<div class="bot-detail-row"><strong>건강 상태</strong><span>' + labelListOrNone(b.healthConditions) + '</span></div>' +
+        '<div class="bot-detail-row"><strong>가족</strong><span>' + labelListOrNone(b.familyMembers) + '</span></div>' +
+        '<div class="bot-detail-row"><strong>지인</strong><span>' + labelListOrNone(b.acquaintances) + '</span></div>' +
+        '<div class="bot-detail-row"><strong>자산</strong><span>' + labelListOrNone(b.assets) + '</span></div>' +
+        '<div class="bot-detail-row"><strong>재능</strong><span>' + labelListOrNone(b.talents) + '</span></div>' +
+        '<div class="bot-detail-row"><strong>취미</strong><span>' + labelListOrNone(b.hobbies) + '</span></div>' +
+        '<div class="bot-detail-row"><strong>마지막 선택</strong><span>' + escapeHtml(b.lastChoiceText || '-') + '</span></div>' +
+        '<div class="bot-detail-row"><strong>누적 턴</strong><span>' + (b.turnCount || 0) + '회</span></div>' +
+        '<div class="bot-detail-row"><strong>최근 턴 시각</strong><span>' + escapeHtml(lastTurn) + '</span></div>' +
         '</div>';
-    }).join('') + '</div>';
+      return '<details class="bot-detail-card"><summary>' + summary + '</summary>' + detail + '</details>';
+    }).join('');
   }
+
+  async function refreshLifeGameBotDetails() {
+    lifeGameBotDetailListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = (await getLifeGameBotDetailsFn()).data || {};
+      renderLifeGameBotDetailList(result.bots);
+    } catch (e) {
+      console.error('인생게임 봇 상세 조회 실패:', e);
+      lifeGameBotDetailListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+  lifeGameBotDetailRefreshBtn.addEventListener('click', refreshLifeGameBotDetails);
 
   async function refreshLifeGameBotConfig() {
     lifeGameBotStatusEl.textContent = '불러오는 중...';
@@ -2046,8 +2119,8 @@
       lifeGameBotCountInput.value = result.botCount || 0;
       lifeGameBotSecondsInput.value = result.secondsPerTurn || 30;
       renderLifeGameBotPersonalityInputs(result.personalityWeights);
-      renderLifeGameBotList(result.bots);
       lifeGameBotStatusEl.textContent = '';
+      await refreshLifeGameBotDetails();
     } catch (e) {
       console.error('인생게임 봇 설정 조회 실패:', e);
       lifeGameBotStatusEl.textContent = '조회에 실패했습니다.';
