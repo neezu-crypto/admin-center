@@ -206,13 +206,17 @@ const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
   await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
   const db = getDatabase();
-  const [bmLogSnap, smLogSnap] = await Promise.all([
+  const [bmLogSnap, smLogSnap, rgLogSnap, galLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').get(),
     db.ref('adminAuditLog').get(),
+    db.ref('rocketGame/auditLog').get(),
+    db.ref('gallery/auditLog').get(),
   ]);
 
   const bmLog = bmLogSnap.val() || {};
   const smLog = smLogSnap.val() || {};
+  const rgLog = rgLogSnap.val() || {};
+  const galLog = galLogSnap.val() || {};
 
   const entries = [];
   Object.keys(bmLog).forEach(function (id) {
@@ -229,6 +233,24 @@ const listAuditLogOverview = onCall(async (request) => {
       actorName: e.actorName, action: e.action, detail: e.detail,
     });
   });
+  // 2026-09-05 추가 — rocket-game/streamer-gallery 온보딩 누락분 보완(신규 게임
+  // 온보딩 체크리스트 항목, 관리자 전용 내부 도구이므로 두 사이트가 아직 비공개
+  // 개발 중이어도 무방함). 두 저장소 모두 logAudit(actorUid, actorName, action,
+  // detail, at) 형태가 동일해 위 두 소스와 같은 매핑을 그대로 쓴다.
+  Object.keys(rgLog).forEach(function (id) {
+    const e = rgLog[id];
+    entries.push({
+      id: id, source: 'rocketGame', at: e.at,
+      actorName: e.actorName, action: e.action, detail: e.detail,
+    });
+  });
+  Object.keys(galLog).forEach(function (id) {
+    const e = galLog[id];
+    entries.push({
+      id: id, source: 'gallery', at: e.at,
+      actorName: e.actorName, action: e.action, detail: e.detail,
+    });
+  });
 
   entries.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
   return { entries: entries.slice(0, AUDIT_OVERVIEW_LIMIT) };
@@ -236,12 +258,18 @@ const listAuditLogOverview = onCall(async (request) => {
 
 // 시리즈 게임 목록 — 새 게임이 생기면 여기에 한 줄만 추가하면 된다(신규 게임
 // 온보딩 체크리스트의 "통합 관리 센터에 등록" 항목이 사실상 이 배열 하나).
+// lifeGame/rocketGame/gallery는 2026-09-05 추가 — 관리자 전용 도구 노출일 뿐이라
+// rocketGame/gallery가 아직 비공개 개발 중이어도 등록해도 무방(devbarLinks 같은
+// 공개 노출과는 별개 판단, 사용자 확인됨).
 const GAME_CATALOG = [
   { id: 'bettingMarket', name: '스트리머 배팅시장' },
   { id: 'stockMarket', name: '스트리머 주식시장' },
   { id: 'backgroundMarket', name: '스트리머 배경시장' },
   { id: 'midnightMartRun', name: '미드나잇 마트런' },
   { id: 'dontClickAds', name: '절대 광고를 클릭하지 마' },
+  { id: 'lifeGame', name: '스트리머 인생게임' },
+  { id: 'rocketGame', name: '로켓 게임' },
+  { id: 'gallery', name: '스트리머 갤러리' },
 ];
 
 const AUDIT_LOG_CAP = 200;
@@ -600,6 +628,19 @@ const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', 
 // cardBannerRequests(soop-stock-market)는 관리자 승인 단계 없이 즉시 적용되는
 // 흐름이라(14번에서 이미 확인) 검수 알림 대상이 아니다 — 의도적으로 제외.
 
+// 2026-09-05 추가(신규 게임 온보딩 체크리스트) — 인생게임/갤러리의 신고 큐는
+// admin-center 페이지 안에 대응하는 섹션이 없고, 각 사이트 자체 관리 패널에서
+// 처리한다. 그래서 makeQueueTrigger의 deepLink(admin-center#anchor 고정)를 그대로
+// 못 쓰고, 그 사이트 자신의 URL로 안내하는 커스텀 트리거를 쓴다.
+const notifyLifeGameReportAlert = onValueCreated('/lifeGame/galleryReports/{id}', async (event) => {
+  const data = event.data.val() || {};
+  await sendDiscordNotification('🔔 **새 갤러리 신고 (인생게임)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널에서 확인)');
+});
+const notifyGalleryImageReport = onValueCreated('/gallery/imageReports/{id}', async (event) => {
+  const data = event.data.val() || {};
+  await sendDiscordNotification('🔔 **새 이미지 신고 (스트리머 갤러리)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)');
+});
+
 // 25번 — 인증 스트리머가 주식시장/배팅시장에 접속하면 관리자 디스코드로
 // 알림. verifiedStreamerVisits는 두 앱이 공유하는 큐(soop-stock-market의
 // logStockMarketVisit, StreamBet-Market의 logBettingMarketVisit이 각자
@@ -732,7 +773,11 @@ const getPurchaseOverview = onCall(async (request) => {
 // 10번 — 페이지별 접속자 분석. interior-3d-viewer는 아직 presence 구현이 없어
 // 우선 제외한다(별도 후속 작업, 10번 문서 참고). soop-stock-market이 이미 검증한
 // 60분 유예 규칙을 그대로 재사용해 "활성 uid" 수를 센다.
-const PRESENCE_APPS = ['bettingMarket', 'stockMarket'];
+// lifeGame/rocketGame/gallery는 2026-09-05 추가 — 클라이언트가 presence/{appId}/{uid}
+// 표준 경로에 { lastSeen } 형태로 쓰기 시작한 뒤에만 실제로 값이 잡힌다(각 저장소
+// 쪽 작업과 짝을 이룸). lifeGame은 자체 lifeGame/presence 경로(다른 용도, 세계관
+// 패널·봇 시스템)와 별개로 이 표준 경로에도 병행 기록한다.
+const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'rocketGame', 'gallery'];
 const PRESENCE_GRACE_MS = 60 * 60 * 1000;
 const PRESENCE_HOURLY_RETENTION_DAYS = 30;
 
@@ -1005,6 +1050,8 @@ module.exports = {
   notifyCashChargeRequest,
   notifyUnfreezeDonationRequest,
   notifyListingRequest,
+  notifyLifeGameReportAlert,
+  notifyGalleryImageReport,
   notifyVerifiedStreamerVisit,
   searchSeriesUser,
   getPurchaseOverview,
