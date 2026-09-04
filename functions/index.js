@@ -611,9 +611,19 @@ const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyReq
 // 앱에서 온 신청인지 구분한다 - 이 필드가 생기기 전 신청·기존 주식시장
 // 호출부는 값을 안 보내므로(undefined) '주식시장'으로 폴백
 // (notifyVerifiedStreamerVisit의 marketLabel과 동일한 패턴).
+// 2026-09-05 발견 — rocket-game('rocket-game')·streamer-gallery('streamer-gallery')도
+// 이미 이 공용 함수를 호출하며 각자의 source 값을 보내고 있었는데, 여기 매핑에
+// 등록이 안 돼서 전부 '주식시장'으로 잘못 표시되고 있었다(실제 사용자가 갤러리에서
+// 신청 후 발견). 신규 게임 온보딩 때 이 맵도 같이 갱신해야 한다.
+const STREAMER_VERIFY_SOURCE_LABELS = {
+  'life-game': '인생게임',
+  'rocket-game': '로켓게임',
+  'streamer-gallery': '갤러리',
+};
 const notifyStockVerifyRequest = onValueCreated('/streamerVerificationRequests/{id}', async (event) => {
   const data = event.data.val() || {};
-  const label = data.source === 'life-game' ? '새 인증 신청 (인생게임)' : '새 인증 신청 (주식시장)';
+  const sourceLabel = STREAMER_VERIFY_SOURCE_LABELS[data.source] || '주식시장';
+  const label = '새 인증 신청 (' + sourceLabel + ')';
   await sendDiscordNotification('🔔 **' + label + '**\n' + formatRequestSummary(data) + '\n' + deepLink('section-verification'));
 });
 const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)', 'section-purchase-approval');
