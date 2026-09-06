@@ -661,6 +661,22 @@ const notifyGalleryUnlockRequest = onValueCreated('/gallery/unlockRequests/{id}'
     '\nhttps://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)'
   );
 });
+// 이미지 업로드 알림(2026-09-06 추가) — formatRequestSummary는 streamerName/
+// category 필드를 모르므로(streamerId를 이름으로 착각해 내부 id 문자열을
+// 그대로 보여줄 위험) 위 해금 신청과 동일하게 직접 문구를 구성한다. 썸네일
+// URL을 본문에 그대로 넣어두면 Discord가 자동으로 미리보기 임베드를 붙여준다
+// (별도 embeds payload 없이도 sendDiscordNotification의 단순 text 방식으로 충분).
+const GALLERY_CATEGORY_LABELS = { screenshot: '스크린샷', selfie: '방셀', 'ai-art': 'AI 일러스트', 'fan-art': '팬아트', meme: '밈', etc: '기타' };
+const notifyGalleryImageUpload = onValueCreated('/gallery/images/{id}', async (event) => {
+  const data = event.data.val() || {};
+  const category = GALLERY_CATEGORY_LABELS[data.category] || data.category || '';
+  await sendDiscordNotification(
+    '🖼️ **새 이미지 업로드 (스트리머 갤러리)**\n' +
+    (data.streamerName || '(알 수 없음)') + (category ? ' · ' + category : '') +
+    (data.thumbUrl ? '\n' + data.thumbUrl : '') +
+    '\nhttps://neezu-crypto.github.io/streamer-gallery/'
+  );
+});
 
 // 25번 — 인증 스트리머가 주식시장/배팅시장/인생게임/갤러리에 접속하면 관리자
 // 디스코드로 알림. verifiedStreamerVisits는 여러 앱이 공유하는 큐(soop-stock-
@@ -1082,6 +1098,7 @@ module.exports = {
   notifyLifeGameReportAlert,
   notifyGalleryImageReport,
   notifyGalleryUnlockRequest,
+  notifyGalleryImageUpload,
   notifyVerifiedStreamerVisit,
   searchSeriesUser,
   getPurchaseOverview,
