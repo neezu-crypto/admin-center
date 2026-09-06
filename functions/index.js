@@ -662,17 +662,25 @@ const notifyGalleryUnlockRequest = onValueCreated('/gallery/unlockRequests/{id}'
   );
 });
 
-// 25번 — 인증 스트리머가 주식시장/배팅시장에 접속하면 관리자 디스코드로
-// 알림. verifiedStreamerVisits는 두 앱이 공유하는 큐(soop-stock-market의
-// logStockMarketVisit, StreamBet-Market의 logBettingMarketVisit이 각자
-// 쓴다) - 승인 대기가 필요한 "신청" 큐가 아니라 그냥 접속 로그라 makeQueueTrigger의
-// "🔔 새 O 신청" 문구 대신 별도 메시지를 쓴다. 같은 스트리머가 하루에 여러 번
-// 들어와도 알림이 반복되지 않는 건 각 앱의 로깅 함수가 날짜별 dedup으로 이미
-// 막아준다(여기서는 큐에 실제로 쌓인 항목만 그대로 알리면 됨). 딱히 검토가
-// 필요한 큐가 아니라 admin-center에 대응하는 카드/앵커가 없어 딥링크는 생략.
+// 25번 — 인증 스트리머가 주식시장/배팅시장/인생게임/갤러리에 접속하면 관리자
+// 디스코드로 알림. verifiedStreamerVisits는 여러 앱이 공유하는 큐(soop-stock-
+// market의 logStockMarketVisit, StreamBet-Market의 logBettingMarketVisit,
+// streamer-life-game의 logLifeGameVisit, streamer-gallery의 logGalleryVisit이
+// 각자 쓴다) - 승인 대기가 필요한 "신청" 큐가 아니라 그냥 접속 로그라
+// makeQueueTrigger의 "🔔 새 O 신청" 문구 대신 별도 메시지를 쓴다. 같은
+// 스트리머가 하루에 여러 번 들어와도 알림이 반복되지 않는 건 각 앱의 로깅
+// 함수가 날짜별 dedup으로 이미 막아준다(여기서는 큐에 실제로 쌓인 항목만
+// 그대로 알리면 됨). 딱히 검토가 필요한 큐가 아니라 admin-center에 대응하는
+// 카드/앵커가 없어 딥링크는 생략.
+// market 값은 각 앱의 로깅 함수가 PRESENCE_APPS(10번)와 동일한 이름으로 쓴다
+// (betting/stock/lifeGame/gallery) - 없는 값이면 마켓 이름 대신 원본 문자열을
+// 그대로 보여줘서, 새 앱이 이 매핑에 등록되는 걸 잊었을 때도 조용히
+// "주식시장"으로 오표시되지 않고 눈에 띄게 한다(2026-09-06, lifeGame/gallery
+// 추가 전엔 betting이 아니면 전부 "주식시장"으로 잘못 표시되는 버그가 있었음).
+const VISIT_MARKET_LABELS = { betting: '배팅시장', stock: '주식시장', lifeGame: '인생게임', gallery: '갤러리' };
 const notifyVerifiedStreamerVisit = onValueCreated('/verifiedStreamerVisits/{entryId}', async (event) => {
   const data = event.data.val() || {};
-  const marketLabel = data.market === 'betting' ? '배팅시장' : '주식시장';
+  const marketLabel = VISIT_MARKET_LABELS[data.market] || (data.market || '알 수 없는 앱');
   const name = data.nickname
     ? data.nickname + (data.soopId ? ' (@' + data.soopId + ')' : '')
     : 'uid: ' + (data.uid || '(알 수 없음)');
