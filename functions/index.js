@@ -646,6 +646,17 @@ const notifyLifeGameReportAlert = onValueCreated('/lifeGame/galleryReports/{id}'
   const data = event.data.val() || {};
   await sendDiscordNotification('🔔 **새 갤러리 신고 (인생게임)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널에서 확인)');
 });
+// 게임 후기 신고(2026-09-08 추가) - formatRequestSummary는 이 노드의 필드명
+// (reviewUid/reporterUid)을 모르는 필드로 취급해 "(상세 정보 없음)"만 찍을
+// 수 있어서(requesterUid/uid만 인식) 직접 문구를 구성한다.
+const notifyLifeGameReviewReportAlert = onValueCreated('/lifeGame/reviewReports/{id}', async (event) => {
+  const data = event.data.val() || {};
+  await sendDiscordNotification(
+    '🔔 **새 후기 신고 (인생게임)**\n대상 후기 uid: ' + (data.reviewUid || '(알 수 없음)') +
+    (data.reason ? ' · 사유: ' + data.reason : '') +
+    '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널에서 확인)'
+  );
+});
 const notifyGalleryImageReport = onValueCreated('/gallery/imageReports/{id}', async (event) => {
   const data = event.data.val() || {};
   await sendDiscordNotification('🔔 **새 이미지 신고 (스트리머 갤러리)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)');
@@ -1096,6 +1107,7 @@ module.exports = {
   notifyUnfreezeDonationRequest,
   notifyListingRequest,
   notifyLifeGameReportAlert,
+  notifyLifeGameReviewReportAlert,
   notifyGalleryImageReport,
   notifyGalleryUnlockRequest,
   notifyGalleryImageUpload,
