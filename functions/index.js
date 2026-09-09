@@ -629,14 +629,13 @@ const notifyStockVerifyRequest = onValueCreated('/streamerVerificationRequests/{
 const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)', 'section-purchase-approval');
 const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)', 'section-purchase-approval');
 const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)', 'section-purchase-approval');
+const notifyCardBannerRequest       = makeQueueTrigger('/cardBannerRequests/{id}', '새 카드 배너 신청 (주식시장)', 'section-purchase-approval');
 const notifyPinRequest              = makeQueueTrigger('/pinRequests/{id}', '새 고정노출 신청 (주식시장)', 'section-purchase-approval');
 const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}', '새 중계방 신청 (주식시장)', 'section-purchase-approval');
 const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval');
 const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval');
 const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
 const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)', 'section-listing-request');
-// cardBannerRequests(soop-stock-market)는 관리자 승인 단계 없이 즉시 적용되는
-// 흐름이라(14번에서 이미 확인) 검수 알림 대상이 아니다 — 의도적으로 제외.
 
 // 2026-09-05 추가(신규 게임 온보딩 체크리스트) — 인생게임/갤러리의 신고 큐는
 // admin-center 페이지 안에 대응하는 섹션이 없고, 각 사이트 자체 관리 패널에서
@@ -771,10 +770,11 @@ const PURCHASE_SOURCES = [
   { path: 'bettingMarket/skinPurchases', gameId: 'bettingMarket', itemType: 'skin', uidField: 'uid', labelField: 'skinName', amountField: 'price' },
   { path: 'bettingMarket/chestPurchaseRequests', gameId: 'bettingMarket', itemType: 'chest_purchase', uidField: 'uid', labelField: null, amountField: null },
   { path: 'bettingMarket/chestOpenLog', gameId: 'bettingMarket', itemType: 'chest_open', uidField: 'uid', labelField: null, amountField: 'prize' },
-  { path: 'bannerRequests', gameId: 'stockMarket', itemType: 'banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'chargedAmount' },
-  { path: 'chartBannerRequests', gameId: 'stockMarket', itemType: 'chart_banner', uidField: 'requesterUid', labelField: 'stockName', amountField: 'chargedAmount' },
-  { path: 'pinRequests', gameId: 'stockMarket', itemType: 'pin', uidField: 'requesterUid', labelField: 'stockName', amountField: 'chargedAmount' },
-  { path: 'relayRoomRequests', gameId: 'stockMarket', itemType: 'relay_room', uidField: 'requesterUid', labelField: 'nickname', amountField: 'chargedAmount' },
+  { path: 'bannerRequests', gameId: 'stockMarket', itemType: 'banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons' },
+  { path: 'chartBannerRequests', gameId: 'stockMarket', itemType: 'chart_banner', uidField: 'requesterUid', labelField: 'stockName', amountField: 'starBalloons' },
+  { path: 'cardBannerRequests', gameId: 'stockMarket', itemType: 'card_banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons' },
+  { path: 'pinRequests', gameId: 'stockMarket', itemType: 'pin', uidField: 'requesterUid', labelField: 'stockName', amountField: 'starBalloons' },
+  { path: 'relayRoomRequests', gameId: 'stockMarket', itemType: 'relay_room', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons' },
   { path: 'treasureChestRequests', gameId: 'stockMarket', itemType: 'treasure_chest', uidField: 'requesterUid', labelField: null, amountField: null },
   { path: 'cashChargeRequests', gameId: 'stockMarket', itemType: 'cash_charge', uidField: 'requesterUid', labelField: 'nickname', amountField: null },
   { path: 'unfreezeDonationRequests', gameId: 'stockMarket', itemType: 'unfreeze_donation', uidField: 'requesterUid', labelField: 'stockName', amountField: null },
@@ -1100,6 +1100,7 @@ module.exports = {
   notifyChestPurchaseRequest,
   notifyBannerRequest,
   notifyChartBannerRequest,
+  notifyCardBannerRequest,
   notifyPinRequest,
   notifyRelayRoomRequest,
   notifyTreasureChestRequest,

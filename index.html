@@ -1748,9 +1748,11 @@
 
   const PURCHASE_ITEM_LABEL = {
     skin: '스킨 구매', chest_purchase: '보물상자 구매 신청', chest_open: '보물상자 개봉', banner: '배너 신청', chart_banner: '차트 배너 신청',
-    pin: '고정노출 신청', relay_room: '중계방 신청', treasure_chest: '보물상자 구매', cash_charge: '자산 충전 신청',
+    card_banner: '카드 배너 신청', pin: '고정노출 신청', relay_room: '중계방 신청', treasure_chest: '보물상자 구매', cash_charge: '자산 충전 신청',
     play_time: '플레이타임 충전', lottery: '복권 구매', unfreeze_donation: '동결 해제(후원) 신청',
   };
+  // 배너 5종(2026-09-09부터 방송 후원 확인 방식)은 amount 단위가 별풍선 개수라 "원"이 아니다.
+  const PURCHASE_ITEM_DONATION_TYPES = new Set(['banner', 'chart_banner', 'card_banner', 'pin', 'relay_room']);
   function renderUserDetailPurchases(purchaseResult) {
     if (purchaseResult.status !== 'fulfilled') {
       userDetailPurchasesEl.innerHTML = '<div class="empty-state">구매 이력 조회에 실패했습니다.</div>';
@@ -1766,10 +1768,11 @@
       const row = document.createElement('div');
       row.className = 'audit-row';
       const timeText = e.at ? new Date(e.at).toLocaleString('ko-KR') : '';
+      const unitSuffix = PURCHASE_ITEM_DONATION_TYPES.has(e.itemType) ? '개' : '원';
       row.innerHTML =
         '<div class="audit-main"><b>' + escapeHtml(PURCHASE_ITEM_LABEL[e.itemType] || e.itemType) + '</b>' +
         '<span class="source-tag ' + e.gameId + '">' + escapeHtml(SOURCE_LABEL[e.gameId] || e.gameId) + '</span></div>' +
-        (e.label ? '<span class="audit-detail">' + escapeHtml(e.label) + (e.amount ? ' · ' + Math.round(e.amount).toLocaleString('ko-KR') + '원' : '') + '</span>' : '') +
+        (e.label ? '<span class="audit-detail">' + escapeHtml(e.label) + (e.amount ? ' · ' + Math.round(e.amount).toLocaleString('ko-KR') + unitSuffix : '') + '</span>' : '') +
         '<span class="audit-time">' + timeText + '</span>';
       userDetailPurchasesEl.appendChild(row);
     });
@@ -1823,8 +1826,8 @@
     }
     const d = result.value.data;
     statsStockSummaryEl.innerHTML =
-      '<div class="verif-row"><div class="verif-info"><b>오늘 — 출석 ' + (d.attendance.claimedCount || 0) + '명(' + won(d.attendance.totalPaidToday) + ') · 셀프상품 매출 ' + won(d.purchase.todayRevenue) + '(' + d.purchase.todayCount + '건)</b>' +
-      '<span>누적 — 셀프상품 매출 ' + won(d.purchase.totalRevenue) + '(' + d.purchase.totalCount + '건) · 복권 판매 ' + d.lottery.totalSold + '장/순수익 ' + won(d.lottery.netRevenue) + '</span>' +
+      '<div class="verif-row"><div class="verif-info"><b>오늘 — 출석 ' + (d.attendance.claimedCount || 0) + '명(' + won(d.attendance.totalPaidToday) + ') · 플레이타임 매출 ' + won(d.purchase.todayRevenue) + ' · 후원 접수(승인) ' + (d.purchase.todayBalloons || 0) + '개</b>' +
+      '<span>누적 — 플레이타임 매출 ' + won(d.purchase.totalRevenue) + ' · 후원 접수(승인) ' + (d.purchase.totalBalloons || 0) + '개 (' + d.purchase.totalCount + '건) · 복권 판매 ' + d.lottery.totalSold + '장/순수익 ' + won(d.lottery.netRevenue) + '</span>' +
       '<span>회원 — 전체 ' + d.users.totalUsers + '명(계정보호 ' + d.users.protectedUsers + ' · 미보호 ' + d.users.anonUsers + ') · 손익랭킹 등록 ' + d.profitRankingEntryCount + '건</span>' +
       '<span style="color:var(--ink-mute);">재무 건전성(발행량/준비금) 개념은 이 게임엔 아직 없음 — 09번 문서 참고</span></div></div>';
   }
@@ -2183,12 +2186,13 @@
   let listingRequests = {};
   const purchaseQueueData = {}; // path -> RTDB raw object
 
-  // banner/pin/relayRoom 신청은 최근 리팩터로 검수 없이 즉시 승인되도록 바뀌어
-  // (status: "approved"가 신청 즉시 기록됨) 사실상 이 큐에 절대 나타나지 않는다.
-  // 그래도 과거 데이터나 향후 정책 변경에 대비해 승인/거절 처리 자체는 남겨둔다.
+  // 배너/카드배너/차트배너/고정/중계방 5종은 2026-09-09부터 게임자산 즉시차감
+  // 방식에서 원래의 방송 후원 확인 방식(status: "pending" → 관리자 승인)으로
+  // 되돌아갔다 — 이 큐에 실제로 나타난다.
   const PURCHASE_QUEUE_SOURCES = [
     { path: 'bettingMarket/chestPurchaseRequests', label: '보물상자 구매(배팅시장)', kind: 'bmChest' },
     { path: 'chartBannerRequests', label: '차트 배너 신청', kind: 'chartBanner' },
+    { path: 'cardBannerRequests', label: '카드 배너 신청', kind: 'cardBanner' },
     { path: 'treasureChestRequests', label: '보물상자 구매 신청', kind: 'treasureChest' },
     { path: 'cashChargeRequests', label: '자산 충전 신청', kind: 'cashCharge' },
     { path: 'unfreezeDonationRequests', label: '동결 해제(후원) 신청', kind: 'unfreezeDonation' },
@@ -2679,7 +2683,12 @@
       case 'chartBanner':
         bits.push('종목: ' + (e.stockName || e.stockId));
         bits.push((e.days || 0) + '일');
-        bits.push('결제액 ' + (e.chargedAmount || 0).toLocaleString());
+        bits.push('별풍선 ' + (e.starBalloons || 0).toLocaleString());
+        break;
+      case 'cardBanner':
+        bits.push('종목: ' + (e.nickname || e.stockId));
+        bits.push((e.days || 0) + '일');
+        bits.push('별풍선 ' + (e.starBalloons || 0).toLocaleString());
         break;
       case 'treasureChest':
         bits.push('상자 ' + e.chestCount + (e.bonusChestCount ? '(+보너스 ' + e.bonusChestCount + ')' : ''));
@@ -2693,13 +2702,13 @@
         bits.push('soopId: ' + e.soopId);
         break;
       case 'banner':
-        bits.push((e.days || 0) + '일 · 결제액 ' + (e.chargedAmount || 0).toLocaleString());
+        bits.push((e.days || 0) + '일 · 별풍선 ' + (e.starBalloons || 0).toLocaleString());
         break;
       case 'pin':
-        bits.push('종목: ' + e.stockName + ' · ' + (e.hours || 0) + '시간');
+        bits.push('종목: ' + e.stockName + ' · ' + (e.hours || 0) + '시간 · 별풍선 ' + (e.starBalloons || 0).toLocaleString());
         break;
       case 'relayRoom':
-        bits.push((e.hours || 0) + '시간 · 결제액 ' + (e.chargedAmount || 0).toLocaleString());
+        bits.push((e.hours || 0) + '시간 · 별풍선 ' + (e.starBalloons || 0).toLocaleString());
         break;
     }
     return bits.join(' · ');
@@ -2756,6 +2765,12 @@
       const promoLink = window.prompt('홍보 링크(변경 시에만 입력):', e.promoLink || '');
       if (promoLink === null) return;
       call = smAdminActionFn({ action: 'approveChartBannerRequest', payload: { requestId: e.id, days: days, nickname: nickname, bannerImg: bannerImg, promoLink: promoLink } });
+    } else if (e._kind === 'cardBanner') {
+      const days = window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
+      if (days === null) return;
+      const nickname = window.prompt('종목명(오타 수정 시에만 변경):', e.nickname || '');
+      if (nickname === null) return;
+      call = smAdminActionFn({ action: 'approveCardBannerRequest', payload: { requestId: e.id, days: days, nickname: nickname } });
     } else if (e._kind === 'pin') {
       const hours = window.prompt('고정노출 시간(시간 단위)을 입력하세요:', String(e.hours || 24));
       if (hours === null) return;
@@ -2788,6 +2803,7 @@
   const PURCHASE_REJECT_ACTION = {
     banner:           'rejectBannerRequest',
     chartBanner:      'rejectChartBannerRequest',
+    cardBanner:       'rejectCardBannerRequest',
     pin:              'rejectPinRequest',
     relayRoom:        'rejectRelayRoomRequest',
     treasureChest:    'rejectTreasureChestRequest',
