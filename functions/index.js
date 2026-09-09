@@ -686,7 +686,7 @@ const notifyGalleryUnlockRequest = onValueCreated('/gallery/unlockRequests/{id}'
 // 그대로 보여줄 위험) 위 해금 신청과 동일하게 직접 문구를 구성한다. 썸네일
 // URL을 본문에 그대로 넣어두면 Discord가 자동으로 미리보기 임베드를 붙여준다
 // (별도 embeds payload 없이도 sendDiscordNotification의 단순 text 방식으로 충분).
-const GALLERY_CATEGORY_LABELS = { screenshot: '스크린샷', selfie: '방셀', 'ai-art': 'AI 일러스트', 'fan-art': '팬아트', meme: '밈', etc: '기타' };
+const GALLERY_CATEGORY_LABELS = { screenshot: '스크린샷', 'ai-art': 'AI 일러스트', 'fan-art': '팬아트', meme: '밈', etc: '기타' };
 const notifyGalleryImageUpload = onValueCreated('/gallery/images/{id}', async (event) => {
   const data = event.data.val() || {};
   const category = GALLERY_CATEGORY_LABELS[data.category] || data.category || '';
