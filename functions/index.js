@@ -656,6 +656,16 @@ const notifyLifeGameReviewReportAlert = onValueCreated('/lifeGame/reviewReports/
     '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널에서 확인)'
   );
 });
+const notifyLifeGameSponsorRequest = onValueCreated('/lifeGame/sponsorRequests/{id}', async (event) => {
+  const data = event.data.val() || {};
+  await sendDiscordNotification(
+    '🔔 **새 후원 스트리머 신청 (인생게임)**\n' + (data.nickname || '(알 수 없음)') +
+    (data.soopId ? ' (@' + data.soopId + ')' : '') +
+    (data.days ? ' · ' + data.days + '일' : '') +
+    (data.starBalloons ? ' · 별풍선 ' + data.starBalloons + '개' : '') +
+    '\n' + deepLink('section-purchase-approval')
+  );
+});
 const notifyGalleryImageReport = onValueCreated('/gallery/imageReports/{id}', async (event) => {
   const data = event.data.val() || {};
   await sendDiscordNotification('🔔 **새 이미지 신고 (스트리머 갤러리)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)');
@@ -999,6 +1009,74 @@ const setLifeGameBotConfig = onCall(async (request) => {
   return { ok: true };
 });
 
+// 인생게임 후원 스트리머 배너(2026-09-09) — soop-stock-market의 배너 신청
+// 승인/거절과 동일 원칙(후원창 후원 확인 → 승인)이지만, streamer-life-game은
+// adminAction 같은 단일 디스패처가 없어(06번 원칙 - 각 게임 관례를 따름) 봇
+// 설정과 동일하게 admin-center가 직접 lifeGame/currentSponsor를 조작한다.
+// 검색화면·엔딩화면·멀티플레이 참가·모바일 하단배너 네 자리 전부가 이 단일
+// 노드를 구독하므로 슬롯은 1개뿐 — 이미 진행 중인 후원이 있으면(soop-stock-
+// market 배너와 동일하게) 남은 기간에 이어서 연장한다.
+const lifeGameApproveSponsorRequest = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data || {};
+  const requestId = data.requestId;
+  if (!requestId) throw new HttpsError('invalid-argument', 'requestId가 필요합니다.');
+  const daysNum = Math.round(Number(data.days));
+  if (!Number.isInteger(daysNum) || daysNum < 1) {
+    throw new HttpsError('invalid-argument', '노출 기간을 올바르게 입력해주세요.');
+  }
+  const nickname = (data.nickname || '').toString().trim();
+
+  const db = getDatabase();
+  const reqSnap = await db.ref('lifeGame/sponsorRequests/' + requestId).get();
+  if (!reqSnap.exists()) throw new HttpsError('not-found', '신청 내역을 찾을 수 없습니다.');
+  const reqData = reqSnap.val();
+  if (reqData.status !== 'pending') {
+    throw new HttpsError('failed-precondition', '이미 처리된 신청입니다.');
+  }
+
+  const finalNickname = nickname || reqData.nickname;
+  const now = Date.now();
+  const currentSnap = await db.ref('lifeGame/currentSponsor').get();
+  const current = currentSnap.val();
+  const baseTime = (current && current.endAt > now) ? current.endAt : now;
+  const endAt = baseTime + daysNum * 86400000;
+
+  await db.ref().update({
+    'lifeGame/currentSponsor': {
+      nickname: finalNickname,
+      soopId: reqData.soopId,
+      previewImg: reqData.previewImg,
+      stationLink: reqData.stationLink,
+      startAt: now,
+      endAt: endAt,
+    },
+    ['lifeGame/sponsorRequests/' + requestId + '/nickname']: finalNickname,
+    ['lifeGame/sponsorRequests/' + requestId + '/status']: 'approved',
+    ['lifeGame/sponsorRequests/' + requestId + '/reviewedAt']: now,
+  });
+  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 승인', finalNickname + ' · ' + daysNum + '일');
+  return { ok: true, endAt: endAt };
+});
+
+const lifeGameRejectSponsorRequest = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data || {};
+  const requestId = data.requestId;
+  if (!requestId) throw new HttpsError('invalid-argument', 'requestId가 필요합니다.');
+
+  const db = getDatabase();
+  const reqSnap = await db.ref('lifeGame/sponsorRequests/' + requestId).get();
+  if (!reqSnap.exists()) throw new HttpsError('not-found', '신청 내역을 찾을 수 없습니다.');
+  if (reqSnap.val().status !== 'pending') {
+    throw new HttpsError('failed-precondition', '이미 처리된 신청입니다.');
+  }
+
+  await db.ref('lifeGame/sponsorRequests/' + requestId).update({ status: 'rejected', reviewedAt: Date.now() });
+  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 거절', requestId);
+  return { ok: true };
+});
+
 // 20번 2단계 — 정지계정 관리. 게임별 정지(각 게임의 기존 banAccount/unbanAccount)가
 // 기본이고, 여기 두 함수는 신원 단위로 명백히 심각한 사안(다중계정 어뷰징, 결제
 // 사기 등)만 관리자가 명시적으로 "전체 게임 정지"로 격상시키는 전용 통로다(07번
@@ -1072,6 +1150,8 @@ module.exports = {
   getLifeGameStats,
   getLifeGameBotConfig,
   setLifeGameBotConfig,
+  lifeGameApproveSponsorRequest,
+  lifeGameRejectSponsorRequest,
   banAccountAllGames,
   unbanAccountAllGames,
   migrateBannedAccounts,
@@ -1109,6 +1189,7 @@ module.exports = {
   notifyListingRequest,
   notifyLifeGameReportAlert,
   notifyLifeGameReviewReportAlert,
+  notifyLifeGameSponsorRequest,
   notifyGalleryImageReport,
   notifyGalleryUnlockRequest,
   notifyGalleryImageUpload,
