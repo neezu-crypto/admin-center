@@ -692,9 +692,11 @@
           <option value="90">최근 90일</option>
         </select>
         <button id="onyuStatsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+        <button id="onyuStatsCsvBtn" class="perm-refresh-btn" type="button">CSV 내보내기</button>
       </div>
       <div id="onyuStatsTotals"></div>
       <div id="onyuStatsDetails" style="margin-top:16px;"></div>
+      <div id="onyuStatsExtra" style="margin-top:16px;"></div>
     </div>
 
     <div class="card" id="section-audit-log">
@@ -961,6 +963,9 @@
   const onyuStatsRefreshBtn = document.getElementById('onyuStatsRefreshBtn');
   const onyuStatsTotalsEl = document.getElementById('onyuStatsTotals');
   const onyuStatsDetailsEl = document.getElementById('onyuStatsDetails');
+  const onyuStatsExtraEl = document.getElementById('onyuStatsExtra');
+  const onyuStatsCsvBtn = document.getElementById('onyuStatsCsvBtn');
+  let lastOnyuStatsData = null;
   const reviewAlertBadgeEl = document.getElementById('reviewAlertBadge');
   const reviewQueueCountTagEl = document.getElementById('reviewQueueCountTag');
   const marketReportListEl = document.getElementById('marketReportList');
@@ -2125,9 +2130,11 @@
   async function refreshOnyuStats() {
     onyuStatsTotalsEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     onyuStatsDetailsEl.innerHTML = '';
+    onyuStatsExtraEl.innerHTML = '';
     try {
       const result = await getOnyuStatsFn({ days: Number(onyuStatsDaysEl.value) || 14 });
       const data = result.data || {};
+      lastOnyuStatsData = data;
       const totals = data.totals || {};
       const names = {
         visit: '방문', session_start: '세션 시작', game_started: '게임 시작', game_completed: '게임 완료',
@@ -2151,12 +2158,36 @@
       const endingRows = rows(data.endings, function (key) { return key.replace(/\//g, ' · '); });
       const choiceRows = rows(data.choices, function (key) { return key.replace(/\//g, ' · '); });
       onyuStatsDetailsEl.innerHTML = '<h3 class="sub-heading">권한·로그인</h3><div class="stat-row-list stat-row-list-scroll">' + (modeRows + providerRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">챕터·엔딩</h3><div class="stat-row-list stat-row-list-scroll">' + (chapterRows + endingRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">선택지</h3><div class="stat-row-list stat-row-list-scroll">' + (choiceRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div>';
+      const cgRows = rows(data.cgs, function (key) { return key.replace(/\//g, ' · '); });
+      const audioRows = rows(data.audio, function (key) { return key.replace(/\//g, ' · '); });
+      const screenRows = rows(data.screens, function (key) { return '화면 · ' + key; });
+      const deviceRows = rows(data.devices, function (key) { return '기기 · ' + key; });
+      const orientationRows = rows(data.orientations, function (key) { return '방향 · ' + key; });
+      const versionRows = rows(data.clientVersions, function (key) { return '버전 · ' + key; });
+      const dailyRows = (data.daily || []).slice().reverse().map(function (day) {
+        return '<div class="stat-row-item"><span class="name">' + escapeHtml(day.date) + '</span><div class="metrics"><div class="stat-metric"><span class="value">' + (day.uniqueUsers || 0) + '</span><span class="unit">고유 사용자</span></div><div class="stat-metric"><span class="value">' + ((day.totals && day.totals.game_started) || 0) + '</span><span class="unit">게임 시작</span></div><div class="stat-metric"><span class="value">' + ((day.totals && day.totals.game_completed) || 0) + '</span><span class="unit">게임 완료</span></div></div></div>';
+      }).join('');
+      onyuStatsExtraEl.innerHTML = '<h3 class="sub-heading">CG·오디오·화면</h3><div class="stat-row-list stat-row-list-scroll">' + (cgRows + audioRows + screenRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">기기·화면 방향·버전</h3><div class="stat-row-list stat-row-list-scroll">' + (deviceRows + orientationRows + versionRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">일별 추이</h3><div class="stat-row-list stat-row-list-scroll">' + (dailyRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div>';
     } catch (e) {
       console.error('온 이유 통계 조회 실패:', e);
       onyuStatsTotalsEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
     }
   }
   onyuStatsRefreshBtn.addEventListener('click', refreshOnyuStats);
+  onyuStatsCsvBtn.addEventListener('click', function () {
+    if (!lastOnyuStatsData) return;
+    const data = lastOnyuStatsData;
+    const rows = [['구분', '항목', '횟수']];
+    function append(group, obj) { Object.keys(obj || {}).forEach(function (key) { rows.push([group, key, obj[key] || 0]); }); }
+    append('전체', data.totals); append('챕터', data.chapters); append('선택지', data.choices); append('엔딩', data.endings);
+    append('CG', data.cgs); append('오디오', data.audio); append('화면', data.screens); append('권한', data.authModes); append('로그인', data.providers);
+    append('기기', data.devices); append('방향', data.orientations); append('버전', data.clientVersions);
+    const csv = rows.map(function (row) { return row.map(function (cell) { return '"' + String(cell == null ? '' : cell).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url; link.download = 'onyu-vn-stats-' + data.from + '-' + data.to + '.csv'; link.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  });
 
   // 인생게임 관리형 봇(2026-08-30, streamer-life-game 62장) - 봇 수·1턴당 초·성향
   // 분포 설정. 실행 자체는 streamer-life-game의 예약 함수가 서버에서 도는 방식이라

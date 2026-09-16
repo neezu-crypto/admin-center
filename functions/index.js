@@ -1309,7 +1309,7 @@ const onyuRevokeViewerAccess = onCall((request) => updateOnyuViewerAccess(reques
 // 일별 카운터로 합산하고, 운영·오류 분석에 필요한 일부 이벤트만 짧은 기간 원문을
 // 남긴다. 집계 경로는 관리자센터가 읽고, 클라이언트에는 공개하지 않는다.
 const ONYU_ANALYTICS_EVENTS = new Set([
-  'visit', 'session_start', 'session_end', 'screen_viewed', 'signature_shown', 'signature_completed',
+  'visit', 'session_start', 'session_end', 'screen_viewed', 'signature_shown', 'signature_completed', 'signature_skipped',
   'sound_unlock_clicked', 'login_success', 'viewer_access_requested', 'viewer_access_approved',
   'viewer_access_rejected', 'viewer_access_revoked', 'streamer_verification_requested',
   'streamer_verification_approved', 'streamer_verification_rejected',
@@ -1326,7 +1326,7 @@ const ONYU_ANALYTICS_EVENTS = new Set([
   'fullscreen_exited', 'asset_load_error', 'presence_heartbeat',
 ]);
 const ONYU_ANALYTICS_RAW_EVENTS = new Set([
-  'session_start', 'game_started', 'game_completed', 'chapter_started', 'chapter_completed',
+  'session_start', 'signature_skipped', 'game_started', 'game_completed', 'chapter_started', 'chapter_completed',
   'choice_selected', 'cg_revealed', 'ending_reached', 'outfit_selected',
   'viewer_access_requested', 'viewer_access_approved', 'viewer_access_rejected',
   'viewer_access_revoked', 'access_check_denied', 'game_access_denied', 'asset_load_error',
@@ -1334,6 +1334,7 @@ const ONYU_ANALYTICS_RAW_EVENTS = new Set([
 ]);
 const ONYU_ANALYTICS_DAILY_RETENTION_DAYS = 400;
 const ONYU_ANALYTICS_RAW_RETENTION_DAYS = 30;
+const ONYU_ANALYTICS_DEDUP_RETENTION_DAYS = 35;
 
 function onyuAnalyticsKey(value, fallback) {
   const text = String(value === undefined || value === null ? (fallback || '') : value).trim();
@@ -1370,12 +1371,23 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
   const now = Date.now();
   const uidKey = onyuAnalyticsUidKey(meta.uid);
   function increment(path) { incrementCounts[path] = (incrementCounts[path] || 0) + 1; }
-  events.forEach(function (event) {
+  let accepted = 0;
+  for (let eventIndex = 0; eventIndex < events.length; eventIndex++) {
+    const event = events[eventIndex];
     const eventName = event.event;
-    if (!ONYU_ANALYTICS_EVENTS.has(eventName)) return;
+    if (!ONYU_ANALYTICS_EVENTS.has(eventName)) continue;
     const clientAt = Number(event.clientAt);
     const at = isFinite(clientAt) && clientAt > now - 7 * 24 * 3600 * 1000 && clientAt < now + 10 * 60 * 1000 ? clientAt : now;
     const date = onyuAnalyticsDate(at);
+    const eventId = onyuAnalyticsKey(event.eventId);
+    if (eventId) {
+      const dedupRef = db.ref('onyuVn/analytics/dedup/' + date + '/' + eventId);
+      const dedupResult = await dedupRef.transaction(function (value) {
+        return value === true ? undefined : true;
+      });
+      if (!dedupResult.committed) continue;
+    }
+    accepted++;
     const base = 'onyuVn/analytics/daily/' + date;
     increment(base + '/totals/' + eventName);
     increment(base + '/authModes/' + meta.authMode);
@@ -1397,6 +1409,12 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
     if (screen) increment(base + '/screens/' + screen);
     const mode = onyuAnalyticsKey(event.requestedMode);
     if (mode) increment(base + '/requestedModes/' + mode);
+    const deviceType = onyuAnalyticsKey(event.deviceType);
+    const orientation = onyuAnalyticsKey(event.orientation);
+    const clientVersion = onyuAnalyticsKey(event.clientVersion);
+    if (deviceType) increment(base + '/devices/' + deviceType);
+    if (orientation) increment(base + '/orientations/' + orientation);
+    if (clientVersion) increment(base + '/clientVersions/' + clientVersion);
 
     const summary = 'onyuVn/analytics/users/' + uidKey + '/summary';
     if (eventName === 'game_started') increment(summary + '/startedCount');
@@ -1416,6 +1434,9 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
         clientAt: isFinite(clientAt) ? clientAt : null,
         serverAt: now,
         sessionId: onyuAnalyticsKey(event.sessionId),
+        deviceType: onyuAnalyticsKey(event.deviceType) || null,
+        orientation: onyuAnalyticsKey(event.orientation) || null,
+        clientVersion: onyuAnalyticsKey(event.clientVersion) || null,
         chapterId: chapterId || null,
         choiceId: choiceId || null,
         optionId: optionId || null,
@@ -1425,7 +1446,7 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
       };
       rawEntries.push({ date: date, value: raw });
     }
-  });
+  }
 
   Object.keys(incrementCounts).forEach(function (path) {
     updates[path] = ServerValue.increment(incrementCounts[path]);
@@ -1435,7 +1456,7 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
     updates['onyuVn/analytics/raw/' + entry.date + '/' + key] = entry.value;
   });
   if (Object.keys(updates).length) await db.ref().update(updates);
-  return { accepted: events.filter(function (e) { return ONYU_ANALYTICS_EVENTS.has(e.event); }).length };
+  return { accepted };
 }
 
 const onyuTrackEvents = onCall(async (request) => {
@@ -1480,7 +1501,9 @@ const getOnyuStats = onCall(async (request) => {
   const snaps = await Promise.all(dates.map(function (date) { return db.ref('onyuVn/analytics/daily/' + date).get(); }));
   const totals = {};
   const chapters = {}, choices = {}, endings = {}, cgs = {}, audio = {}, screens = {}, authModes = {}, providers = {};
+  const devices = {}, orientations = {}, clientVersions = {};
   const unique = {};
+  const daily = [];
   function mergeCounter(target, source, prefix) {
     Object.keys(source || {}).forEach(function (key) {
       const value = source[key];
@@ -1490,6 +1513,7 @@ const getOnyuStats = onCall(async (request) => {
   }
   snaps.forEach(function (snap, index) {
     const value = snap.val() || {};
+    daily.push({ date: dates[index], uniqueUsers: Object.keys(value.uniqueUsers || {}).length, totals: value.totals || {} });
     mergeCounter(totals, value.totals || {}, '');
     mergeCounter(chapters, value.chapters || {}, '');
     mergeCounter(choices, value.choices || {}, '');
@@ -1499,6 +1523,9 @@ const getOnyuStats = onCall(async (request) => {
     mergeCounter(screens, value.screens || {}, '');
     mergeCounter(authModes, value.authModes || {}, '');
     mergeCounter(providers, value.providers || {}, '');
+    mergeCounter(devices, value.devices || {}, '');
+    mergeCounter(orientations, value.orientations || {}, '');
+    mergeCounter(clientVersions, value.clientVersions || {}, '');
     Object.keys(value.uniqueUsers || {}).forEach(function (uid) { unique[uid] = true; });
   });
   return {
@@ -1515,6 +1542,10 @@ const getOnyuStats = onCall(async (request) => {
     screens,
     authModes,
     providers,
+    devices,
+    orientations,
+    clientVersions,
+    daily,
   };
 });
 
@@ -1529,6 +1560,9 @@ const trimOnyuAnalytics = onSchedule('every 24 hours', async function () {
   });
   Object.keys(data.raw || {}).forEach(function (date) {
     if (now - new Date(date + 'T00:00:00Z').getTime() > ONYU_ANALYTICS_RAW_RETENTION_DAYS * 24 * 3600 * 1000) updates['onyuVn/analytics/raw/' + date] = null;
+  });
+  Object.keys(data.dedup || {}).forEach(function (date) {
+    if (now - new Date(date + 'T00:00:00Z').getTime() > ONYU_ANALYTICS_DEDUP_RETENTION_DAYS * 24 * 3600 * 1000) updates['onyuVn/analytics/dedup/' + date] = null;
   });
   if (Object.keys(updates).length) await db.ref().update(updates);
 });
