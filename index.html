@@ -2167,7 +2167,16 @@
       const dailyRows = (data.daily || []).slice().reverse().map(function (day) {
         return '<div class="stat-row-item"><span class="name">' + escapeHtml(day.date) + '</span><div class="metrics"><div class="stat-metric"><span class="value">' + (day.uniqueUsers || 0) + '</span><span class="unit">고유 사용자</span></div><div class="stat-metric"><span class="value">' + ((day.totals && day.totals.game_started) || 0) + '</span><span class="unit">게임 시작</span></div><div class="stat-metric"><span class="value">' + ((day.totals && day.totals.game_completed) || 0) + '</span><span class="unit">게임 완료</span></div></div></div>';
       }).join('');
-      onyuStatsExtraEl.innerHTML = '<h3 class="sub-heading">CG·오디오·화면</h3><div class="stat-row-list stat-row-list-scroll">' + (cgRows + audioRows + screenRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">기기·화면 방향·버전</h3><div class="stat-row-list stat-row-list-scroll">' + (deviceRows + orientationRows + versionRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">일별 추이</h3><div class="stat-row-list stat-row-list-scroll">' + (dailyRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div>';
+      const funnel = data.funnel || {};
+      const funnelRows = [['방문', funnel.visitors], ['세션 시작', funnel.sessions], ['게임 시작', funnel.gameStarted], ['챕터 시작', funnel.chapterStarted], ['엔딩 도달', funnel.endingReached], ['게임 완료', funnel.gameCompleted]].map(function (item) {
+        return '<div class="stat-row-item"><span class="name">' + item[0] + '</span><div class="metrics"><div class="stat-metric"><span class="value">' + (item[1] || 0) + '</span><span class="unit">회</span></div></div></div>';
+      }).join('');
+      const retentionRows = (data.retention || []).slice().reverse().filter(function (row) { return row.day1 !== null || row.day7 !== null; }).map(function (row) {
+        const d1 = row.day1 === null ? '-' : (row.day1 + '명 (' + Math.round(row.day1Rate * 100) + '%)');
+        const d7 = row.day7 === null ? '-' : (row.day7 + '명 (' + Math.round(row.day7Rate * 100) + '%)');
+        return '<div class="stat-row-item"><span class="name">' + escapeHtml(row.date) + '</span><div class="metrics"><div class="stat-metric"><span class="value">' + d1 + '</span><span class="unit">1일 재방문</span></div><div class="stat-metric"><span class="value">' + d7 + '</span><span class="unit">7일 재방문</span></div></div></div>';
+      }).join('');
+      onyuStatsExtraEl.innerHTML = '<h3 class="sub-heading">CG·오디오·화면</h3><div class="stat-row-list stat-row-list-scroll">' + (cgRows + audioRows + screenRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">기기·화면 방향·버전</h3><div class="stat-row-list stat-row-list-scroll">' + (deviceRows + orientationRows + versionRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">진행 퍼널</h3><div class="stat-row-list stat-row-list-scroll">' + funnelRows + '</div><h3 class="sub-heading" style="margin-top:16px;">일별 추이</h3><div class="stat-row-list stat-row-list-scroll">' + (dailyRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">잔존율</h3><div class="stat-row-list stat-row-list-scroll">' + (retentionRows || '<div class="empty-state">7일 이상 누적된 데이터가 없습니다.</div>') + '</div>';
     } catch (e) {
       console.error('온 이유 통계 조회 실패:', e);
       onyuStatsTotalsEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
@@ -2182,6 +2191,7 @@
     append('전체', data.totals); append('챕터', data.chapters); append('선택지', data.choices); append('엔딩', data.endings);
     append('CG', data.cgs); append('오디오', data.audio); append('화면', data.screens); append('권한', data.authModes); append('로그인', data.providers);
     append('기기', data.devices); append('방향', data.orientations); append('버전', data.clientVersions);
+    append('퍼널', data.funnel);
     const csv = rows.map(function (row) { return row.map(function (cell) { return '"' + String(cell == null ? '' : cell).replace(/"/g, '""') + '"'; }).join(','); }).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);

@@ -1504,6 +1504,7 @@ const getOnyuStats = onCall(async (request) => {
   const devices = {}, orientations = {}, clientVersions = {};
   const unique = {};
   const daily = [];
+  const dailyUsers = [];
   function mergeCounter(target, source, prefix) {
     Object.keys(source || {}).forEach(function (key) {
       const value = source[key];
@@ -1513,7 +1514,9 @@ const getOnyuStats = onCall(async (request) => {
   }
   snaps.forEach(function (snap, index) {
     const value = snap.val() || {};
-    daily.push({ date: dates[index], uniqueUsers: Object.keys(value.uniqueUsers || {}).length, totals: value.totals || {} });
+    const usersForDay = Object.keys(value.uniqueUsers || {});
+    dailyUsers.push(new Set(usersForDay));
+    daily.push({ date: dates[index], uniqueUsers: usersForDay.length, totals: value.totals || {} });
     mergeCounter(totals, value.totals || {}, '');
     mergeCounter(chapters, value.chapters || {}, '');
     mergeCounter(choices, value.choices || {}, '');
@@ -1527,6 +1530,28 @@ const getOnyuStats = onCall(async (request) => {
     mergeCounter(orientations, value.orientations || {}, '');
     mergeCounter(clientVersions, value.clientVersions || {}, '');
     Object.keys(value.uniqueUsers || {}).forEach(function (uid) { unique[uid] = true; });
+  });
+  const funnel = {
+    visitors: totals.visit || 0,
+    sessions: totals.session_start || 0,
+    gameStarted: totals.game_started || 0,
+    chapterStarted: totals.chapter_started || 0,
+    endingReached: totals.ending_reached || 0,
+    gameCompleted: totals.game_completed || 0,
+  };
+  const retention = daily.map(function (day, index) {
+    const cohort = dailyUsers[index];
+    function returning(offset) {
+      if (index + offset >= dailyUsers.length) return null;
+      let count = 0;
+      cohort.forEach(function (uid) { if (dailyUsers[index + offset].has(uid)) count++; });
+      return count;
+    }
+    const day1 = returning(1);
+    const day7 = returning(7);
+    return { date: day.date, cohortUsers: cohort.size, day1, day7,
+      day1Rate: day1 === null || !cohort.size ? null : day1 / cohort.size,
+      day7Rate: day7 === null || !cohort.size ? null : day7 / cohort.size };
   });
   return {
     days,
@@ -1546,6 +1571,8 @@ const getOnyuStats = onCall(async (request) => {
     orientations,
     clientVersions,
     daily,
+    funnel,
+    retention,
   };
 });
 
