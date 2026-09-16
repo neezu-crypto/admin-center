@@ -1,5 +1,5 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
-const { onValueCreated } = require('firebase-functions/v2/database');
+const { onValueCreated, onValueUpdated } = require('firebase-functions/v2/database');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
@@ -1312,6 +1312,7 @@ const ONYU_ANALYTICS_EVENTS = new Set([
   'visit', 'session_start', 'session_end', 'screen_viewed', 'signature_shown', 'signature_completed',
   'sound_unlock_clicked', 'login_success', 'viewer_access_requested', 'viewer_access_approved',
   'viewer_access_rejected', 'viewer_access_revoked', 'streamer_verification_requested',
+  'streamer_verification_approved', 'streamer_verification_rejected',
   'access_check_success', 'access_check_denied', 'game_access_granted', 'game_access_denied',
   'game_started', 'game_paused', 'game_resumed', 'game_abandoned', 'game_completed',
   'name_submitted', 'chapter_started', 'chapter_completed', 'choice_shown', 'choice_selected',
@@ -1329,6 +1330,7 @@ const ONYU_ANALYTICS_RAW_EVENTS = new Set([
   'choice_selected', 'cg_revealed', 'ending_reached', 'outfit_selected',
   'viewer_access_requested', 'viewer_access_approved', 'viewer_access_rejected',
   'viewer_access_revoked', 'access_check_denied', 'game_access_denied', 'asset_load_error',
+  'streamer_verification_approved', 'streamer_verification_rejected',
 ]);
 const ONYU_ANALYTICS_DAILY_RETENTION_DAYS = 400;
 const ONYU_ANALYTICS_RAW_RETENTION_DAYS = 30;
@@ -1531,6 +1533,23 @@ const trimOnyuAnalytics = onSchedule('every 24 hours', async function () {
   if (Object.keys(updates).length) await db.ref().update(updates);
 });
 
+// 주식시장 공용 스트리머 인증 요청 노드의 상태 변경을 온이유 출처만 골라 집계한다.
+// 요청 생성 알림은 기존 notifyStockVerifyRequest가 담당하므로 여기서는 승인·거절
+// 전환만 처리해 클라이언트 이벤트 유실을 보완한다.
+const trackOnyuStreamerVerificationStatus = onValueUpdated('/streamerVerificationRequests/{id}', async (event) => {
+  const before = event.data.before.val() || {};
+  const after = event.data.after.val() || {};
+  if (after.source !== 'onyu-vn' || before.status === after.status || !after.uid) return null;
+  const status = after.status === 'approved' ? 'approved' : after.status === 'rejected' ? 'rejected' : null;
+  if (!status) return null;
+  const meta = { uid: String(after.uid), provider: 'other', authMode: status === 'approved' ? 'streamer' : 'viewer' };
+  await writeOnyuAnalyticsEvents(getDatabase(), meta, [{
+    event: 'streamer_verification_' + status,
+    serverAt: Date.now(),
+  }]);
+  return null;
+});
+
 module.exports = {
   getGalleryStats,
   getLifeGameStats,
@@ -1595,4 +1614,5 @@ module.exports = {
   onyuTrackEvents,
   getOnyuStats,
   trimOnyuAnalytics,
+  trackOnyuStreamerVerificationStatus,
 };
