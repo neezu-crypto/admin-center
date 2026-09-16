@@ -1148,7 +1148,7 @@ const migrateBannedAccounts = onCall(async (request) => {
 // ── onyu-vn 일반 시청자 접근 승인 ─────────────────────────────
 // onyu-vn은 정적 GitHub Pages 게임이라 클라이언트가 승인 여부를 직접 쓰면 우회할 수
 // 있다. 신청·조회·게임 시작 판정은 이 관리자센터 codebase의 callable을 통해 처리하고,
-// 승인·반려는 관리자만 실행한다. 승인 키는 브라우저가 아니라 Firebase uid다.
+// 승인·무시는 관리자만 실행한다. 승인 키는 브라우저가 아니라 Firebase uid다.
 function onyuProviderLabel(request) {
   const provider = request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
   return provider === 'google.com' ? 'google' : 'kakao';
@@ -1248,7 +1248,7 @@ async function updateOnyuViewerAccess(request, status) {
   updates['onyuVn/viewerAccessRequests/' + uid + '/reviewedAt'] = now;
   updates['onyuVn/viewerAccessRequests/' + uid + '/reviewedBy'] = adminUid;
   await db.ref().update(updates);
-  await logToAdminAuditLog(db, request, 'onyu-vn 접근 ' + (status === 'approved' ? '승인' : status === 'rejected' ? '반려' : '회수'), uid + ' · ' + adminName);
+  await logToAdminAuditLog(db, request, 'onyu-vn 접근 ' + (status === 'approved' ? '승인' : status === 'rejected' ? '무시' : '회수'), uid + ' · ' + adminName);
   return { ok: true, uid, status };
 }
 

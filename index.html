@@ -1121,7 +1121,7 @@
     onyuAccessRequests.forEach(function (r) {
       const row = document.createElement('div');
       row.className = 'verif-row';
-      const statusLabel = r.status === 'approved' ? '승인됨' : r.status === 'rejected' ? '반려됨' : r.status === 'revoked' ? '회수됨' : '대기 중';
+      const statusLabel = r.status === 'approved' ? '승인됨' : r.status === 'rejected' ? '무시됨' : r.status === 'revoked' ? '회수됨' : '대기 중';
       const time = r.updatedAt || r.requestedAt;
       const providerLabel = r.provider === 'google' ? 'Google' : 'Kakao';
       row.innerHTML =
@@ -1147,7 +1147,7 @@
         addAction('접근 회수', 'revoke', function () { return onyuRevokeViewerAccessFn({ uid: r.uid }); });
       } else {
         addAction('승인', 'approve', function () { return onyuApproveViewerAccessFn({ uid: r.uid }); });
-        if (r.status !== 'rejected') addAction('반려', 'reject', function () { return onyuRejectViewerAccessFn({ uid: r.uid }); });
+        if (r.status !== 'rejected') addAction('무시', 'reject', function () { return onyuRejectViewerAccessFn({ uid: r.uid }); });
       }
       onyuAccessListEl.appendChild(row);
     });
