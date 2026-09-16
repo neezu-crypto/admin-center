@@ -1145,6 +1145,117 @@ const migrateBannedAccounts = onCall(async (request) => {
   return { migratedCount: migratedCount };
 });
 
+// ── onyu-vn 일반 시청자 접근 승인 ─────────────────────────────
+// onyu-vn은 정적 GitHub Pages 게임이라 클라이언트가 승인 여부를 직접 쓰면 우회할 수
+// 있다. 신청·조회·게임 시작 판정은 이 관리자센터 codebase의 callable을 통해 처리하고,
+// 승인·반려는 관리자만 실행한다. 승인 키는 브라우저가 아니라 Firebase uid다.
+function onyuProviderLabel(request) {
+  const provider = request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
+  return provider === 'google.com' ? 'google' : 'kakao';
+}
+
+async function getOnyuAccessState(uid, request) {
+  const db = getDatabase();
+  const [userSnap, accessSnap, requestSnap] = await Promise.all([
+    db.ref('users/' + uid).get(),
+    db.ref('onyuVn/viewerAccess/' + uid).get(),
+    db.ref('onyuVn/viewerAccessRequests/' + uid).get(),
+  ]);
+  const user = userSnap.val() || {};
+  const provider = request && request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
+  const authenticatedViewer = provider !== 'anonymous' || user.googleLinked === true || user.kakaoLinked === true;
+  const loginMethod = user.googleLinked === true || provider === 'google.com' ? 'google' : user.kakaoLinked === true ? 'kakao' : null;
+  // users 플래그가 없는 레거시 인증 기록도 스트리머로 인식한다.
+  const streamerVerified = user.streamerVerified === true || await isVerifiedStreamerUid(uid);
+  if (streamerVerified) return { role: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod };
+  const access = accessSnap.val() || {};
+  const req = requestSnap.val() || {};
+  const status = access.status || req.status || 'none';
+  return { role: 'viewer', accessStatus: status, canStartGame: authenticatedViewer && status === 'approved', authenticated: authenticatedViewer, loginMethod };
+}
+
+// 일반 시청자가 후원 후 관리자 승인을 기다리는 신청을 생성한다. 익명 세션은 신청할
+// 수 없고, 스트리머 인증 유저는 별도 승인 없이 이미 통과 상태로 반환한다.
+const onyuRequestViewerAccess = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
+  if (provider === 'anonymous') throw new HttpsError('failed-precondition', 'Google 또는 카카오 로그인이 필요합니다.');
+  const current = await getOnyuAccessState(uid, request);
+  if (current.role === 'streamer' || (current.authenticated && current.accessStatus === 'approved')) return Object.assign({ ok: true }, current);
+  if (!current.authenticated) throw new HttpsError('failed-precondition', 'Google 또는 카카오 로그인이 필요합니다.');
+
+  const db = getDatabase();
+  const requestRef = db.ref('onyuVn/viewerAccessRequests/' + uid);
+  const existingSnap = await requestRef.get();
+  const existing = existingSnap.val() || {};
+  const now = Date.now();
+  const next = {
+    uid,
+    provider: onyuProviderLabel(request),
+    status: 'pending',
+    requestedAt: existing.requestedAt || now,
+    updatedAt: now,
+  };
+  await requestRef.set(next);
+  return { ok: true, role: 'viewer', accessStatus: 'pending', canStartGame: false, requestId: uid };
+});
+
+const onyuGetViewerAccess = onCall(async (request) => {
+  const uid = requireAuth(request);
+  return Object.assign({ ok: true, uid }, await getOnyuAccessState(uid, request));
+});
+
+// 게임 시작 직전에 호출하는 최종 서버 판정. 정적 콘텐츠 파일 자체를 숨기는 함수는
+// 아니지만, 정상적인 시작 경로의 승인 우회는 이 함수에서 차단한다.
+const onyuStartSession = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const state = await getOnyuAccessState(uid, request);
+  if (!state.canStartGame) {
+    throw new HttpsError('permission-denied', state.authenticated ? '별풍선 후원 확인 및 관리자 승인이 필요합니다.' : 'Google 또는 카카오 로그인 후 접근 승인을 받아야 합니다.');
+  }
+  return Object.assign({ ok: true, uid }, state);
+});
+
+const onyuListViewerAccessRequests = onCall(async (request) => {
+  await requireAdmin(request);
+  const snap = await getDatabase().ref('onyuVn/viewerAccessRequests').get();
+  const data = snap.val() || {};
+  const requests = Object.keys(data).map((uid) => Object.assign({ uid }, data[uid])).sort((a, b) => (b.updatedAt || b.requestedAt || 0) - (a.updatedAt || a.requestedAt || 0));
+  return { requests };
+});
+
+async function updateOnyuViewerAccess(request, status) {
+  const adminUid = await requireAdmin(request);
+  const uid = String(request.data && request.data.uid || '').trim();
+  if (!uid || uid.length > 200) throw new HttpsError('invalid-argument', '대상 uid가 필요합니다.');
+  const db = getDatabase();
+  const reqRef = db.ref('onyuVn/viewerAccessRequests/' + uid);
+  const reqSnap = await reqRef.get();
+  const req = reqSnap.val() || {};
+  if (!req.uid) throw new HttpsError('not-found', '해당 접근 승인 신청을 찾을 수 없습니다.');
+  const now = Date.now();
+  const adminName = (request.auth.token && (request.auth.token.name || request.auth.token.email)) || adminUid;
+  const updates = {};
+  updates['onyuVn/viewerAccess/' + uid] = {
+    status,
+    approvedAt: status === 'approved' ? now : null,
+    rejectedAt: status === 'rejected' ? now : null,
+    revokedAt: status === 'revoked' ? now : null,
+    reviewedAt: now,
+    reviewedBy: adminUid,
+  };
+  updates['onyuVn/viewerAccessRequests/' + uid + '/status'] = status;
+  updates['onyuVn/viewerAccessRequests/' + uid + '/reviewedAt'] = now;
+  updates['onyuVn/viewerAccessRequests/' + uid + '/reviewedBy'] = adminUid;
+  await db.ref().update(updates);
+  await logToAdminAuditLog(db, request, 'onyu-vn 접근 ' + (status === 'approved' ? '승인' : status === 'rejected' ? '반려' : '회수'), uid + ' · ' + adminName);
+  return { ok: true, uid, status };
+}
+
+const onyuApproveViewerAccess = onCall((request) => updateOnyuViewerAccess(request, 'approved'));
+const onyuRejectViewerAccess = onCall((request) => updateOnyuViewerAccess(request, 'rejected'));
+const onyuRevokeViewerAccess = onCall((request) => updateOnyuViewerAccess(request, 'revoked'));
+
 module.exports = {
   getGalleryStats,
   getLifeGameStats,
@@ -1198,4 +1309,11 @@ module.exports = {
   getPurchaseOverview,
   sampleConcurrentUsers,
   getVisitorAnalytics,
+  onyuRequestViewerAccess,
+  onyuGetViewerAccess,
+  onyuStartSession,
+  onyuListViewerAccessRequests,
+  onyuApproveViewerAccess,
+  onyuRejectViewerAccess,
+  onyuRevokeViewerAccess,
 };
