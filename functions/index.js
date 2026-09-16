@@ -636,6 +636,17 @@ const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{
 const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval');
 const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
 const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)', 'section-listing-request');
+const notifyOnyuViewerAccessRequest = onValueCreated('/onyuVn/viewerAccessAlerts/{id}', async (event) => {
+  const data = event.data.val() || {};
+  const nickname = String(data.nickname || '(닉네임 미입력)').replace(/[\r\n]/g, ' ').slice(0, 60);
+  const uid = String(data.uid || '(알 수 없음)').replace(/[\r\n]/g, ' ').slice(0, 120);
+  await sendDiscordNotification(
+    '🔔 **새 후원 승인 신청 (온 이유)**\n' +
+    '후원자 닉네임: ' + nickname + '\n' +
+    'uid: `' + uid + '`\n' +
+    deepLink('section-onyu-access')
+  );
+});
 
 // 2026-09-05 추가(신규 게임 온보딩 체크리스트) — 인생게임/갤러리의 신고 큐는
 // admin-center 페이지 안에 대응하는 섹션이 없고, 각 사이트 자체 관리 패널에서
@@ -1180,6 +1191,8 @@ const onyuRequestViewerAccess = onCall(async (request) => {
   const uid = requireAuth(request);
   const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
   if (provider === 'anonymous') throw new HttpsError('failed-precondition', 'Google 또는 카카오 로그인이 필요합니다.');
+  const nickname = String(request.data && request.data.nickname || '').trim();
+  if (!nickname || nickname.length > 30) throw new HttpsError('invalid-argument', 'SOOP 후원자 닉네임을 입력해 주세요.');
   const current = await getOnyuAccessState(uid, request);
   if (current.role === 'streamer' || (current.authenticated && current.accessStatus === 'approved')) return Object.assign({ ok: true }, current);
   if (!current.authenticated) throw new HttpsError('failed-precondition', 'Google 또는 카카오 로그인이 필요합니다.');
@@ -1191,12 +1204,26 @@ const onyuRequestViewerAccess = onCall(async (request) => {
   const now = Date.now();
   const next = {
     uid,
+    nickname,
     provider: onyuProviderLabel(request),
     status: 'pending',
     requestedAt: existing.requestedAt || now,
     updatedAt: now,
   };
   await requestRef.set(next);
+  // 같은 uid가 재신청할 때도 디스코드 알림이 누락되지 않도록, 현재 상태 노드와
+  // 별도의 일회성 알림 큐를 만든다. 알림 큐 기록 실패가 후원 신청 자체를 막지는 않는다.
+  try {
+    await db.ref('onyuVn/viewerAccessAlerts').push().set({
+      uid,
+      nickname,
+      provider: onyuProviderLabel(request),
+      status: 'pending',
+      requestedAt: now,
+    });
+  } catch (e) {
+    console.error('온 이유 후원 신청 알림 큐 기록 실패:', e);
+  }
   return { ok: true, role: 'viewer', accessStatus: 'pending', canStartGame: false, requestId: uid };
 });
 
@@ -1310,6 +1337,7 @@ module.exports = {
   sampleConcurrentUsers,
   getVisitorAnalytics,
   onyuRequestViewerAccess,
+  notifyOnyuViewerAccessRequest,
   onyuGetViewerAccess,
   onyuStartSession,
   onyuListViewerAccessRequests,

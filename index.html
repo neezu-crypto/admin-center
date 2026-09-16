@@ -1126,6 +1126,7 @@
       const providerLabel = r.provider === 'google' ? 'Google' : 'Kakao';
       row.innerHTML =
         '<div class="verif-info"><b>온 이유 · ' + providerLabel + '<span class="source-tag stockMarket">일반 시청자</span></b>' +
+        '<span>후원자 닉네임: ' + escapeHtml(r.nickname || '(미입력)') + '</span>' +
         '<span>uid: ' + escapeHtml(r.uid) + ' · ' + statusLabel + '</span>' +
         (time ? '<span>' + new Date(time).toLocaleString('ko-KR') + '</span>' : '') + '</div>' +
         '<div class="verif-actions"></div>';
