@@ -4,6 +4,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
+const { ServerValue } = require('firebase-admin/database');
 
 initializeApp();
 
@@ -270,6 +271,7 @@ const GAME_CATALOG = [
   { id: 'lifeGame', name: '스트리머 인생게임' },
   { id: 'rocketGame', name: '로켓 게임' },
   { id: 'gallery', name: '스트리머 갤러리' },
+  { id: 'onyuVn', name: '당신이 여기에 온 이유' },
 ];
 
 const AUDIT_LOG_CAP = 200;
@@ -854,7 +856,7 @@ const getPurchaseOverview = onCall(async (request) => {
 // 표준 경로에 { lastSeen } 형태로 쓰기 시작한 뒤에만 실제로 값이 잡힌다(각 저장소
 // 쪽 작업과 짝을 이룸). lifeGame은 자체 lifeGame/presence 경로(다른 용도, 세계관
 // 패널·봇 시스템)와 별개로 이 표준 경로에도 병행 기록한다.
-const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'rocketGame', 'gallery'];
+const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'rocketGame', 'gallery', 'onyuVn'];
 const PRESENCE_GRACE_MS = 60 * 60 * 1000;
 const PRESENCE_HOURLY_RETENTION_DAYS = 30;
 
@@ -1240,6 +1242,7 @@ const onyuRequestViewerAccess = onCall(async (request) => {
   } catch (e) {
     console.error('온 이유 후원 신청 알림 큐 기록 실패:', e);
   }
+  await recordOnyuServerEvent(request, 'viewer_access_requested');
   return { ok: true, role: 'viewer', accessStatus: 'pending', canStartGame: false, requestId: uid };
 });
 
@@ -1256,6 +1259,7 @@ const onyuStartSession = onCall(async (request) => {
   if (!state.canStartGame) {
     throw new HttpsError('permission-denied', state.authenticated ? '별풍선 후원 확인 및 관리자 승인이 필요합니다.' : 'Google 또는 카카오 로그인 후 접근 승인을 받아야 합니다.');
   }
+  await recordOnyuServerEvent(request, 'game_access_granted');
   return Object.assign({ ok: true, uid }, state);
 });
 
@@ -1292,12 +1296,240 @@ async function updateOnyuViewerAccess(request, status) {
   updates['onyuVn/viewerAccessRequests/' + uid + '/reviewedBy'] = adminUid;
   await db.ref().update(updates);
   await logToAdminAuditLog(db, request, 'onyu-vn 접근 ' + (status === 'approved' ? '승인' : status === 'rejected' ? '무시' : '회수'), uid + ' · ' + adminName);
+  await recordOnyuServerEvent(request, 'viewer_access_' + status, { targetUid: uid });
   return { ok: true, uid, status };
 }
 
 const onyuApproveViewerAccess = onCall((request) => updateOnyuViewerAccess(request, 'approved'));
 const onyuRejectViewerAccess = onCall((request) => updateOnyuViewerAccess(request, 'rejected'));
 const onyuRevokeViewerAccess = onCall((request) => updateOnyuViewerAccess(request, 'revoked'));
+
+// ── onyu-vn 분석 이벤트 수집 ──────────────────────────────────
+// 클라이언트는 이 목록 밖의 이벤트나 임의의 RTDB 경로를 쓸 수 없다. 모든 이벤트는
+// 일별 카운터로 합산하고, 운영·오류 분석에 필요한 일부 이벤트만 짧은 기간 원문을
+// 남긴다. 집계 경로는 관리자센터가 읽고, 클라이언트에는 공개하지 않는다.
+const ONYU_ANALYTICS_EVENTS = new Set([
+  'visit', 'session_start', 'session_end', 'screen_viewed', 'signature_shown', 'signature_completed',
+  'sound_unlock_clicked', 'login_success', 'viewer_access_requested', 'viewer_access_approved',
+  'viewer_access_rejected', 'viewer_access_revoked', 'streamer_verification_requested',
+  'access_check_success', 'access_check_denied', 'game_access_granted', 'game_access_denied',
+  'game_started', 'game_paused', 'game_resumed', 'game_abandoned', 'game_completed',
+  'name_submitted', 'chapter_started', 'chapter_completed', 'choice_shown', 'choice_selected',
+  'cg_revealed', 'gallery_opened', 'gallery_item_opened', 'gallery_unlock', 'ending_branch_entered',
+  'ending_reached', 'credits_started', 'credits_cg_skipped', 'ending_title_revealed',
+  'return_to_title', 'outfit_picker_shown', 'outfit_selected', 'outfit_selection_cancelled',
+  'autosave_created', 'manual_save_created', 'save_loaded', 'save_load_failed',
+  'bgm_play_started', 'bgm_play_failed', 'bgm_changed', 'bgm_autoplay_blocked',
+  'sfx_played', 'sfx_play_failed', 'settings_changed', 'transition_started',
+  'transition_completed', 'input_blocked_during_transition', 'fullscreen_entered',
+  'fullscreen_exited', 'asset_load_error', 'presence_heartbeat',
+]);
+const ONYU_ANALYTICS_RAW_EVENTS = new Set([
+  'session_start', 'game_started', 'game_completed', 'chapter_started', 'chapter_completed',
+  'choice_selected', 'cg_revealed', 'ending_reached', 'outfit_selected',
+  'viewer_access_requested', 'viewer_access_approved', 'viewer_access_rejected',
+  'viewer_access_revoked', 'access_check_denied', 'game_access_denied', 'asset_load_error',
+]);
+const ONYU_ANALYTICS_DAILY_RETENTION_DAYS = 400;
+const ONYU_ANALYTICS_RAW_RETENTION_DAYS = 30;
+
+function onyuAnalyticsKey(value, fallback) {
+  const text = String(value === undefined || value === null ? (fallback || '') : value).trim();
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(text) ? text : '';
+}
+
+function onyuAnalyticsDate(at) {
+  return new Date(at).toISOString().slice(0, 10);
+}
+
+function onyuAnalyticsUidKey(uid) {
+  // Firebase uid는 슬래시를 포함하지 않지만 방어적으로 허용 문자만 남긴다.
+  return onyuAnalyticsKey(uid, 'anonymous') || 'anonymous';
+}
+
+async function getOnyuAnalyticsMeta(uid, request) {
+  const db = getDatabase();
+  const userSnap = await db.ref('users/' + uid).get();
+  const user = userSnap.val() || {};
+  const provider = request && request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
+  const isAdmin = uid === ONYU_ADMIN_UID;
+  const verified = !isAdmin && (user.streamerVerified === true || (provider !== 'anonymous' && await isVerifiedStreamerUid(uid)));
+  return {
+    uid,
+    provider: provider === 'google.com' ? 'google' : provider === 'kakao.com' ? 'kakao' : provider === 'anonymous' ? 'anonymous' : 'other',
+    authMode: isAdmin ? 'admin' : verified ? 'streamer' : provider === 'anonymous' ? 'anonymous' : 'viewer',
+  };
+}
+
+async function writeOnyuAnalyticsEvents(db, meta, events) {
+  const incrementCounts = {};
+  const updates = {};
+  const rawEntries = [];
+  const now = Date.now();
+  const uidKey = onyuAnalyticsUidKey(meta.uid);
+  function increment(path) { incrementCounts[path] = (incrementCounts[path] || 0) + 1; }
+  events.forEach(function (event) {
+    const eventName = event.event;
+    if (!ONYU_ANALYTICS_EVENTS.has(eventName)) return;
+    const clientAt = Number(event.clientAt);
+    const at = isFinite(clientAt) && clientAt > now - 7 * 24 * 3600 * 1000 && clientAt < now + 10 * 60 * 1000 ? clientAt : now;
+    const date = onyuAnalyticsDate(at);
+    const base = 'onyuVn/analytics/daily/' + date;
+    increment(base + '/totals/' + eventName);
+    increment(base + '/authModes/' + meta.authMode);
+    increment(base + '/providers/' + meta.provider);
+    updates[base + '/uniqueUsers/' + uidKey] = true;
+
+    const chapterId = onyuAnalyticsKey(event.chapterId);
+    const choiceId = onyuAnalyticsKey(event.choiceId);
+    const optionId = onyuAnalyticsKey(event.optionId);
+    const itemId = onyuAnalyticsKey(event.itemId || event.cgId);
+    const endingId = onyuAnalyticsKey(event.endingId);
+    const trackId = onyuAnalyticsKey(event.trackId);
+    if (chapterId) increment(base + '/chapters/' + chapterId + '/' + eventName);
+    if (chapterId && choiceId) increment(base + '/choices/' + chapterId + '/' + choiceId + '/' + (optionId || 'unknown'));
+    if (endingId) increment(base + '/endings/' + endingId + '/' + eventName);
+    if (itemId) increment(base + '/items/' + itemId + '/' + eventName);
+    if (trackId) increment(base + '/audio/' + trackId + '/' + eventName);
+    const screen = onyuAnalyticsKey(event.screen);
+    if (screen) increment(base + '/screens/' + screen);
+    const mode = onyuAnalyticsKey(event.requestedMode);
+    if (mode) increment(base + '/requestedModes/' + mode);
+
+    const summary = 'onyuVn/analytics/users/' + uidKey + '/summary';
+    if (eventName === 'game_started') increment(summary + '/startedCount');
+    if (eventName === 'game_completed') increment(summary + '/completedCount');
+    if (eventName === 'session_start') increment(summary + '/sessionCount');
+    if (chapterId && (eventName === 'chapter_started' || eventName === 'chapter_completed')) updates[summary + '/lastChapterId'] = chapterId;
+    if (endingId && eventName === 'ending_reached') updates[summary + '/endings/' + endingId] = true;
+    if (itemId && (eventName === 'cg_revealed' || eventName === 'gallery_unlock')) updates[summary + '/items/' + itemId] = true;
+    updates[summary + '/lastEventAt'] = now;
+
+    if (ONYU_ANALYTICS_RAW_EVENTS.has(eventName)) {
+      const raw = {
+        event: eventName,
+        uid: meta.uid,
+        provider: meta.provider,
+        authMode: meta.authMode,
+        clientAt: isFinite(clientAt) ? clientAt : null,
+        serverAt: now,
+        sessionId: onyuAnalyticsKey(event.sessionId),
+        chapterId: chapterId || null,
+        choiceId: choiceId || null,
+        optionId: optionId || null,
+        itemId: itemId || null,
+        endingId: endingId || null,
+        trackId: trackId || null,
+      };
+      rawEntries.push({ date: date, value: raw });
+    }
+  });
+
+  Object.keys(incrementCounts).forEach(function (path) {
+    updates[path] = ServerValue.increment(incrementCounts[path]);
+  });
+  rawEntries.forEach(function (entry) {
+    const key = db.ref('onyuVn/analytics/raw/' + entry.date).push().key;
+    updates['onyuVn/analytics/raw/' + entry.date + '/' + key] = entry.value;
+  });
+  if (Object.keys(updates).length) await db.ref().update(updates);
+  return { accepted: events.filter(function (e) { return ONYU_ANALYTICS_EVENTS.has(e.event); }).length };
+}
+
+const onyuTrackEvents = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const events = request.data && request.data.events;
+  if (!Array.isArray(events) || !events.length || events.length > 25) {
+    throw new HttpsError('invalid-argument', '이벤트는 1~25개 묶음이어야 합니다.');
+  }
+  const cleaned = events.map(function (event) {
+    const source = event && typeof event === 'object' ? event : {};
+    const clean = {};
+    Object.keys(source).slice(0, 20).forEach(function (key) {
+      if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(key)) return;
+      const value = source[key];
+      if (typeof value === 'string') clean[key] = value.slice(0, 120);
+      else if (typeof value === 'number' && isFinite(value)) clean[key] = value;
+      else if (typeof value === 'boolean') clean[key] = value;
+    });
+    return clean;
+  });
+  const meta = await getOnyuAnalyticsMeta(uid, request);
+  return Object.assign({ ok: true }, await writeOnyuAnalyticsEvents(getDatabase(), meta, cleaned));
+});
+
+async function recordOnyuServerEvent(request, eventName, extra) {
+  try {
+    const uid = requireAuth(request);
+    const meta = await getOnyuAnalyticsMeta(uid, request);
+    await writeOnyuAnalyticsEvents(getDatabase(), meta, [Object.assign({ event: eventName, serverAt: Date.now() }, extra || {})]);
+  } catch (e) {
+    // 분석 기록 실패가 로그인·승인·게임 시작을 막아서는 안 된다.
+    console.error('온 이유 서버 이벤트 기록 실패:', eventName, e);
+  }
+}
+
+const getOnyuStats = onCall(async (request) => {
+  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  const days = Math.min(Math.max(Number(request.data && request.data.days) || 14, 1), 90);
+  const db = getDatabase();
+  const dates = [];
+  for (let i = days - 1; i >= 0; i--) dates.push(onyuAnalyticsDate(Date.now() - i * 24 * 3600 * 1000));
+  const snaps = await Promise.all(dates.map(function (date) { return db.ref('onyuVn/analytics/daily/' + date).get(); }));
+  const totals = {};
+  const chapters = {}, choices = {}, endings = {}, cgs = {}, audio = {}, screens = {}, authModes = {}, providers = {};
+  const unique = {};
+  function mergeCounter(target, source, prefix) {
+    Object.keys(source || {}).forEach(function (key) {
+      const value = source[key];
+      if (value && typeof value === 'object') mergeCounter(target, value, prefix ? prefix + '/' + key : key);
+      else if (typeof value === 'number') target[prefix ? prefix + '/' + key : key] = (target[prefix ? prefix + '/' + key : key] || 0) + value;
+    });
+  }
+  snaps.forEach(function (snap, index) {
+    const value = snap.val() || {};
+    mergeCounter(totals, value.totals || {}, '');
+    mergeCounter(chapters, value.chapters || {}, '');
+    mergeCounter(choices, value.choices || {}, '');
+    mergeCounter(endings, value.endings || {}, '');
+    mergeCounter(cgs, value.items || {}, '');
+    mergeCounter(audio, value.audio || {}, '');
+    mergeCounter(screens, value.screens || {}, '');
+    mergeCounter(authModes, value.authModes || {}, '');
+    mergeCounter(providers, value.providers || {}, '');
+    Object.keys(value.uniqueUsers || {}).forEach(function (uid) { unique[uid] = true; });
+  });
+  return {
+    days,
+    from: dates[0],
+    to: dates[dates.length - 1],
+    uniqueUsers: Object.keys(unique).length,
+    totals,
+    chapters,
+    choices,
+    endings,
+    cgs,
+    audio,
+    screens,
+    authModes,
+    providers,
+  };
+});
+
+const trimOnyuAnalytics = onSchedule('every 24 hours', async function () {
+  const db = getDatabase();
+  const snap = await db.ref('onyuVn/analytics').get();
+  const data = snap.val() || {};
+  const now = Date.now();
+  const updates = {};
+  Object.keys(data.daily || {}).forEach(function (date) {
+    if (now - new Date(date + 'T00:00:00Z').getTime() > ONYU_ANALYTICS_DAILY_RETENTION_DAYS * 24 * 3600 * 1000) updates['onyuVn/analytics/daily/' + date] = null;
+  });
+  Object.keys(data.raw || {}).forEach(function (date) {
+    if (now - new Date(date + 'T00:00:00Z').getTime() > ONYU_ANALYTICS_RAW_RETENTION_DAYS * 24 * 3600 * 1000) updates['onyuVn/analytics/raw/' + date] = null;
+  });
+  if (Object.keys(updates).length) await db.ref().update(updates);
+});
 
 module.exports = {
   getGalleryStats,
@@ -1360,4 +1592,7 @@ module.exports = {
   onyuApproveViewerAccess,
   onyuRejectViewerAccess,
   onyuRevokeViewerAccess,
+  onyuTrackEvents,
+  getOnyuStats,
+  trimOnyuAnalytics,
 };

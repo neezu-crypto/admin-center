@@ -680,6 +680,23 @@
       <div id="lifeGameStatsChoices" style="margin-top:16px;"></div>
     </div>
 
+    <div class="card" id="section-onyu-stats">
+      <h2>당신이 여기에 온 이유 통계</h2>
+      <p class="hint">온이유의 방문·진행·선택지·엔딩·CG·의상·오디오 사용량을 서버 집계 카운터에서 조회합니다.</p>
+      <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+        <label for="onyuStatsDays">기간</label>
+        <select id="onyuStatsDays" class="perm-select">
+          <option value="7">최근 7일</option>
+          <option value="14" selected>최근 14일</option>
+          <option value="30">최근 30일</option>
+          <option value="90">최근 90일</option>
+        </select>
+        <button id="onyuStatsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      </div>
+      <div id="onyuStatsTotals"></div>
+      <div id="onyuStatsDetails" style="margin-top:16px;"></div>
+    </div>
+
     <div class="card" id="section-audit-log">
       <h2>감사 로그</h2>
       <p class="hint">
@@ -838,6 +855,7 @@
   const getVisitorAnalyticsFn = httpsCallable(functions, 'getVisitorAnalytics');
   const getGalleryStatsFn = httpsCallable(functions, 'getGalleryStats');
   const getLifeGameStatsFn = httpsCallable(functions, 'getLifeGameStats');
+  const getOnyuStatsFn = httpsCallable(functions, 'getOnyuStats');
   const getLifeGameBotConfigFn = httpsCallable(functions, 'getLifeGameBotConfig');
   const setLifeGameBotConfigFn = httpsCallable(functions, 'setLifeGameBotConfig');
   const lifeGameApproveSponsorRequestFn = httpsCallable(functions, 'lifeGameApproveSponsorRequest');
@@ -939,6 +957,10 @@
   const lifeGameStatsTotalsEl = document.getElementById('lifeGameStatsTotals');
   const lifeGameStatsEndingsEl = document.getElementById('lifeGameStatsEndings');
   const lifeGameStatsChoicesEl = document.getElementById('lifeGameStatsChoices');
+  const onyuStatsDaysEl = document.getElementById('onyuStatsDays');
+  const onyuStatsRefreshBtn = document.getElementById('onyuStatsRefreshBtn');
+  const onyuStatsTotalsEl = document.getElementById('onyuStatsTotals');
+  const onyuStatsDetailsEl = document.getElementById('onyuStatsDetails');
   const reviewAlertBadgeEl = document.getElementById('reviewAlertBadge');
   const reviewQueueCountTagEl = document.getElementById('reviewQueueCountTag');
   const marketReportListEl = document.getElementById('marketReportList');
@@ -1942,7 +1964,7 @@
   // 10번 — 페이지별 접속자 분석. 서버가 5분마다 자동 샘플링해둔 시간당
   // 최고치를 앱별 스파크라인 카드로 보여준다(차트 라이브러리 없이 인라인 SVG로
   // 직접 그려서 soop-stock-market의 Chart.js를 새로 끌어오지 않고도 추세를 표현).
-  const VISITOR_APP_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장' };
+  const VISITOR_APP_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장', onyuVn: '온 이유', lifeGame: '인생게임', rocketGame: '로켓 게임', gallery: '스트리머 갤러리' };
   function buildSparklineSvg(values) {
     const w = 400, h = 46, pad = 4;
     const max = Math.max.apply(null, values.concat([1]));
@@ -2099,6 +2121,42 @@
         : '<div class="empty-state">아직 선택 기록이 없습니다.</div>'
     );
   }
+
+  async function refreshOnyuStats() {
+    onyuStatsTotalsEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    onyuStatsDetailsEl.innerHTML = '';
+    try {
+      const result = await getOnyuStatsFn({ days: Number(onyuStatsDaysEl.value) || 14 });
+      const data = result.data || {};
+      const totals = data.totals || {};
+      const names = {
+        visit: '방문', session_start: '세션 시작', game_started: '게임 시작', game_completed: '게임 완료',
+        choice_selected: '선택지 선택', cg_revealed: 'CG 공개', ending_reached: '엔딩 도달',
+        viewer_access_requested: '접근 신청', viewer_access_approved: '접근 승인',
+        streamer_verification_requested: '스트리머 인증 신청', bgm_play_started: 'BGM 재생', sfx_played: 'SFX 재생'
+      };
+      const totalHtml = Object.keys(names).map(function (key) {
+        return '<div class="stat-metric"><span class="value">' + (totals[key] || 0) + '</span><span class="unit">' + names[key] + '</span></div>';
+      }).join('');
+      onyuStatsTotalsEl.innerHTML = '<div class="stat-row-list"><div class="stat-row-item"><span class="name">' + escapeHtml(data.from + ' ~ ' + data.to) + '</span><div class="metrics"><div class="stat-metric"><span class="value">' + (data.uniqueUsers || 0) + '</span><span class="unit">고유 사용자</span></div>' + totalHtml + '</div></div></div>';
+
+      function rows(obj, labeler) {
+        return Object.keys(obj || {}).sort(function (a, b) { return (obj[b] || 0) - (obj[a] || 0); }).slice(0, 40).map(function (key) {
+          return '<div class="stat-row-item"><span class="name">' + escapeHtml(labeler(key)) + '</span><div class="metrics"><div class="stat-metric"><span class="value">' + (obj[key] || 0) + '</span><span class="unit">회</span></div></div></div>';
+        }).join('');
+      }
+      const modeRows = rows(data.authModes, function (key) { return '권한 · ' + key; });
+      const providerRows = rows(data.providers, function (key) { return '로그인 · ' + key; });
+      const chapterRows = rows(data.chapters, function (key) { return key.replace(/\//g, ' · '); });
+      const endingRows = rows(data.endings, function (key) { return key.replace(/\//g, ' · '); });
+      const choiceRows = rows(data.choices, function (key) { return key.replace(/\//g, ' · '); });
+      onyuStatsDetailsEl.innerHTML = '<h3 class="sub-heading">권한·로그인</h3><div class="stat-row-list stat-row-list-scroll">' + (modeRows + providerRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">챕터·엔딩</h3><div class="stat-row-list stat-row-list-scroll">' + (chapterRows + endingRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div><h3 class="sub-heading" style="margin-top:16px;">선택지</h3><div class="stat-row-list stat-row-list-scroll">' + (choiceRows || '<div class="empty-state">기록이 없습니다.</div>') + '</div>';
+    } catch (e) {
+      console.error('온 이유 통계 조회 실패:', e);
+      onyuStatsTotalsEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+    }
+  }
+  onyuStatsRefreshBtn.addEventListener('click', refreshOnyuStats);
 
   // 인생게임 관리형 봇(2026-08-30, streamer-life-game 62장) - 봇 수·1턴당 초·성향
   // 분포 설정. 실행 자체는 streamer-life-game의 예약 함수가 서버에서 도는 방식이라
@@ -2960,6 +3018,7 @@
     { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-lifegame-stats', label: '📖 인생게임 통계', role: 'admin', permKey: 'viewMonitoring' },
+    { id: 'section-onyu-stats', label: '💜 온 이유 통계', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-skin-purchases', label: '🎨 스킨 구매 내역', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인', permKey: 'reviewQueue' },
@@ -3036,7 +3095,7 @@
     // 켜져 있을 때만 보인다(devbar 편집과 동일한 독립 래퍼 패턴).
     const canViewMonitoring = role === 'admin' || (role === 'streamer' && !!grantedPermissions.viewMonitoring);
     monitoringShellEl.hidden = !canViewMonitoring;
-    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshLifeGameStats(); refreshAuditLog(); refreshSkinPurchases(); }
+    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshLifeGameStats(); refreshOnyuStats(); refreshAuditLog(); refreshSkinPurchases(); }
     // 페이지별 검수(마켓/닉네임 신고, 프리셋 병합 실패) — 관리자는 항상, 인증
     // 스트리머는 'reviewQueue' 권한이 켜져 있을 때만 보인다(읽기+쓰기 모두 포함).
     const canManageReviewQueue = role === 'admin' || (role === 'streamer' && !!grantedPermissions.reviewQueue);
