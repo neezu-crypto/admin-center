@@ -1178,19 +1178,27 @@ async function getOnyuAccessState(uid, request) {
   const authenticatedViewer = provider !== 'anonymous' || user.googleLinked === true || user.kakaoLinked === true;
   const loginMethod = user.googleLinked === true || provider === 'google.com' ? 'google' : user.kakaoLinked === true ? 'kakao' : null;
   const isAdmin = uid === ONYU_ADMIN_UID;
-  const adminMode = isAdmin && !!(request && request.data && request.data.adminMode);
-  if (adminMode) {
-    return { role: 'admin', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin: true, adminMode: true };
+  const requestedMode = request && request.data && request.data.accessMode;
+  // 레거시 클라이언트의 adminMode=true 요청은 관리자 모드로 한 번만 호환하고,
+  // 그 외에는 일반 로그인 유저 모드로 취급한다. 권한은 항상 UID로 재검증한다.
+  const adminAccessMode = isAdmin && ['admin', 'streamer', 'viewer'].includes(requestedMode)
+    ? requestedMode
+    : isAdmin && request && request.data && request.data.adminMode === true ? 'admin' : 'viewer';
+  if (isAdmin && adminAccessMode === 'admin') {
+    return { role: 'admin', accessMode: 'admin', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin: true, adminMode: true };
+  }
+  if (isAdmin && adminAccessMode === 'streamer') {
+    return { role: 'streamer', accessMode: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin: true, adminMode: false };
   }
   // 관리자 계정은 일반 유저 모드에서 스트리머 인증 혜택까지 우회하지 않도록
   // 시청자 경로로 판정한다. 관리자 모드일 때만 위에서 모든 접근을 허용한다.
   // 그 외 계정은 users 플래그가 없는 레거시 인증 기록도 스트리머로 인식한다.
   const streamerVerified = !isAdmin && (user.streamerVerified === true || await isVerifiedStreamerUid(uid));
-  if (streamerVerified) return { role: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin, adminMode: false };
+  if (streamerVerified) return { role: 'streamer', accessMode: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin, adminMode: false };
   const access = accessSnap.val() || {};
   const req = requestSnap.val() || {};
   const status = access.status || req.status || 'none';
-  return { role: isAdmin ? 'admin' : 'viewer', accessStatus: status, canStartGame: authenticatedViewer && status === 'approved', authenticated: authenticatedViewer, loginMethod, isAdmin, adminMode: false };
+  return { role: 'viewer', accessMode: 'viewer', accessStatus: status, canStartGame: authenticatedViewer && status === 'approved', authenticated: authenticatedViewer, loginMethod, isAdmin, adminMode: false };
 }
 
 // 일반 시청자가 후원 후 관리자 승인을 기다리는 신청을 생성한다. 익명 세션은 신청할
