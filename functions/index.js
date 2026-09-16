@@ -1160,6 +1160,7 @@ const migrateBannedAccounts = onCall(async (request) => {
 // onyu-vn은 정적 GitHub Pages 게임이라 클라이언트가 승인 여부를 직접 쓰면 우회할 수
 // 있다. 신청·조회·게임 시작 판정은 이 관리자센터 codebase의 callable을 통해 처리하고,
 // 승인·무시는 관리자만 실행한다. 승인 키는 브라우저가 아니라 Firebase uid다.
+const ONYU_ADMIN_UID = '3Y2N5S5aCxT3bVDvcjx6GLyUaEs1';
 function onyuProviderLabel(request) {
   const provider = request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
   return provider === 'google.com' ? 'google' : 'kakao';
@@ -1176,13 +1177,20 @@ async function getOnyuAccessState(uid, request) {
   const provider = request && request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
   const authenticatedViewer = provider !== 'anonymous' || user.googleLinked === true || user.kakaoLinked === true;
   const loginMethod = user.googleLinked === true || provider === 'google.com' ? 'google' : user.kakaoLinked === true ? 'kakao' : null;
-  // users 플래그가 없는 레거시 인증 기록도 스트리머로 인식한다.
-  const streamerVerified = user.streamerVerified === true || await isVerifiedStreamerUid(uid);
-  if (streamerVerified) return { role: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod };
+  const isAdmin = uid === ONYU_ADMIN_UID;
+  const adminMode = isAdmin && !!(request && request.data && request.data.adminMode);
+  if (adminMode) {
+    return { role: 'admin', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin: true, adminMode: true };
+  }
+  // 관리자 계정은 일반 유저 모드에서 스트리머 인증 혜택까지 우회하지 않도록
+  // 시청자 경로로 판정한다. 관리자 모드일 때만 위에서 모든 접근을 허용한다.
+  // 그 외 계정은 users 플래그가 없는 레거시 인증 기록도 스트리머로 인식한다.
+  const streamerVerified = !isAdmin && (user.streamerVerified === true || await isVerifiedStreamerUid(uid));
+  if (streamerVerified) return { role: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin, adminMode: false };
   const access = accessSnap.val() || {};
   const req = requestSnap.val() || {};
   const status = access.status || req.status || 'none';
-  return { role: 'viewer', accessStatus: status, canStartGame: authenticatedViewer && status === 'approved', authenticated: authenticatedViewer, loginMethod };
+  return { role: isAdmin ? 'admin' : 'viewer', accessStatus: status, canStartGame: authenticatedViewer && status === 'approved', authenticated: authenticatedViewer, loginMethod, isAdmin, adminMode: false };
 }
 
 // 일반 시청자가 후원 후 관리자 승인을 기다리는 신청을 생성한다. 익명 세션은 신청할
