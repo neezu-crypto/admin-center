@@ -616,11 +616,13 @@ const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyReq
 // 2026-09-05 발견 — rocket-game('rocket-game')·streamer-gallery('streamer-gallery')도
 // 이미 이 공용 함수를 호출하며 각자의 source 값을 보내고 있었는데, 여기 매핑에
 // 등록이 안 돼서 전부 '주식시장'으로 잘못 표시되고 있었다(실제 사용자가 갤러리에서
-// 신청 후 발견). 신규 게임 온보딩 때 이 맵도 같이 갱신해야 한다.
+// 신청 후 발견). 온이유('onyu-vn')도 같은 공용 노드를 사용하므로 앱별 source를
+// 추가하지 않으면 동일한 문제가 재발한다.
 const STREAMER_VERIFY_SOURCE_LABELS = {
   'life-game': '인생게임',
   'rocket-game': '로켓게임',
   'streamer-gallery': '갤러리',
+  'onyu-vn': '온 이유',
 };
 const notifyStockVerifyRequest = onValueCreated('/streamerVerificationRequests/{id}', async (event) => {
   const data = event.data.val() || {};
