@@ -114,6 +114,57 @@ const getAdminCenterState = onCall(async (request) => {
   return { role, permissions: permsSnap.val() || {}, killswitchLastRun: killswitchSnap.val() || null };
 });
 
+// 통합 관리 센터의 초기 세션 배지용 경량 요약. 전체 목록을 반환하지 않고 각 큐에
+// 대기 항목이 하나라도 있는지만 확인한다. 실제 목록/상세 데이터는 사용자가 해당
+// 세션을 연 뒤 기존 조회 함수에서 가져온다. Admin SDK 쿼리 결과는 서버 안에서만
+// 사용하므로 클라이언트에 대형 RTDB 노드를 전송하지 않는다.
+async function hasAnyEntry(db, path, status) {
+  let queryRef = db.ref(path);
+  if (status) queryRef = queryRef.orderByChild('status').equalTo(status);
+  queryRef = queryRef.limitToFirst(1);
+  return (await queryRef.get()).exists();
+}
+
+const getAdminSessionSummary = onCall(async (request) => {
+  const { role } = await requireAdminOrVerifiedStreamer(request);
+  const permissions = (await getDatabase().ref('adminCenter/streamerPermissions').get()).val() || {};
+  const db = getDatabase();
+  const canReview = role === 'admin' || permissions.reviewQueue === true;
+
+  const summary = { identity: false, monitoring: false, review: false, content: false, settings: false, devbar: false, shared: false };
+  const tasks = [];
+  if (role === 'admin') {
+    tasks.push(Promise.all([
+      hasAnyEntry(db, 'bettingMarket/verifyRequests'),
+      hasAnyEntry(db, 'streamerVerificationRequests', 'pending'),
+      hasAnyEntry(db, 'onyuVn/viewerAccessRequests', 'pending'),
+    ]).then(function (values) { summary.identity = values.some(Boolean); }));
+  }
+  if (canReview) {
+    tasks.push(Promise.all([
+      hasAnyEntry(db, 'bettingMarket/marketReports'),
+      hasAnyEntry(db, 'bettingMarket/nicknameReports'),
+      hasAnyEntry(db, 'presetMergeFailures'),
+      hasAnyEntry(db, 'listingRequests', 'pending'),
+      hasAnyEntry(db, 'bettingMarket/chestPurchaseRequests'),
+      hasAnyEntry(db, 'chartBannerRequests', 'pending'),
+      hasAnyEntry(db, 'cardBannerRequests', 'pending'),
+      hasAnyEntry(db, 'treasureChestRequests', 'pending'),
+      hasAnyEntry(db, 'cashChargeRequests', 'pending'),
+      hasAnyEntry(db, 'unfreezeDonationRequests', 'pending'),
+      hasAnyEntry(db, 'bannerRequests', 'pending'),
+      hasAnyEntry(db, 'pinRequests', 'pending'),
+      hasAnyEntry(db, 'relayRoomRequests', 'pending'),
+      hasAnyEntry(db, 'lifeGame/sponsorRequests', 'pending'),
+      hasAnyEntry(db, 'bettingMarket/markets', 'pendingValidation'),
+      hasAnyEntry(db, 'bettingMarket/markets', 'closed'),
+      hasAnyEntry(db, 'bettingMarket/markets', 'pendingSettlement'),
+    ]).then(function (values) { summary.review = values.some(Boolean); }));
+  }
+  await Promise.all(tasks);
+  return { role, summary };
+});
+
 // 통합 관리 센터 — 위임 권한 하나를 켜고/끈다. 관리자만 가능하고, 인증 스트리머 전원에게
 // 동일하게 적용된다(스트리머별 개별 권한이 아니라 하나의 공용 스위치 목록).
 const setAdminCenterPermission = onCall(async (request) => {
@@ -208,10 +259,10 @@ const listAuditLogOverview = onCall(async (request) => {
   await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
   const db = getDatabase();
   const [bmLogSnap, smLogSnap, rgLogSnap, galLogSnap] = await Promise.all([
-    db.ref('bettingMarket/auditLog').get(),
-    db.ref('adminAuditLog').get(),
-    db.ref('rocketGame/auditLog').get(),
-    db.ref('gallery/auditLog').get(),
+    db.ref('bettingMarket/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    db.ref('adminAuditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    db.ref('rocketGame/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    db.ref('gallery/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
   ]);
 
   const bmLog = bmLogSnap.val() || {};
@@ -821,12 +872,14 @@ const getPurchaseOverview = onCall(async (request) => {
   const itemTypeFilter = String((request.data || {}).itemType || '').trim();
   const db = getDatabase();
 
-  const snaps = await Promise.all(PURCHASE_SOURCES.map(function (src) { return db.ref(src.path).get(); }));
+  const sources = itemTypeFilter
+    ? PURCHASE_SOURCES.filter(function (src) { return src.itemType === itemTypeFilter; })
+    : PURCHASE_SOURCES;
+  const snaps = await Promise.all(sources.map(function (src) { return db.ref(src.path).get(); }));
 
   let entries = [];
   snaps.forEach(function (snap, i) {
-    const src = PURCHASE_SOURCES[i];
-    if (itemTypeFilter && src.itemType !== itemTypeFilter) return;
+    const src = sources[i];
     const val = snap.val() || {};
     Object.keys(val).forEach(function (id) {
       const rec = val[id];
@@ -912,7 +965,10 @@ const getVisitorAnalytics = onCall(async (request) => {
 
   const results = {};
   await Promise.all(PRESENCE_APPS.map(async function (appId) {
-    const snap = await db.ref('analytics/presenceHourly/' + appId).get();
+    const ref = db.ref('analytics/presenceHourly/' + appId);
+    const snap = bucketKeys.length
+      ? await ref.orderByKey().startAt(bucketKeys[0]).endAt(bucketKeys[bucketKeys.length - 1]).get()
+      : await ref.get();
     const data = snap.val() || {};
     results[appId] = bucketKeys.map(function (k) { return { hour: k, peak: (data[k] && data[k].peak) || 0 }; });
   }));
@@ -1624,6 +1680,7 @@ module.exports = {
   unbanAccountAllGames,
   migrateBannedAccounts,
   getAdminCenterState,
+  getAdminSessionSummary,
   setAdminCenterPermission,
   revokeAllStreamerPermissions,
   setDevbarLink,

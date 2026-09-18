@@ -381,6 +381,27 @@
   .quicknav button:hover { background: #1c2027; color: #e8462c; }
   .quicknav::-webkit-scrollbar { width: 4px; }
   .quicknav::-webkit-scrollbar-thumb { background: #e8462c; border-radius: 10px; }
+  #sessionLauncher {
+    display: none; margin: 0 0 24px; padding: 18px 20px; border-radius: 18px;
+    background: rgba(252,250,247,0.9); border: 1px solid rgba(20,20,22,0.08);
+    box-shadow: 0 14px 28px -18px rgba(40,30,10,0.3); color: var(--ink);
+  }
+  #sessionLauncher.visible { display: block; }
+  #sessionLauncher h2 { margin: 0 0 6px; font-size: 15px; }
+  #sessionLauncher p { margin: 0 0 14px; color: var(--ink-soft); font-size: 12.5px; line-height: 1.6; }
+  .session-launcher-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+  .session-launcher-btn {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    min-height: 42px; padding: 9px 12px; border: 1px solid rgba(20,20,22,0.12);
+    border-radius: 12px; background: #fffdfa; color: var(--ink); font-size: 12.5px;
+    font-weight: 700; text-align: left; cursor: pointer; transition: border-color .16s, background .16s, transform .16s;
+  }
+  .session-launcher-btn:hover { border-color: rgba(232,70,44,0.45); background: #fff6f2; transform: translateY(-1px); }
+  .session-launcher-btn.active { border-color: #e8462c; background: rgba(232,70,44,0.1); color: #b93724; }
+  .session-launcher-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+  .session-launcher-badge { min-width: 18px; padding: 2px 6px; border-radius: 999px; background: rgba(226,85,79,0.14); color: #c94742; font-size: 10px; text-align: center; }
+  .session-launcher-status { margin-top: 10px; min-height: 18px; color: var(--ink-mute); font-size: 11.5px; }
+  .session-panel-placeholder { display: none; }
   @media (max-width: 1400px) {
     .quicknav { display: none !important; }
   }
@@ -396,7 +417,7 @@
 <header>
   <div>
     <h1>통합 관리 센터<span class="role-badge admin" id="roleBadge" hidden></span></h1>
-    <div class="sub">시리즈 전체 관리 세션 통합 (준비 중)</div>
+    <div class="sub">시리즈 전체 관리 세션 통합 · 필요한 세션만 선택 로드</div>
   </div>
   <div id="authArea">
     <span id="reviewAlertBadge" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4); cursor:pointer;" hidden></span>
@@ -412,6 +433,13 @@
     <p id="gateMessage">이 페이지는 관리자 계정 또는 인증된 스트리머 계정으로만 입장할 수 있습니다.</p>
     <button id="gateLoginBtn" type="button">Google 로그인</button>
   </div>
+
+  <section id="sessionLauncher" aria-label="관리 세션 선택">
+    <h2>관리 세션을 선택하세요</h2>
+    <p>페이지 기본 화면과 권한만 먼저 불러왔습니다. 사용할 세션을 선택하면 해당 데이터만 불러옵니다.</p>
+    <div id="sessionLauncherGrid" class="session-launcher-grid"></div>
+    <div id="sessionLauncherStatus" class="session-launcher-status" role="status" aria-live="polite"></div>
+  </section>
 
   <!-- 관리자 전용 화면 -->
   <div id="adminShell" hidden>
@@ -498,7 +526,7 @@
     </div>
 
     <div class="card" id="section-market-management">
-      <h2>배팅시장 진행중인 마켓 관리</h2>
+      <h2>배팅시장 진행중인 마켓 관리 <span id="marketManagementCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
       <p class="hint">
         StreamBet-Market의 기존 함수(reviewProposal/closeMarketEarly/voidMarket/judgeMarket/
         cancelPendingJudgment/setMinParticipantsOverride)를 그대로 호출합니다(새 로직 아님).
@@ -727,7 +755,8 @@
     <div class="card" id="section-review-queue">
       <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
       <p class="hint">
-        실시간 구독입니다(새로고침 불필요). 마켓/닉네임 신고는 배팅시장 기존 함수를, 프리셋 병합 실패는
+        세션을 열었을 때만 실시간 구독을 시작하며, 각 큐는 최신 대기 항목 최대 200건을 표시합니다
+        (새로고침 불필요). 마켓/닉네임 신고는 배팅시장 기존 함수를, 프리셋 병합 실패는
         interior-3d-viewer에 신규로 만든 함수를 그대로 호출합니다 — 이 항목이 이 시리즈에서 유일하게
         CLI로만 처리 가능했던 사각지대였습니다.
       </p>
@@ -759,8 +788,8 @@
   </div>
 </main>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
   import {
@@ -774,7 +803,7 @@
   // 큐는 05번 관례대로 관리자 uid 기준으로 이미 .read가 열려 있어 직접 구독이
   // 가능하다 — 쓰기는 여전히 전부 Cloud Functions를 통해서만 한다).
   import {
-    getDatabase, ref, onValue, get, query, limitToLast,
+    getDatabase, ref, onValue, get, query, limitToLast, orderByChild, equalTo,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
 
   // 07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
@@ -799,6 +828,7 @@
   const functions = getFunctions(app, 'us-central1');
   const db = getDatabase(app);
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
+  const getAdminSessionSummaryFn = httpsCallable(functions, 'getAdminSessionSummary');
   const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
   const revokeAllStreamerPermissionsFn = httpsCallable(functions, 'revokeAllStreamerPermissions');
   // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market이 이미 배포한 함수를 그대로
@@ -902,6 +932,9 @@
   const authBtnEl = document.getElementById('authBtn');
   const roleBadgeEl = document.getElementById('roleBadge');
   const quicknavEl = document.getElementById('quicknav');
+  const sessionLauncherEl = document.getElementById('sessionLauncher');
+  const sessionLauncherGridEl = document.getElementById('sessionLauncherGrid');
+  const sessionLauncherStatusEl = document.getElementById('sessionLauncherStatus');
   const gateEl = document.getElementById('gate');
   const gateMessageEl = document.getElementById('gateMessage');
   const gateLoginBtn = document.getElementById('gateLoginBtn');
@@ -975,11 +1008,57 @@
   const purchaseApprovalListEl = document.getElementById('purchaseApprovalList');
   const listingRequestCountTagEl = document.getElementById('listingRequestCountTag');
   const listingRequestListEl = document.getElementById('listingRequestList');
+  const marketManagementCountTagEl = document.getElementById('marketManagementCountTag');
 
   let currentUser = null;
   let role = 'none'; // 'admin' | 'streamer' | 'none'
   let grantedPermissions = {};
   let killswitchLastRun = null;
+
+  // 세션 선택형 로딩 — 초기 진입에서는 권한과 화면 셸만 표시하고, 실제 데이터
+  // 호출·실시간 구독은 사용자가 세션을 열었을 때만 시작한다. section id는 기존
+  // 카드와 1:1로 매핑해 기존 기능을 삭제하지 않고 로딩 시점만 늦춘다.
+  const SESSION_DEFINITIONS = [
+    {
+      id: 'identity', label: '신원·권한', icon: '🔐', role: 'admin',
+      sections: ['section-user-search', 'section-verification', 'section-onyu-access', 'section-permission-delegation', 'section-bootstrap'],
+    },
+    {
+      id: 'monitoring', label: '모니터링', icon: '📊', permission: 'viewMonitoring',
+      sections: ['section-stats', 'section-visitor-analytics', 'section-gallery-stats', 'section-lifegame-stats', 'section-onyu-stats', 'section-audit-log', 'section-skin-purchases'],
+    },
+    {
+      id: 'review', label: '검수·승인', icon: '🔎', permission: 'reviewQueue',
+      sections: ['section-review-queue', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
+    },
+    {
+      id: 'content', label: '콘텐츠·현황', icon: '📦', role: 'admin',
+      sections: ['section-content-freeze', 'section-lifegame-bots', 'section-promoted-content'],
+    },
+    {
+      id: 'settings', label: '사이트 설정', icon: '⚙️', role: 'admin',
+      sections: ['section-discord-webhook'],
+    },
+    {
+      id: 'devbar', label: 'devbar 구성', icon: '🔗', permission: 'devbarEdit',
+      sections: ['section-devbar'],
+    },
+    {
+      id: 'shared', label: '공용 도구', icon: '💬', roles: ['admin', 'streamer'],
+      sections: ['section-granted-permissions', 'section-chat'],
+    },
+  ];
+  const SESSION_SECTION_IDS = SESSION_DEFINITIONS.reduce(function (map, session) {
+    session.sections.forEach(function (id) { map[id] = session.id; });
+    return map;
+  }, {});
+  const sessionState = {};
+  const SESSION_CACHE_TTL_MS = 60 * 1000;
+  SESSION_DEFINITIONS.forEach(function (session) {
+    sessionState[session.id] = { loaded: false, loading: false, lastLoadedAt: 0, unsubscribe: [], error: null };
+  });
+  let activeSessionId = null;
+  let sessionSummary = {};
 
   const SOURCE_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장' };
 
@@ -1053,6 +1132,7 @@
     }
     render();
     renderKillswitchStatus();
+    if (role !== 'none' && currentUser) refreshSessionSummary();
   }
 
   // 07번 4단계 — 카탈로그가 채워지기 전에 미리 마련해두는 패닉 버튼. 위임된 권한을
@@ -1099,6 +1179,230 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+
+  let sessionPanelsPrepared = false;
+  function prepareSessionPanels() {
+    if (sessionPanelsPrepared) return;
+    SESSION_DEFINITIONS.forEach(function (session) {
+      session.sections.forEach(function (sectionId) {
+        const section = document.getElementById(sectionId);
+        if (section) section.classList.add('session-panel');
+      });
+    });
+    sessionPanelsPrepared = true;
+  }
+
+  function sessionCanOpen(session) {
+    if (role === 'none') return false;
+    if (session.roles && session.roles.indexOf(role) === -1) return false;
+    if (session.role && session.role !== role) return false;
+    if (session.permission && role !== 'admin' && !grantedPermissions[session.permission]) return false;
+    return true;
+  }
+
+  function getAvailableSessions() {
+    return SESSION_DEFINITIONS.filter(sessionCanOpen);
+  }
+
+  function sessionIdForHash(hash) {
+    const normalized = String(hash || '').replace(/^#/, '');
+    if (SESSION_DEFINITIONS.some(function (session) { return session.id === normalized; })) return normalized;
+    return SESSION_SECTION_IDS[normalized] || null;
+  }
+
+  function renderSessionLauncher() {
+    prepareSessionPanels();
+    if (role === 'none') {
+      sessionLauncherEl.classList.remove('visible');
+      sessionLauncherGridEl.innerHTML = '';
+      sessionLauncherStatusEl.textContent = '';
+      return;
+    }
+    const sessions = getAvailableSessions();
+    sessionLauncherEl.classList.add('visible');
+    sessionLauncherGridEl.innerHTML = '';
+    sessions.forEach(function (session) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'session-launcher-btn' + (activeSessionId === session.id ? ' active' : '');
+      btn.dataset.session = session.id;
+      btn.innerHTML = '<span>' + session.icon + ' ' + escapeHtml(session.label) + '</span>' +
+        (sessionSummary[session.id] ? '<span class="session-launcher-badge">대기</span>' : '');
+      btn.addEventListener('click', function () { activateSession(session.id); });
+      sessionLauncherGridEl.appendChild(btn);
+    });
+    if (activeSessionId) {
+      const state = sessionState[activeSessionId];
+      sessionLauncherStatusEl.textContent = state && state.loading
+        ? '선택한 세션의 데이터를 불러오는 중입니다...'
+        : state && state.error
+        ? '일부 데이터를 불러오지 못했습니다. 세션 안의 새로고침 버튼으로 다시 시도하세요.'
+        : '현재 세션: ' + (SESSION_DEFINITIONS.find(function (s) { return s.id === activeSessionId; }) || {}).label;
+    } else {
+      sessionLauncherStatusEl.textContent = '세션을 선택하면 해당 데이터와 실시간 검수 항목만 로드됩니다.';
+    }
+  }
+
+  function setSessionPanelsVisible(sessionId) {
+    prepareSessionPanels();
+    document.querySelectorAll('.session-panel').forEach(function (section) { section.hidden = true; });
+    document.querySelectorAll('.card-group-header').forEach(function (heading) { heading.hidden = true; });
+    const session = SESSION_DEFINITIONS.find(function (item) { return item.id === sessionId; });
+    if (!session) return;
+    session.sections.forEach(function (sectionId) {
+      const section = document.getElementById(sectionId);
+      if (section) section.hidden = false;
+    });
+    // 카드 그룹 제목은 현재 세션에 실제 카드가 있을 때만 표시한다.
+    document.querySelectorAll('.card-group-header').forEach(function (heading) {
+      let node = heading.nextElementSibling;
+      while (node && !node.classList.contains('card-group-header')) {
+        if ((node.matches && node.matches('.session-panel:not([hidden])')) ||
+            (node.querySelector && node.querySelector('.session-panel:not([hidden])'))) {
+          heading.hidden = false;
+          return;
+        }
+        node = node.nextElementSibling;
+      }
+    });
+  }
+
+  function registerSessionUnsubscriber(sessionId, unsubscribe) {
+    if (typeof unsubscribe !== 'function') return;
+    const state = sessionState[sessionId];
+    if (state) state.unsubscribe.push(unsubscribe);
+  }
+
+  function teardownSession(sessionId) {
+    const state = sessionState[sessionId];
+    if (!state) return;
+    state.unsubscribe.splice(0).forEach(function (unsubscribe) {
+      try { unsubscribe(); } catch (e) { console.warn('세션 구독 해제 실패:', e); }
+    });
+    if (sessionId === 'shared') adminChatSubscribed = false;
+    if (sessionId === 'review') {
+      reviewSubscriptionsStarted = false;
+      marketManagementSubscribed = false;
+      marketsCache = {};
+      lastMarketReviewSignature = '';
+      lastMarketManageSignature = '';
+      marketReports = {};
+      nicknameReports = {};
+      presetMergeFailures = {};
+      listingRequests = {};
+      Object.keys(purchaseQueueData).forEach(function (path) { delete purchaseQueueData[path]; });
+      updateReviewAlertBadge();
+      clearMarketCountdowns();
+    }
+    if (sessionId === 'review' || sessionId === 'shared') state.loaded = false;
+  }
+
+  function resetSessionRuntime() {
+    SESSION_DEFINITIONS.forEach(function (session) {
+      teardownSession(session.id);
+      sessionState[session.id].loaded = false;
+      sessionState[session.id].loading = false;
+      sessionState[session.id].lastLoadedAt = 0;
+      sessionState[session.id].error = null;
+    });
+    activeSessionId = null;
+    sessionSummary = {};
+  }
+
+  async function refreshSessionSummary() {
+    if (role === 'none' || !currentUser) return;
+    try {
+      const result = await getAdminSessionSummaryFn();
+      sessionSummary = result.data.summary || {};
+    } catch (e) {
+      // 배지 조회 실패가 세션 사용을 막아서는 안 된다.
+      console.warn('세션 대기 요약 조회 실패:', e);
+      sessionSummary = {};
+    }
+    renderSessionLauncher();
+  }
+
+  async function loadSessionData(sessionId) {
+    const state = sessionState[sessionId];
+    if (!state || state.loading) return;
+    if (state.loaded && Date.now() - state.lastLoadedAt < SESSION_CACHE_TTL_MS) return;
+    state.loaded = false;
+    state.loading = true;
+    state.error = null;
+    renderSessionLauncher();
+    const jobs = [];
+    try {
+      if (sessionId === 'identity') {
+        jobs.push(refreshVerificationOverview(), refreshOnyuAccessRequests());
+      } else if (sessionId === 'monitoring') {
+        jobs.push(
+          refreshStatsOverview('day'), refreshVisitorAnalytics(), refreshGalleryStats(),
+          refreshLifeGameStats(), refreshOnyuStats(), refreshAuditLog(), refreshSkinPurchases()
+        );
+      } else if (sessionId === 'review') {
+        if (role === 'admin') startMarketManagementSubscription();
+        startReviewQueueSubscriptions();
+      } else if (sessionId === 'content') {
+        jobs.push(refreshSeriesConfig(), refreshLifeGameBotConfig(), refreshPromotedContent());
+      } else if (sessionId === 'settings') {
+        jobs.push(refreshDiscordWebhookStatus());
+      } else if (sessionId === 'devbar') {
+        jobs.push(refreshDevbarLinks());
+      } else if (sessionId === 'shared') {
+        renderPermissionViewList();
+        startAdminChatSubscription();
+      }
+      if (jobs.length) await Promise.allSettled(jobs);
+      state.loaded = true;
+      state.lastLoadedAt = Date.now();
+    } catch (e) {
+      console.error('세션 데이터 로드 실패:', sessionId, e);
+      state.error = e;
+    } finally {
+      state.loading = false;
+      renderSessionLauncher();
+    }
+  }
+
+  function activateSession(sessionId, options) {
+    const session = SESSION_DEFINITIONS.find(function (item) { return item.id === sessionId; });
+    if (!session || !sessionCanOpen(session)) return;
+    const opts = options || {};
+    if (activeSessionId && activeSessionId !== sessionId) teardownSession(activeSessionId);
+    activeSessionId = sessionId;
+    setSessionPanelsVisible(sessionId);
+    renderSessionLauncher();
+    revealCardsOnScroll();
+    if (!opts.skipHistory && window.location.hash !== '#' + sessionId) history.pushState(null, '', '#' + sessionId);
+    const defaultTargetId = opts.scrollTarget || session.sections.find(function (sectionId) {
+      const section = document.getElementById(sectionId);
+      return section && section.offsetParent !== null;
+    });
+    const target = defaultTargetId ? document.getElementById(defaultTargetId) : null;
+    if (target) setTimeout(function () { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
+    loadSessionData(sessionId);
+  }
+
+  function prepareInitialSessionView() {
+    prepareSessionPanels();
+    setSessionPanelsVisible(null);
+  }
+
+  function handleHistoryNavigation() {
+    if (role === 'none') return;
+    const sessionId = sessionIdForHash(window.location.hash);
+    if (sessionId) {
+      activateSession(sessionId, { skipHistory: true });
+    } else if (activeSessionId) {
+      teardownSession(activeSessionId);
+      activeSessionId = null;
+      setSessionPanelsVisible(null);
+      renderSessionLauncher();
+    }
+  }
+  window.addEventListener('popstate', handleHistoryNavigation);
+  window.addEventListener('hashchange', handleHistoryNavigation);
+  window.addEventListener('load', function () { revealCardsOnScroll(); });
 
   let pendingRequests = [];
   let verifiedStreamers = [];
@@ -2383,7 +2687,7 @@
     if (adminChatSubscribed) return;
     adminChatSubscribed = true;
     const q = query(ref(db, 'bettingMarket/adminChat'), limitToLast(200));
-    onValue(q, function (snap) {
+    const unsubscribe = onValue(q, function (snap) {
       const val = snap.val() || {};
       const messages = Object.keys(val).map(function (k) { return val[k]; })
         .sort(function (a, b) { return b.at - a.at; });
@@ -2410,6 +2714,7 @@
       }).join('');
       if (atBottom) adminChatMessagesEl.scrollTop = 0;
     });
+    registerSessionUnsubscriber('shared', unsubscribe);
   }
 
   function sendAdminChatMessage() {
@@ -2466,11 +2771,13 @@
       Object.keys(data).forEach(function (id) { stockNamesCache[id] = (data[id] && data[id].name) || id; });
     }).catch(function (e) { console.error('종목 이름 조회 실패:', e); });
 
-    onValue(ref(db, 'bettingMarket/markets'), function (snap) {
+    const unsubscribe = onValue(ref(db, 'bettingMarket/markets'), function (snap) {
       marketsCache = snap.val() || {};
       renderMarketReviewList();
       renderMarketManageList();
+      updateReviewAlertBadge();
     });
+    registerSessionUnsubscriber('review', unsubscribe);
   }
 
   function renderMarketReviewList() {
@@ -2671,32 +2978,35 @@
     if (reviewSubscriptionsStarted) return;
     reviewSubscriptionsStarted = true;
 
-    onValue(ref(db, 'bettingMarket/marketReports'), function (snap) {
+    registerSessionUnsubscriber('review', onValue(query(ref(db, 'bettingMarket/marketReports'), limitToLast(200)), function (snap) {
       marketReports = snap.val() || {};
       renderMarketReportList();
       updateReviewAlertBadge();
-    });
-    onValue(ref(db, 'bettingMarket/nicknameReports'), function (snap) {
+    }));
+    registerSessionUnsubscriber('review', onValue(query(ref(db, 'bettingMarket/nicknameReports'), limitToLast(200)), function (snap) {
       nicknameReports = snap.val() || {};
       renderNicknameReportList();
       updateReviewAlertBadge();
-    });
-    onValue(ref(db, 'presetMergeFailures'), function (snap) {
+    }));
+    registerSessionUnsubscriber('review', onValue(query(ref(db, 'presetMergeFailures'), limitToLast(200)), function (snap) {
       presetMergeFailures = snap.val() || {};
       renderPresetMergeFailureList();
       updateReviewAlertBadge();
-    });
-    onValue(ref(db, 'listingRequests'), function (snap) {
+    }));
+    registerSessionUnsubscriber('review', onValue(query(ref(db, 'listingRequests'), orderByChild('status'), equalTo('pending'), limitToLast(200)), function (snap) {
       listingRequests = snap.val() || {};
       renderListingRequestList();
       updateReviewAlertBadge();
-    });
+    }));
     PURCHASE_QUEUE_SOURCES.forEach(function (src) {
-      onValue(ref(db, src.path), function (snap) {
+      const queueQuery = src.kind === 'bmChest'
+        ? query(ref(db, src.path), limitToLast(200))
+        : query(ref(db, src.path), orderByChild('status'), equalTo('pending'), limitToLast(200));
+      registerSessionUnsubscriber('review', onValue(queueQuery, function (snap) {
         purchaseQueueData[src.path] = snap.val() || {};
         renderPurchaseApprovalList();
         updateReviewAlertBadge();
-      });
+      }));
     });
   }
 
@@ -2726,16 +3036,26 @@
     return count;
   }
 
+  function countPendingMarketManagement() {
+    return Object.values(marketsCache).filter(function (market) {
+      // pendingValidation: 제안 검수, closed: 결과 판정, pendingSettlement: 유예 중인 판정
+      // open은 정상 진행 중인 상태이므로 "대기" 배지에는 포함하지 않는다.
+      return market && ['pendingValidation', 'closed', 'pendingSettlement'].indexOf(market.status) > -1;
+    }).length;
+  }
+
   function updateReviewAlertBadge() {
     const reviewCount = Object.keys(marketReports).length + Object.keys(nicknameReports).length + Object.keys(presetMergeFailures).length;
     const purchaseCount = countPendingPurchaseEntries();
     const listingCount = countPendingListingRequests();
+    const marketManagementCount = countPendingMarketManagement();
 
     setCountTag(reviewQueueCountTagEl, reviewCount);
     setCountTag(purchaseApprovalCountTagEl, purchaseCount);
     setCountTag(listingRequestCountTagEl, listingCount);
+    setCountTag(marketManagementCountTagEl, marketManagementCount);
 
-    const total = reviewCount + purchaseCount + listingCount;
+    const total = reviewCount + purchaseCount + listingCount + marketManagementCount;
     if (total > 0) {
       reviewAlertBadgeEl.textContent = '검수 대기 ' + total;
       reviewAlertBadgeEl.hidden = false;
@@ -2745,7 +3065,16 @@
   }
 
   reviewAlertBadgeEl.addEventListener('click', function () {
-    document.getElementById('section-review-queue').scrollIntoView({ behavior: 'smooth' });
+    const reviewCount = Object.keys(marketReports).length + Object.keys(nicknameReports).length + Object.keys(presetMergeFailures).length;
+    const purchaseCount = countPendingPurchaseEntries();
+    const listingCount = countPendingListingRequests();
+    const marketManagementCount = countPendingMarketManagement();
+    const targetId = reviewCount > 0 ? 'section-review-queue'
+      : purchaseCount > 0 ? 'section-purchase-approval'
+      : listingCount > 0 ? 'section-listing-request'
+      : marketManagementCount > 0 ? 'section-market-management'
+      : 'section-review-queue';
+    activateSession('review', { scrollTarget: targetId });
   });
 
   // ─── 마켓 신고 ───
@@ -3095,8 +3424,9 @@
       }).join('');
     quicknavEl.querySelectorAll('button[data-target]').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        const target = document.getElementById(btn.dataset.target);
-        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const targetId = btn.dataset.target;
+        const sessionId = SESSION_SECTION_IDS[targetId];
+        if (sessionId) activateSession(sessionId, { scrollTarget: targetId });
       });
     });
     quicknavEl.classList.add('visible');
@@ -3109,7 +3439,9 @@
   function revealCardsOnScroll() {
     if (typeof gsap === 'undefined' || typeof ScrollTrigger === 'undefined') return;
     gsap.registerPlugin(ScrollTrigger);
-    document.querySelectorAll('.card:not([data-reveal-init])').forEach(function (card) {
+    Array.from(document.querySelectorAll('.card:not([data-reveal-init])')).filter(function (card) {
+      return card.offsetParent !== null;
+    }).forEach(function (card) {
       card.setAttribute('data-reveal-init', '1');
       gsap.fromTo(card,
         { opacity: 0, y: 26 },
@@ -3123,6 +3455,7 @@
   }
 
   function render() {
+    prepareInitialSessionView();
     gateEl.hidden = role !== 'none';
     adminShellEl.hidden = role !== 'admin';
     streamerShellEl.hidden = role !== 'streamer';
@@ -3131,23 +3464,19 @@
     // 권한이 켜져 있을 때만 보인다(어느 shell에도 속하지 않는 독립 래퍼).
     const canEditDevbar = role === 'admin' || (role === 'streamer' && !!grantedPermissions.devbarEdit);
     devbarShellEl.hidden = !canEditDevbar;
-    if (canEditDevbar) refreshDevbarLinks();
     // 모니터링 4개 카드 — 관리자는 항상, 인증 스트리머는 'viewMonitoring' 권한이
     // 켜져 있을 때만 보인다(devbar 편집과 동일한 독립 래퍼 패턴).
     const canViewMonitoring = role === 'admin' || (role === 'streamer' && !!grantedPermissions.viewMonitoring);
     monitoringShellEl.hidden = !canViewMonitoring;
-    if (canViewMonitoring) { refreshStatsOverview('day'); refreshVisitorAnalytics(); refreshGalleryStats(); refreshLifeGameStats(); refreshOnyuStats(); refreshAuditLog(); refreshSkinPurchases(); }
     // 페이지별 검수(마켓/닉네임 신고, 프리셋 병합 실패) — 관리자는 항상, 인증
     // 스트리머는 'reviewQueue' 권한이 켜져 있을 때만 보인다(읽기+쓰기 모두 포함).
     const canManageReviewQueue = role === 'admin' || (role === 'streamer' && !!grantedPermissions.reviewQueue);
     reviewQueueShellEl.hidden = !canManageReviewQueue;
-    if (canManageReviewQueue) startReviewQueueSubscriptions();
     roleBadgeEl.hidden = role === 'none';
     if (role === 'admin') {
       roleBadgeEl.textContent = '관리자';
       roleBadgeEl.className = 'role-badge admin';
       renderPermissionEditList();
-      refreshLifeGameBotConfig();
     } else if (role === 'streamer') {
       roleBadgeEl.textContent = '인증 스트리머';
       roleBadgeEl.className = 'role-badge streamer';
@@ -3157,32 +3486,41 @@
     } else {
       gateMessageEl.textContent = '이 페이지는 관리자 계정 또는 인증된 스트리머 계정으로만 입장할 수 있습니다.';
     }
+    if (activeSessionId) {
+      const activeSession = SESSION_DEFINITIONS.find(function (session) { return session.id === activeSessionId; });
+      if (!activeSession || !sessionCanOpen(activeSession)) {
+        teardownSession(activeSessionId);
+        activeSessionId = null;
+      }
+    }
+    renderSessionLauncher();
+    if (activeSessionId) setSessionPanelsVisible(activeSessionId);
     renderQuickNav();
-    handleDeepLink();
     revealCardsOnScroll();
   }
 
   // 24번 — 디스코드 알림에 담긴 딥링크(URL 프래그먼트, 19번 앵커 id 재사용) 처리.
   // 로그인 전에는 카드가 전부 hidden이라 브라우저 기본 앵커 스크롤이 못 먹으므로,
   // 역할이 정해져 해당 셸이 보이게 된 시점에 직접 한 번만 스크롤한다.
-  let deepLinkHandled = false;
   function handleDeepLink() {
-    if (deepLinkHandled || role === 'none') return;
+    if (role === 'none') return;
     const hash = window.location.hash.replace('#', '');
-    if (!hash) return;
-    const target = document.getElementById(hash);
-    if (!target) return;
-    deepLinkHandled = true;
-    setTimeout(function () { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100);
+    const sessionId = sessionIdForHash(hash);
+    if (!sessionId) return;
+    const targetId = document.getElementById(hash) ? hash : null;
+    activateSession(sessionId, { skipHistory: true, scrollTarget: targetId });
   }
 
   // 이 페이지는 공개 서비스가 아니라 내부 운영툴이므로, 다른 게임들과 달리 익명
   // 자동 로그인을 하지 않는다 - 실제 Google 계정 로그인 전에는 아무것도 보여주지 않는다.
   onAuthStateChanged(auth, async function (user) {
-    currentUser = (user && !user.isAnonymous) ? user : null;
+    const nextUser = (user && !user.isAnonymous) ? user : null;
+    if (currentUser && (!nextUser || currentUser.uid !== nextUser.uid)) resetSessionRuntime();
+    currentUser = nextUser;
     authBtnEl.disabled = false;
 
     if (!currentUser) {
+      resetSessionRuntime();
       authStatusEl.textContent = '로그인이 필요합니다';
       authBtnEl.textContent = 'Google 로그인';
       role = 'none';
@@ -3193,8 +3531,8 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') { refreshVerificationOverview(); refreshOnyuAccessRequests(); refreshSeriesConfig(); refreshPromotedContent(); refreshDiscordWebhookStatus(); startMarketManagementSubscription(); }
-    if (role === 'admin' || role === 'streamer') { startAdminChatSubscription(); }
+    // 상세 데이터와 실시간 구독은 세션 선택 후에만 시작한다.
+    handleDeepLink();
   });
 </script>
 </body>
