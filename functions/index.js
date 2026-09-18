@@ -736,6 +736,19 @@ const notifyGalleryImageReport = onValueCreated('/gallery/imageReports/{id}', as
   const data = event.data.val() || {};
   await sendDiscordNotification('🔔 **새 이미지 신고 (스트리머 갤러리)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)');
 });
+const notifyGalleryCommentReport = onValueCreated('/gallery/commentReports/{id}', async (event) => {
+  const data = event.data.val() || {};
+  const commentText = String(data.commentText || '(내용 없음)').replace(/[\r\n]/g, ' ').slice(0, 180);
+  const reason = String(data.reason || '(사유 없음)').replace(/[\r\n]/g, ' ').slice(0, 180);
+  await sendDiscordNotification(
+    '🔔 **새 댓글 신고 (스트리머 갤러리)**\n' +
+    '댓글: ' + commentText + '\n' +
+    '작성자 uid: `' + (data.commentAuthorUid || '(알 수 없음)') + '`\n' +
+    '신고자 uid: `' + (data.reporterUid || '(알 수 없음)') + '`\n' +
+    '사유: ' + reason + '\n' +
+    'https://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)'
+  );
+});
 // 스트리머별 업로드 잠금 해금 신청(2026-09-05 추가) — 별풍선 100개 후원 인증은
 // 완전 수동(soop-stock-market의 "동결 해제(후원)"와 동일 원칙)이라 관리자가 빨리
 // 알아야 한다. formatRequestSummary는 streamerName 필드를 모르므로 직접 문구 구성.
@@ -1716,6 +1729,7 @@ module.exports = {
   notifyLifeGameReviewReportAlert,
   notifyLifeGameSponsorRequest,
   notifyGalleryImageReport,
+  notifyGalleryCommentReport,
   notifyGalleryUnlockRequest,
   notifyGalleryImageUpload,
   notifyVerifiedStreamerVisit,
