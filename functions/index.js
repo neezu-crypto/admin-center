@@ -591,11 +591,38 @@ function collectVerifiedStreamerEntries(value) {
 const listStreamerPromoLinks = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const [verifiedSnap, linksSnap] = await Promise.all([
+  const [verifiedSnap, linksSnap, recentSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoLinks').get(),
+    db.ref('adminCenter/streamerPromoRecent').get(),
   ]);
   const links = linksSnap.val() || {};
+  let recentOpened = recentSnap.val() || null;
+  // 이전 버전은 항목마다 lastOpenedAt을 저장했으므로, 최초 조회 때 가장 최근
+  // 1건만 공용 기록으로 승격하고 나머지 항목별 기록은 정리한다.
+  if (!recentOpened) {
+    Object.keys(links).forEach(function (key) {
+      const item = links[key] || {};
+      if (!item.lastOpenedAt || (recentOpened && recentOpened.lastOpenedAt >= item.lastOpenedAt)) return;
+      recentOpened = {
+        key: key,
+        nickname: item.nickname || '',
+        soopId: item.soopId || '',
+        lastOpenedAt: item.lastOpenedAt,
+        lastOpenedBy: item.lastOpenedBy || null,
+      };
+    });
+  }
+  const cleanupUpdates = {};
+  Object.keys(links).forEach(function (key) {
+    const item = links[key] || {};
+    if (item.lastOpenedAt != null) cleanupUpdates['adminCenter/streamerPromoLinks/' + key + '/lastOpenedAt'] = null;
+    if (item.lastOpenedBy != null) cleanupUpdates['adminCenter/streamerPromoLinks/' + key + '/lastOpenedBy'] = null;
+  });
+  if (!recentSnap.exists() && recentOpened) cleanupUpdates['adminCenter/streamerPromoRecent'] = recentOpened;
+  if (Object.keys(cleanupUpdates).length) {
+    await db.ref().update(cleanupUpdates);
+  }
   const streamers = getKnownPromoEntries(verifiedSnap.val());
   streamers.sort(function (a, b) {
     return (a.nickname || a.soopId).localeCompare((b.nickname || b.soopId), 'ko') || a.soopId.localeCompare(b.soopId);
@@ -610,10 +637,11 @@ const listStreamerPromoLinks = onCall(async (request) => {
         soopId: entry.soopId,
         writeUrl: typeof saved.writeUrl === 'string' && saved.writeUrl ? saved.writeUrl : (entry.writeUrl || ''),
         promotedCompleted: saved.promotedCompleted === true,
-        lastOpenedAt: saved.lastOpenedAt || null,
+        lastOpenedAt: recentOpened && recentOpened.key === key ? recentOpened.lastOpenedAt || null : null,
         updatedAt: saved.updatedAt || null,
       };
     }),
+    recentOpened: recentOpened || null,
   };
 });
 
@@ -680,15 +708,25 @@ const markStreamerPromoLinkOpened = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const db = getDatabase();
   const entry = await requireKnownPromoEntry(db, request.data || {});
-  const ref = db.ref('adminCenter/streamerPromoLinks/' + entry.key);
   const lastOpenedAt = Date.now();
-  await ref.update({
-    nickname: entry.nickname,
-    soopId: entry.soopId || null,
-    lastOpenedAt: lastOpenedAt,
-    lastOpenedBy: adminUid,
+  const linksSnap = await db.ref('adminCenter/streamerPromoLinks').get();
+  const links = linksSnap.val() || {};
+  const updates = {
+    'adminCenter/streamerPromoRecent': {
+      key: entry.key,
+      nickname: entry.nickname || '',
+      soopId: entry.soopId || '',
+      lastOpenedAt: lastOpenedAt,
+      lastOpenedBy: adminUid,
+    },
+  };
+  Object.keys(links).forEach(function (key) {
+    const item = links[key] || {};
+    if (item.lastOpenedAt != null) updates['adminCenter/streamerPromoLinks/' + key + '/lastOpenedAt'] = null;
+    if (item.lastOpenedBy != null) updates['adminCenter/streamerPromoLinks/' + key + '/lastOpenedBy'] = null;
   });
-  return { ok: true, lastOpenedAt: lastOpenedAt };
+  await db.ref().update(updates);
+  return { ok: true, lastOpenedAt: lastOpenedAt, recentOpened: updates['adminCenter/streamerPromoRecent'] };
 });
 
 const setStreamerPromoCompletion = onCall(async (request) => {

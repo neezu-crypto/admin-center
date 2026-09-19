@@ -595,7 +595,7 @@
       <button id="streamerPromoLinksRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <button id="streamerPromoClearCompletedBtn" class="perm-refresh-btn" type="button" style="margin-left:6px;">전체 체크 해제</button>
       <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
-      <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄</h3>
+      <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
       <h3 class="subhead" style="margin-top:16px;">전체 홍보 목록</h3>
       <div id="streamerPromoLinksList" style="margin-top:12px;"></div>
@@ -1900,7 +1900,7 @@
     streamerPromoLinksStatusEl.textContent = '';
     try {
       const result = await listStreamerPromoLinksFn();
-      renderStreamerPromoLinksList(result.data.streamers || []);
+      renderStreamerPromoLinksList(result.data.streamers || [], result.data.recentOpened || null);
     } catch (e) {
       console.error('스트리머 홍보글 링크 조회 실패:', e);
       streamerPromoLinksListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
@@ -1908,7 +1908,7 @@
     }
   }
 
-  function renderStreamerPromoLinksList(streamers) {
+  function renderStreamerPromoLinksList(streamers, recentOpened) {
     if (!streamers.length) {
       streamerPromoRecentListEl.innerHTML = '<div class="empty-state">아직 글쓰기 링크를 연 기록이 없습니다.</div>';
       streamerPromoLinksListEl.innerHTML = '<div class="empty-state">인증된 스트리머가 없습니다.</div>';
@@ -1918,9 +1918,7 @@
     const missingCount = streamers.filter(function (item) { return !item.writeUrl; }).length;
     const completedCount = streamers.filter(function (item) { return item.promotedCompleted; }).length;
     streamerPromoLinksStatusEl.textContent = '총 ' + streamers.length + '명 · 링크 미등록 ' + missingCount + '명 · 홍보 완료 ' + completedCount + '명';
-    const recent = streamers.filter(function (item) { return item.lastOpenedAt; })
-      .sort(function (a, b) { return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0); })
-      .slice(0, 20);
+    const recent = recentOpened && recentOpened.lastOpenedAt ? [recentOpened] : [];
     streamerPromoRecentListEl.innerHTML = recent.length
       ? recent.map(function (item) {
           const when = new Date(item.lastOpenedAt).toLocaleString('ko-KR');
@@ -1939,7 +1937,7 @@
       identity.style.cssText = 'min-width:170px; flex:0 0 190px;';
       identity.innerHTML = '<strong>' + escapeHtml(item.nickname || '(닉네임 미기재)') + '</strong>' +
         (item.soopId ? '<span class="hint" style="display:block; margin-top:2px;">@' + escapeHtml(item.soopId) + '</span>' : '') +
-        (item.lastOpenedAt ? '<span class="role-badge" style="display:inline-block; margin-top:5px; background:rgba(194,91,128,0.12); color:#b74f78;">최근 열어봄</span>' : '');
+        (recentOpened && recentOpened.key === item.key ? '<span class="role-badge" style="display:inline-block; margin-top:5px; background:rgba(194,91,128,0.12); color:#b74f78;">최근 열어봄</span>' : '');
       const input = document.createElement('input');
       input.type = 'url';
       input.value = item.writeUrl || '';
@@ -2011,11 +2009,16 @@
         openLink.style.textDecoration = 'none';
         openLink.addEventListener('click', function () {
           if (item.promotedCompleted) return;
-          item.lastOpenedAt = Date.now();
+          recentOpened = {
+            key: item.key,
+            nickname: item.nickname || '',
+            soopId: item.soopId || '',
+            lastOpenedAt: Date.now(),
+          };
           markStreamerPromoLinkOpenedFn({ promoKey: item.key, soopId: item.soopId || '' }).catch(function (err) {
             console.warn('최근 열람 시간 저장 실패:', err);
           });
-          setTimeout(function () { renderStreamerPromoLinksList(streamers); }, 0);
+          setTimeout(function () { renderStreamerPromoLinksList(streamers, recentOpened); }, 0);
           const recentBadge = identity.querySelector('.role-badge');
           if (!recentBadge) {
             const badge = document.createElement('span');
