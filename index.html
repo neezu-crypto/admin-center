@@ -585,6 +585,18 @@
       <div id="lifeGameBotDetailList" style="margin-top:10px;"></div>
     </div>
 
+    <div class="card" id="section-streamer-promo-links">
+      <h2>스트리머별 홍보글 바로가기</h2>
+      <p class="hint">
+        인증된 스트리머의 SOOP 게시판 글쓰기 링크를 저장해 두고, 닉네임별로 새 탭에서 바로 엽니다.
+        게시판 종류와 로그인 상태에 따라 글쓰기 주소가 달라질 수 있어 링크는 관리자가 실제 주소를 한 번 등록해야 합니다.
+        목록은 인증 스트리머 기준으로 닉네임순 정렬되며, 링크가 없는 스트리머도 계속 표시됩니다.
+      </p>
+      <button id="streamerPromoLinksRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
+      <div id="streamerPromoLinksList" style="margin-top:12px;"></div>
+    </div>
+
     <div class="card" id="section-promoted-content">
       <h2>게시글 홍보 현황</h2>
       <p class="hint">
@@ -841,6 +853,8 @@
   const addPromotedContentFn = httpsCallable(functions, 'addPromotedContent');
   const removePromotedContentFn = httpsCallable(functions, 'removePromotedContent');
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
+  const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
+  const saveStreamerPromoLinkFn = httpsCallable(functions, 'saveStreamerPromoLink');
   // 21번 — 배팅시장 마켓 관리. StreamBet-Market이 이미 배포한 함수를 그대로 호출한다
   // (17번 채팅·22번 게시글 홍보 현황과 동일한 "codebase가 달라도 함수 이름만 맞으면
   // 호출 가능" 패턴).
@@ -963,6 +977,9 @@
   const seriesConfigListEl = document.getElementById('seriesConfigList');
   const devbarLinksListEl = document.getElementById('devbarLinksList');
   const promotedContentListEl = document.getElementById('promotedContentList');
+  const streamerPromoLinksRefreshBtn = document.getElementById('streamerPromoLinksRefreshBtn');
+  const streamerPromoLinksStatusEl = document.getElementById('streamerPromoLinksStatus');
+  const streamerPromoLinksListEl = document.getElementById('streamerPromoLinksList');
   const marketReviewListEl = document.getElementById('marketReviewList');
   const marketManageListEl = document.getElementById('marketManageList');
   const promotedContentMigrateBtn = document.getElementById('promotedContentMigrateBtn');
@@ -1034,6 +1051,10 @@
     {
       id: 'content', label: '콘텐츠·현황', icon: '📦', role: 'admin',
       sections: ['section-content-freeze', 'section-lifegame-bots', 'section-promoted-content'],
+    },
+    {
+      id: 'promotions', label: '스트리머 홍보 링크', icon: '📣', role: 'admin',
+      sections: ['section-streamer-promo-links'],
     },
     {
       id: 'settings', label: '사이트 설정', icon: '⚙️', role: 'admin',
@@ -1344,6 +1365,8 @@
         startReviewQueueSubscriptions();
       } else if (sessionId === 'content') {
         jobs.push(refreshSeriesConfig(), refreshLifeGameBotConfig(), refreshPromotedContent());
+      } else if (sessionId === 'promotions') {
+        jobs.push(refreshStreamerPromoLinks());
       } else if (sessionId === 'settings') {
         jobs.push(refreshDiscordWebhookStatus());
       } else if (sessionId === 'devbar') {
@@ -1862,6 +1885,78 @@
       promotedContentListEl.appendChild(section);
     });
   }
+
+  async function refreshStreamerPromoLinks() {
+    streamerPromoLinksListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    streamerPromoLinksStatusEl.textContent = '';
+    try {
+      const result = await listStreamerPromoLinksFn();
+      renderStreamerPromoLinksList(result.data.streamers || []);
+    } catch (e) {
+      console.error('스트리머 홍보글 링크 조회 실패:', e);
+      streamerPromoLinksListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
+      streamerPromoLinksStatusEl.textContent = '인증 스트리머 목록을 불러오지 못했습니다.';
+    }
+  }
+
+  function renderStreamerPromoLinksList(streamers) {
+    if (!streamers.length) {
+      streamerPromoLinksListEl.innerHTML = '<div class="empty-state">인증된 스트리머가 없습니다.</div>';
+      streamerPromoLinksStatusEl.textContent = '';
+      return;
+    }
+    const missingCount = streamers.filter(function (item) { return !item.writeUrl; }).length;
+    streamerPromoLinksStatusEl.textContent = '총 ' + streamers.length + '명 · 링크 미등록 ' + missingCount + '명';
+    streamerPromoLinksListEl.innerHTML = '';
+    streamers.forEach(function (item) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid rgba(20,20,22,0.08);';
+      const identity = document.createElement('div');
+      identity.style.cssText = 'min-width:170px; flex:0 0 190px;';
+      identity.innerHTML = '<strong>' + escapeHtml(item.nickname || '(닉네임 미기재)') + '</strong>' +
+        (item.soopId ? '<span class="hint" style="display:block; margin-top:2px;">@' + escapeHtml(item.soopId) + '</span>' : '');
+      const input = document.createElement('input');
+      input.type = 'url';
+      input.value = item.writeUrl || '';
+      input.placeholder = 'https://www.sooplive.com/.../글쓰기 주소';
+      input.maxLength = 500;
+      input.setAttribute('aria-label', (item.nickname || '스트리머') + ' 홍보글 글쓰기 링크');
+      input.style.cssText = 'flex:1 1 320px; min-width:220px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:8px 10px; border-radius:10px; font-size:12.5px;';
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'perm-refresh-btn';
+      saveBtn.textContent = '저장';
+      saveBtn.addEventListener('click', function () {
+        saveBtn.disabled = true;
+        saveStreamerPromoLinkFn({ soopId: item.soopId || '', verificationId: item.soopId ? '' : item.key.replace(/^verification_/, ''), writeUrl: input.value })
+          .then(function (result) {
+            input.value = result.data && result.data.removed ? '' : input.value.trim();
+            refreshStreamerPromoLinks();
+          })
+          .catch(function (err) {
+            console.error('스트리머 홍보글 링크 저장 실패:', err);
+            window.alert('저장에 실패했습니다: ' + (err && err.message ? err.message : err));
+          })
+          .finally(function () { saveBtn.disabled = false; });
+      });
+      row.appendChild(identity);
+      row.appendChild(input);
+      row.appendChild(saveBtn);
+      if (item.writeUrl) {
+        const openLink = document.createElement('a');
+        openLink.href = item.writeUrl;
+        openLink.target = '_blank';
+        openLink.rel = 'noopener noreferrer';
+        openLink.className = 'perm-refresh-btn';
+        openLink.textContent = '글쓰기 열기';
+        openLink.style.textDecoration = 'none';
+        row.appendChild(openLink);
+      }
+      streamerPromoLinksListEl.appendChild(row);
+    });
+  }
+
+  streamerPromoLinksRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
 
   promotedContentMigrateBtn.addEventListener('click', function () {
     promotedContentMigrateBtn.disabled = true;

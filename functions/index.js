@@ -131,7 +131,7 @@ const getAdminSessionSummary = onCall(async (request) => {
   const db = getDatabase();
   const canReview = role === 'admin' || permissions.reviewQueue === true;
 
-  const summary = { identity: false, monitoring: false, review: false, content: false, settings: false, devbar: false, shared: false };
+  const summary = { identity: false, monitoring: false, review: false, content: false, promotions: false, settings: false, devbar: false, shared: false };
   const tasks = [];
   if (role === 'admin') {
     tasks.push(Promise.all([
@@ -510,6 +510,128 @@ const migratePromotedStreamers = onCall(async (request) => {
   });
   if (migratedCount > 0) await db.ref().update(updates);
   return { migratedCount: migratedCount };
+});
+
+// 인증 스트리머별 SOOP 홍보 게시판 글쓰기 바로가기. SOOP의 글쓰기 경로는
+// 게시판 종류·로그인 상태에 따라 달라질 수 있으므로 방송국 주소를 추측해
+// 자동 생성하지 않고, 관리자가 실제 글쓰기 URL을 한 번 등록한다. 링크는
+// adminCenter 아래에만 저장하며 클라이언트에는 uid를 절대 반환하지 않는다.
+const STREAMER_PROMO_URL_MAX = 500;
+const SOOP_ID_RE = /^[A-Za-z0-9]{2,20}$/;
+
+function normalizeSoopId(value) {
+  const id = String(value || '').trim();
+  return SOOP_ID_RE.test(id) ? id.toLowerCase() : '';
+}
+
+function normalizePromoUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.length > STREAMER_PROMO_URL_MAX) {
+    throw new HttpsError('invalid-argument', STREAMER_PROMO_URL_MAX + '자 이하의 링크를 입력해주세요.');
+  }
+  let parsed;
+  try { parsed = new URL(raw); } catch (e) {
+    throw new HttpsError('invalid-argument', '올바른 URL을 입력해주세요.');
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  const allowedHost = hostname === 'sooplive.com' || hostname.endsWith('.sooplive.com') ||
+    hostname === 'sooplive.co.kr' || hostname.endsWith('.sooplive.co.kr');
+  if (parsed.protocol !== 'https:' || !allowedHost || parsed.username || parsed.password) {
+    throw new HttpsError('invalid-argument', 'SOOP의 https 링크만 등록할 수 있습니다.');
+  }
+  return parsed.toString();
+}
+
+function promoStorageKey(verificationId, soopId) {
+  const normalizedId = normalizeSoopId(soopId);
+  return normalizedId || ('verification_' + String(verificationId || '').replace(/[^A-Za-z0-9_-]/g, '_'));
+}
+
+function collectVerifiedStreamerEntries(value) {
+  const data = value || {};
+  const bySoopId = {};
+  const entries = [];
+  Object.keys(data).forEach(function (id) {
+    const row = data[id] || {};
+    const soopId = normalizeSoopId(row.soopId);
+    const entry = { id: id, nickname: String(row.nickname || '').trim(), soopId: soopId, verifiedAt: row.verifiedAt || 0 };
+    if (!entry.nickname && !entry.soopId) return;
+    if (soopId && bySoopId[soopId]) {
+      if ((entry.verifiedAt || 0) <= (bySoopId[soopId].verifiedAt || 0)) return;
+      const oldIndex = entries.indexOf(bySoopId[soopId]);
+      if (oldIndex >= 0) entries.splice(oldIndex, 1);
+    }
+    if (soopId) bySoopId[soopId] = entry;
+    entries.push(entry);
+  });
+  return entries;
+}
+
+const listStreamerPromoLinks = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const [verifiedSnap, linksSnap] = await Promise.all([
+    db.ref('streamerVerifications').get(),
+    db.ref('adminCenter/streamerPromoLinks').get(),
+  ]);
+  const links = linksSnap.val() || {};
+  const streamers = collectVerifiedStreamerEntries(verifiedSnap.val());
+  streamers.sort(function (a, b) {
+    return (a.nickname || a.soopId).localeCompare((b.nickname || b.soopId), 'ko') || a.soopId.localeCompare(b.soopId);
+  });
+  return {
+    streamers: streamers.map(function (entry) {
+      const key = promoStorageKey(entry.id, entry.soopId);
+      const saved = links[key] || {};
+      return {
+        key: key,
+        nickname: entry.nickname,
+        soopId: entry.soopId,
+        writeUrl: typeof saved.writeUrl === 'string' ? saved.writeUrl : '',
+        updatedAt: saved.updatedAt || null,
+      };
+    }),
+  };
+});
+
+const saveStreamerPromoLink = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const data = request.data || {};
+  const requestedSoopId = normalizeSoopId(data.soopId);
+  const requestedVerificationId = String(data.verificationId || '').trim();
+  const writeUrl = normalizePromoUrl(data.writeUrl);
+  if (!requestedSoopId && !requestedVerificationId) {
+    throw new HttpsError('invalid-argument', '인증 스트리머 식별자가 필요합니다.');
+  }
+
+  const db = getDatabase();
+  const verifiedSnap = await db.ref('streamerVerifications').get();
+  const entries = collectVerifiedStreamerEntries(verifiedSnap.val());
+  const entry = entries.find(function (item) {
+    return (requestedSoopId && item.soopId === requestedSoopId) ||
+      (!requestedSoopId && requestedVerificationId === item.id);
+  });
+  if (!entry) throw new HttpsError('failed-precondition', '현재 인증된 스트리머만 등록할 수 있습니다.');
+
+  const key = promoStorageKey(entry.id, entry.soopId);
+  const ref = db.ref('adminCenter/streamerPromoLinks/' + key);
+  const existing = (await ref.get()).val() || {};
+  if (!writeUrl) {
+    await ref.remove();
+    await logToAdminAuditLog(db, request, '스트리머 홍보글 링크 삭제', entry.nickname || entry.soopId);
+    return { ok: true, removed: true };
+  }
+  await ref.set({
+    nickname: entry.nickname,
+    soopId: entry.soopId || null,
+    writeUrl: writeUrl,
+    createdAt: existing.createdAt || Date.now(),
+    updatedAt: Date.now(),
+    updatedBy: adminUid,
+  });
+  await logToAdminAuditLog(db, request, '스트리머 홍보글 링크 저장', entry.nickname || entry.soopId);
+  return { ok: true, removed: false };
 });
 
 // 24번 — 디스코드 웹훅 검수 알림. 웹훅 URL은 비밀번호와 동급인 민감정보라
@@ -1702,6 +1824,8 @@ module.exports = {
   addPromotedContent,
   removePromotedContent,
   migratePromotedStreamers,
+  listStreamerPromoLinks,
+  saveStreamerPromoLink,
   listStreamerVerificationOverview,
   listAuditLogOverview,
   getSeriesConfig,
