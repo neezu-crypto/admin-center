@@ -869,7 +869,18 @@ function formatRequestSummary(data) {
   if (data.hours) parts.push(data.hours + '시간');
   if (data.qty) parts.push(data.qty + '개');
   if (data.reason) parts.push('사유: ' + data.reason);
+  const liveUrl = streamerLiveUrlForData(data);
+  if (liveUrl) parts.push('라이브: ' + liveUrl);
   return parts.length ? parts.join(' · ') : '(상세 정보 없음)';
+}
+
+// 스트리머 아이디가 있는 알림에는 바로 방송을 확인할 수 있는 SOOP 라이브
+// 주소를 함께 표시한다. streamerId는 일부 큐에서 SOOP 아이디로 쓰이고,
+// 일부 큐에서는 내부 식별자일 수 있으므로 영문/숫자 형식일 때만 링크를 만든다.
+function streamerLiveUrlForData(data) {
+  const raw = String((data && (data.soopId || data.streamerId)) || '').trim();
+  if (!/^[A-Za-z0-9]{2,20}$/.test(raw)) return '';
+  return 'https://play.sooplive.com/' + encodeURIComponent(raw.toLowerCase()) + '/';
 }
 
 function makeQueueTrigger(path, label, anchorId) {
@@ -946,11 +957,13 @@ const notifyLifeGameReviewReportAlert = onValueCreated('/lifeGame/reviewReports/
 });
 const notifyLifeGameSponsorRequest = onValueCreated('/lifeGame/sponsorRequests/{id}', async (event) => {
   const data = event.data.val() || {};
+  const liveUrl = streamerLiveUrlForData(data);
   await sendDiscordNotification(
     '🔔 **새 후원 스트리머 신청 (인생게임)**\n' + (data.nickname || '(알 수 없음)') +
     (data.soopId ? ' (@' + data.soopId + ')' : '') +
     (data.days ? ' · ' + data.days + '일' : '') +
     (data.starBalloons ? ' · 별풍선 ' + data.starBalloons + '개' : '') +
+    (liveUrl ? '\n라이브: ' + liveUrl : '') +
     '\n' + deepLink('section-purchase-approval')
   );
 });
@@ -976,9 +989,11 @@ const notifyGalleryCommentReport = onValueCreated('/gallery/commentReports/{id}'
 // 알아야 한다. formatRequestSummary는 streamerName 필드를 모르므로 직접 문구 구성.
 const notifyGalleryUnlockRequest = onValueCreated('/gallery/unlockRequests/{id}', async (event) => {
   const data = event.data.val() || {};
+  const liveUrl = streamerLiveUrlForData(data);
   await sendDiscordNotification(
     '🔔 **새 스트리머 해금 신청 (스트리머 갤러리)**\n' +
     (data.streamerName || '(알 수 없음)') + ' · 후원자 닉네임: ' + (data.nickname || '(알 수 없음)') +
+    (liveUrl ? '\n라이브: ' + liveUrl : '') +
     '\nhttps://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)'
   );
 });
@@ -991,9 +1006,11 @@ const GALLERY_CATEGORY_LABELS = { screenshot: '스크린샷', 'ai-art': 'AI 일�
 const notifyGalleryImageUpload = onValueCreated('/gallery/images/{id}', async (event) => {
   const data = event.data.val() || {};
   const category = GALLERY_CATEGORY_LABELS[data.category] || data.category || '';
+  const liveUrl = streamerLiveUrlForData(data);
   await sendDiscordNotification(
     '🖼️ **새 이미지 업로드 (스트리머 갤러리)**\n' +
     (data.streamerName || '(알 수 없음)') + (category ? ' · ' + category : '') +
+    (liveUrl ? '\n라이브: ' + liveUrl : '') +
     (data.thumbUrl ? '\n' + data.thumbUrl : '') +
     '\nhttps://neezu-crypto.github.io/streamer-gallery/'
   );
@@ -1021,8 +1038,10 @@ const notifyVerifiedStreamerVisit = onValueCreated('/verifiedStreamerVisits/{ent
   const name = data.nickname
     ? data.nickname + (data.soopId ? ' (@' + data.soopId + ')' : '')
     : 'uid: ' + (data.uid || '(알 수 없음)');
+  const liveUrl = streamerLiveUrlForData(data);
   await sendDiscordNotification(
-    '👋 **인증 스트리머 접속 — ' + marketLabel + '**\n' + name + '\n오늘 첫 접속입니다.'
+    '👋 **인증 스트리머 접속 — ' + marketLabel + '**\n' + name +
+    (liveUrl ? '\n라이브: ' + liveUrl : '') + '\n오늘 첫 접속입니다.'
   );
 });
 
