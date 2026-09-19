@@ -593,7 +593,11 @@
         목록은 인증 스트리머 기준으로 닉네임순 정렬되며, 링크가 없는 스트리머도 계속 표시됩니다.
       </p>
       <button id="streamerPromoLinksRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <button id="streamerPromoClearCompletedBtn" class="perm-refresh-btn" type="button" style="margin-left:6px;">전체 체크 해제</button>
       <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
+      <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄</h3>
+      <div id="streamerPromoRecentList"></div>
+      <h3 class="subhead" style="margin-top:16px;">전체 홍보 목록</h3>
       <div id="streamerPromoLinksList" style="margin-top:12px;"></div>
     </div>
 
@@ -855,6 +859,9 @@
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
   const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
   const saveStreamerPromoLinkFn = httpsCallable(functions, 'saveStreamerPromoLink');
+  const markStreamerPromoLinkOpenedFn = httpsCallable(functions, 'markStreamerPromoLinkOpened');
+  const setStreamerPromoCompletionFn = httpsCallable(functions, 'setStreamerPromoCompletion');
+  const clearAllStreamerPromoCompletionFn = httpsCallable(functions, 'clearAllStreamerPromoCompletion');
   // 21번 — 배팅시장 마켓 관리. StreamBet-Market이 이미 배포한 함수를 그대로 호출한다
   // (17번 채팅·22번 게시글 홍보 현황과 동일한 "codebase가 달라도 함수 이름만 맞으면
   // 호출 가능" 패턴).
@@ -978,7 +985,9 @@
   const devbarLinksListEl = document.getElementById('devbarLinksList');
   const promotedContentListEl = document.getElementById('promotedContentList');
   const streamerPromoLinksRefreshBtn = document.getElementById('streamerPromoLinksRefreshBtn');
+  const streamerPromoClearCompletedBtn = document.getElementById('streamerPromoClearCompletedBtn');
   const streamerPromoLinksStatusEl = document.getElementById('streamerPromoLinksStatus');
+  const streamerPromoRecentListEl = document.getElementById('streamerPromoRecentList');
   const streamerPromoLinksListEl = document.getElementById('streamerPromoLinksList');
   const marketReviewListEl = document.getElementById('marketReviewList');
   const marketManageListEl = document.getElementById('marketManageList');
@@ -1901,12 +1910,27 @@
 
   function renderStreamerPromoLinksList(streamers) {
     if (!streamers.length) {
+      streamerPromoRecentListEl.innerHTML = '<div class="empty-state">아직 글쓰기 링크를 연 기록이 없습니다.</div>';
       streamerPromoLinksListEl.innerHTML = '<div class="empty-state">인증된 스트리머가 없습니다.</div>';
       streamerPromoLinksStatusEl.textContent = '';
       return;
     }
     const missingCount = streamers.filter(function (item) { return !item.writeUrl; }).length;
-    streamerPromoLinksStatusEl.textContent = '총 ' + streamers.length + '명 · 링크 미등록 ' + missingCount + '명';
+    const completedCount = streamers.filter(function (item) { return item.promotedCompleted; }).length;
+    streamerPromoLinksStatusEl.textContent = '총 ' + streamers.length + '명 · 링크 미등록 ' + missingCount + '명 · 홍보 완료 ' + completedCount + '명';
+    const recent = streamers.filter(function (item) { return item.lastOpenedAt; })
+      .sort(function (a, b) { return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0); })
+      .slice(0, 20);
+    streamerPromoRecentListEl.innerHTML = recent.length
+      ? recent.map(function (item) {
+          const when = new Date(item.lastOpenedAt).toLocaleString('ko-KR');
+          return '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:7px 0; border-bottom:1px solid rgba(20,20,22,0.08);">' +
+            '<strong>' + escapeHtml(item.nickname || '(닉네임 미기재)') + '</strong>' +
+            '<span class="role-badge" style="background:rgba(194,91,128,0.12); color:#b74f78;">최근 열어봄</span>' +
+            '<span class="hint" style="margin:0;">' + escapeHtml(when) + '</span>' +
+            '</div>';
+        }).join('')
+      : '<div class="empty-state">아직 글쓰기 링크를 연 기록이 없습니다.</div>';
     streamerPromoLinksListEl.innerHTML = '';
     streamers.forEach(function (item) {
       const row = document.createElement('div');
@@ -1914,7 +1938,8 @@
       const identity = document.createElement('div');
       identity.style.cssText = 'min-width:170px; flex:0 0 190px;';
       identity.innerHTML = '<strong>' + escapeHtml(item.nickname || '(닉네임 미기재)') + '</strong>' +
-        (item.soopId ? '<span class="hint" style="display:block; margin-top:2px;">@' + escapeHtml(item.soopId) + '</span>' : '');
+        (item.soopId ? '<span class="hint" style="display:block; margin-top:2px;">@' + escapeHtml(item.soopId) + '</span>' : '') +
+        (item.lastOpenedAt ? '<span class="role-badge" style="display:inline-block; margin-top:5px; background:rgba(194,91,128,0.12); color:#b74f78;">최근 열어봄</span>' : '');
       const input = document.createElement('input');
       input.type = 'url';
       input.value = item.writeUrl || '';
@@ -1926,9 +1951,10 @@
       saveBtn.type = 'button';
       saveBtn.className = 'perm-refresh-btn';
       saveBtn.textContent = '저장';
+      let openLink = null;
       saveBtn.addEventListener('click', function () {
         saveBtn.disabled = true;
-        saveStreamerPromoLinkFn({ soopId: item.soopId || '', verificationId: item.soopId ? '' : item.key.replace(/^verification_/, ''), writeUrl: input.value })
+        saveStreamerPromoLinkFn({ promoKey: item.key, soopId: item.soopId || '', verificationId: item.soopId ? '' : item.key.replace(/^verification_/, ''), writeUrl: input.value })
           .then(function (result) {
             input.value = result.data && result.data.removed ? '' : input.value.trim();
             refreshStreamerPromoLinks();
@@ -1939,17 +1965,66 @@
           })
           .finally(function () { saveBtn.disabled = false; });
       });
+      const completionLabel = document.createElement('label');
+      completionLabel.style.cssText = 'display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap;';
+      const completionInput = document.createElement('input');
+      completionInput.type = 'checkbox';
+      completionInput.checked = item.promotedCompleted === true;
+      completionInput.setAttribute('aria-label', (item.nickname || '스트리머') + ' 홍보 완료');
+      const completionText = document.createElement('span');
+      completionText.textContent = '홍보 완료';
+      completionLabel.appendChild(completionInput);
+      completionLabel.appendChild(completionText);
+      completionInput.addEventListener('change', function () {
+        const nextValue = completionInput.checked;
+        completionInput.disabled = true;
+        setStreamerPromoCompletionFn({
+          promoKey: item.key,
+          soopId: item.soopId || '',
+          completed: nextValue,
+        }).then(function () {
+          item.promotedCompleted = nextValue;
+          refreshStreamerPromoLinks();
+        }).catch(function (err) {
+          console.error('홍보 완료 상태 저장 실패:', err);
+          completionInput.checked = !nextValue;
+          window.alert('홍보 완료 상태 저장에 실패했습니다: ' + (err && err.message ? err.message : err));
+        }).finally(function () { completionInput.disabled = false; });
+      });
       row.appendChild(identity);
       row.appendChild(input);
       row.appendChild(saveBtn);
+      row.appendChild(completionLabel);
       if (item.writeUrl) {
-        const openLink = document.createElement('a');
-        openLink.href = item.writeUrl;
-        openLink.target = '_blank';
-        openLink.rel = 'noopener noreferrer';
+        openLink = item.promotedCompleted ? document.createElement('button') : document.createElement('a');
+        if (openLink.tagName === 'A') {
+          openLink.href = item.writeUrl;
+          openLink.target = '_blank';
+          openLink.rel = 'noopener noreferrer';
+        } else {
+          openLink.type = 'button';
+          openLink.disabled = true;
+          openLink.title = '홍보 완료 처리된 항목입니다.';
+        }
         openLink.className = 'perm-refresh-btn';
-        openLink.textContent = '글쓰기 열기';
+        openLink.textContent = item.promotedCompleted ? '홍보 완료' : '글쓰기 열기';
         openLink.style.textDecoration = 'none';
+        openLink.addEventListener('click', function () {
+          if (item.promotedCompleted) return;
+          item.lastOpenedAt = Date.now();
+          markStreamerPromoLinkOpenedFn({ promoKey: item.key, soopId: item.soopId || '' }).catch(function (err) {
+            console.warn('최근 열람 시간 저장 실패:', err);
+          });
+          setTimeout(function () { renderStreamerPromoLinksList(streamers); }, 0);
+          const recentBadge = identity.querySelector('.role-badge');
+          if (!recentBadge) {
+            const badge = document.createElement('span');
+            badge.className = 'role-badge';
+            badge.style.cssText = 'display:inline-block; margin-top:5px; background:rgba(194,91,128,0.12); color:#b74f78;';
+            badge.textContent = '최근 열어봄';
+            identity.appendChild(badge);
+          }
+        });
         row.appendChild(openLink);
       }
       streamerPromoLinksListEl.appendChild(row);
@@ -1957,6 +2032,17 @@
   }
 
   streamerPromoLinksRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
+  streamerPromoClearCompletedBtn.addEventListener('click', function () {
+    if (!window.confirm('홍보 완료로 체크된 항목을 모두 해제할까요?')) return;
+    streamerPromoClearCompletedBtn.disabled = true;
+    clearAllStreamerPromoCompletionFn().then(function (result) {
+      streamerPromoLinksStatusEl.textContent = (result.data.clearedCount || 0) + '건의 홍보 완료 체크를 해제했습니다.';
+      refreshStreamerPromoLinks();
+    }).catch(function (err) {
+      console.error('홍보 완료 전체 해제 실패:', err);
+      window.alert('전체 체크 해제에 실패했습니다: ' + (err && err.message ? err.message : err));
+    }).finally(function () { streamerPromoClearCompletedBtn.disabled = false; });
+  });
 
   promotedContentMigrateBtn.addEventListener('click', function () {
     promotedContentMigrateBtn.disabled = true;

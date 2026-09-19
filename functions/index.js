@@ -5,6 +5,7 @@ const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
+const STREAMER_PROMO_SEED = require('./streamer-promo-seed.json');
 
 initializeApp();
 
@@ -536,7 +537,8 @@ function normalizePromoUrl(value) {
   }
   const hostname = parsed.hostname.toLowerCase();
   const allowedHost = hostname === 'sooplive.com' || hostname.endsWith('.sooplive.com') ||
-    hostname === 'sooplive.co.kr' || hostname.endsWith('.sooplive.co.kr');
+    hostname === 'sooplive.co.kr' || hostname.endsWith('.sooplive.co.kr') ||
+    hostname === 'cafe.naver.com';
   if (parsed.protocol !== 'https:' || !allowedHost || parsed.username || parsed.password) {
     throw new HttpsError('invalid-argument', 'SOOP의 https 링크만 등록할 수 있습니다.');
   }
@@ -546,6 +548,24 @@ function normalizePromoUrl(value) {
 function promoStorageKey(verificationId, soopId) {
   const normalizedId = normalizeSoopId(soopId);
   return normalizedId || ('verification_' + String(verificationId || '').replace(/[^A-Za-z0-9_-]/g, '_'));
+}
+
+function getKnownPromoEntries(verifiedValue) {
+  const entries = STREAMER_PROMO_SEED.map(function (entry) {
+    return Object.assign({}, entry, { isSeed: true });
+  });
+  const byKey = {};
+  entries.forEach(function (entry) { byKey[entry.key] = entry; });
+  collectVerifiedStreamerEntries(verifiedValue).forEach(function (entry) {
+    const key = promoStorageKey(entry.id, entry.soopId);
+    if (byKey[key]) {
+      byKey[key].isVerified = true;
+      if (!byKey[key].nickname && entry.nickname) byKey[key].nickname = entry.nickname;
+      return;
+    }
+    byKey[key] = Object.assign({}, entry, { key: key, isVerified: true });
+  });
+  return Object.keys(byKey).map(function (key) { return byKey[key]; });
 }
 
 function collectVerifiedStreamerEntries(value) {
@@ -576,7 +596,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
     db.ref('adminCenter/streamerPromoLinks').get(),
   ]);
   const links = linksSnap.val() || {};
-  const streamers = collectVerifiedStreamerEntries(verifiedSnap.val());
+  const streamers = getKnownPromoEntries(verifiedSnap.val());
   streamers.sort(function (a, b) {
     return (a.nickname || a.soopId).localeCompare((b.nickname || b.soopId), 'ko') || a.soopId.localeCompare(b.soopId);
   });
@@ -588,7 +608,9 @@ const listStreamerPromoLinks = onCall(async (request) => {
         key: key,
         nickname: entry.nickname,
         soopId: entry.soopId,
-        writeUrl: typeof saved.writeUrl === 'string' ? saved.writeUrl : '',
+        writeUrl: typeof saved.writeUrl === 'string' && saved.writeUrl ? saved.writeUrl : (entry.writeUrl || ''),
+        promotedCompleted: saved.promotedCompleted === true,
+        lastOpenedAt: saved.lastOpenedAt || null,
         updatedAt: saved.updatedAt || null,
       };
     }),
@@ -598,21 +620,23 @@ const listStreamerPromoLinks = onCall(async (request) => {
 const saveStreamerPromoLink = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const data = request.data || {};
+  const requestedPromoKey = String(data.promoKey || '').trim().toLowerCase();
   const requestedSoopId = normalizeSoopId(data.soopId);
   const requestedVerificationId = String(data.verificationId || '').trim();
   const writeUrl = normalizePromoUrl(data.writeUrl);
-  if (!requestedSoopId && !requestedVerificationId) {
+  if (!requestedPromoKey && !requestedSoopId && !requestedVerificationId) {
     throw new HttpsError('invalid-argument', '인증 스트리머 식별자가 필요합니다.');
   }
 
   const db = getDatabase();
   const verifiedSnap = await db.ref('streamerVerifications').get();
-  const entries = collectVerifiedStreamerEntries(verifiedSnap.val());
+  const entries = getKnownPromoEntries(verifiedSnap.val());
   const entry = entries.find(function (item) {
-    return (requestedSoopId && item.soopId === requestedSoopId) ||
-      (!requestedSoopId && requestedVerificationId === item.id);
+    return (requestedPromoKey && item.key === requestedPromoKey) ||
+      (!requestedPromoKey && requestedSoopId && item.soopId === requestedSoopId) ||
+      (!requestedPromoKey && !requestedSoopId && requestedVerificationId === item.id);
   });
-  if (!entry) throw new HttpsError('failed-precondition', '현재 인증된 스트리머만 등록할 수 있습니다.');
+  if (!entry) throw new HttpsError('failed-precondition', '등록된 스트리머만 수정할 수 있습니다.');
 
   const key = promoStorageKey(entry.id, entry.soopId);
   const ref = db.ref('adminCenter/streamerPromoLinks/' + key);
@@ -632,6 +656,82 @@ const saveStreamerPromoLink = onCall(async (request) => {
   });
   await logToAdminAuditLog(db, request, '스트리머 홍보글 링크 저장', entry.nickname || entry.soopId);
   return { ok: true, removed: false };
+});
+
+async function requireKnownPromoEntry(db, data) {
+  const requestedKey = String((data || {}).promoKey || '').trim().toLowerCase();
+  const requestedSoopId = normalizeSoopId((data || {}).soopId);
+  const requestedVerificationId = String((data || {}).verificationId || '').trim();
+  if (!requestedKey && !requestedSoopId && !requestedVerificationId) {
+    throw new HttpsError('invalid-argument', '스트리머 식별자가 필요합니다.');
+  }
+  const verifiedSnap = await db.ref('streamerVerifications').get();
+  const entries = getKnownPromoEntries(verifiedSnap.val());
+  const entry = entries.find(function (item) {
+    return (requestedKey && item.key === requestedKey) ||
+      (!requestedKey && requestedSoopId && item.soopId === requestedSoopId) ||
+      (!requestedKey && !requestedSoopId && requestedVerificationId === item.id);
+  });
+  if (!entry) throw new HttpsError('not-found', '등록된 스트리머를 찾을 수 없습니다.');
+  return entry;
+}
+
+const markStreamerPromoLinkOpened = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const db = getDatabase();
+  const entry = await requireKnownPromoEntry(db, request.data || {});
+  const ref = db.ref('adminCenter/streamerPromoLinks/' + entry.key);
+  const lastOpenedAt = Date.now();
+  await ref.update({
+    nickname: entry.nickname,
+    soopId: entry.soopId || null,
+    lastOpenedAt: lastOpenedAt,
+    lastOpenedBy: adminUid,
+  });
+  return { ok: true, lastOpenedAt: lastOpenedAt };
+});
+
+const setStreamerPromoCompletion = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const data = request.data || {};
+  if (typeof data.completed !== 'boolean') {
+    throw new HttpsError('invalid-argument', 'completed 값은 true/false여야 합니다.');
+  }
+  const db = getDatabase();
+  const entry = await requireKnownPromoEntry(db, data);
+  const ref = db.ref('adminCenter/streamerPromoLinks/' + entry.key);
+  if (!data.completed) {
+    await ref.update({ promotedCompleted: null, promotedAt: null, promotedBy: null });
+    return { ok: true, completed: false };
+  }
+  const now = Date.now();
+  await ref.update({
+    nickname: entry.nickname,
+    soopId: entry.soopId || null,
+    promotedCompleted: true,
+    promotedAt: now,
+    promotedBy: adminUid,
+  });
+  return { ok: true, completed: true, promotedAt: now };
+});
+
+const clearAllStreamerPromoCompletion = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const snap = await db.ref('adminCenter/streamerPromoLinks').get();
+  const data = snap.val() || {};
+  const updates = {};
+  let clearedCount = 0;
+  Object.keys(data).forEach(function (key) {
+    if (data[key] && data[key].promotedCompleted === true) {
+      updates['adminCenter/streamerPromoLinks/' + key + '/promotedCompleted'] = null;
+      updates['adminCenter/streamerPromoLinks/' + key + '/promotedAt'] = null;
+      updates['adminCenter/streamerPromoLinks/' + key + '/promotedBy'] = null;
+      clearedCount += 1;
+    }
+  });
+  if (clearedCount) await db.ref().update(updates);
+  return { ok: true, clearedCount: clearedCount };
 });
 
 // 24번 — 디스코드 웹훅 검수 알림. 웹훅 URL은 비밀번호와 동급인 민감정보라
@@ -1826,6 +1926,9 @@ module.exports = {
   migratePromotedStreamers,
   listStreamerPromoLinks,
   saveStreamerPromoLink,
+  markStreamerPromoLinkOpened,
+  setStreamerPromoCompletion,
+  clearAllStreamerPromoCompletion,
   listStreamerVerificationOverview,
   listAuditLogOverview,
   getSeriesConfig,
