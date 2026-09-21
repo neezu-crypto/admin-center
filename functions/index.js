@@ -413,6 +413,92 @@ const deleteDevbarLink = onCall(async (request) => {
   return { ok: true };
 });
 
+// 통합 관리 센터 운영 도구 — Adult Image Generator 링크 모음. 관리자만 조회·저장할
+// 수 있으며 링크, 메모, 정렬 순서를 하나의 노드에 보관한다. 최초 조회 시 기본 목록을
+// 서버에서 시드해 여러 브라우저의 관리자 세션에서도 동일한 목록을 사용한다.
+const ADULT_IMAGE_GENERATOR_LINKS_PATH = 'adminCenter/adultImageGeneratorLinks';
+const ADULT_IMAGE_GENERATOR_URL_RE = /^https:\/\/\S+$/;
+const ADULT_IMAGE_GENERATOR_ID_RE = /^[a-z0-9][a-z0-9_-]{1,48}$/;
+const DEFAULT_ADULT_IMAGE_GENERATOR_LINKS = [
+  { id: 'kenerateai', title: 'Kenerate AI', url: 'https://kenerateai.com/app/image', memo: '', order: 0 },
+  { id: 'goenhance', title: 'GoEnhance AI', url: 'https://www.goenhance.ai/app/text-to-image', memo: '', order: 1 },
+  { id: 'aireel', title: 'AI Reel', url: 'https://www.aireel.net/ko/image-to-image', memo: '', order: 2 },
+  { id: 'weshop', title: 'WeShop AI', url: 'https://www.weshop.ai/ko/tools/creative-suite-ai-image', memo: '', order: 3 },
+  { id: 'pixai', title: 'PixAI', url: 'https://pixai.art/ko/generator/image', memo: '', order: 4 },
+  { id: 'senzia', title: 'Senzia', url: 'https://www.senzia.cc/ko/ai-image-generator', memo: '', order: 5 },
+  { id: 'pollo', title: 'Pollo AI', url: 'https://pollo.ai/ko/ai-image-generator', memo: '', order: 6 },
+  { id: 'mage', title: 'Mage', url: 'https://www.mage.space/explore', memo: '', order: 7 },
+  { id: 'live3d', title: 'Live3D', url: 'https://live3d.io/ai-image-editor', memo: '', order: 8 },
+];
+
+function adultImageGeneratorLinksFromValue(value) {
+  if (!value || typeof value !== 'object') return [];
+  return Object.keys(value).map(function (id) {
+    return Object.assign({ id: id }, value[id] || {});
+  }).filter(function (item) {
+    return typeof item.url === 'string' && ADULT_IMAGE_GENERATOR_URL_RE.test(item.url);
+  }).sort(function (a, b) {
+    return (Number(a.order) || 0) - (Number(b.order) || 0);
+  }).map(function (item, index) {
+    return {
+      id: item.id,
+      title: String(item.title || item.id).slice(0, 80),
+      url: item.url,
+      memo: String(item.memo || '').slice(0, 200),
+      order: index,
+    };
+  });
+}
+
+const getAdultImageGeneratorLinks = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const node = db.ref(ADULT_IMAGE_GENERATOR_LINKS_PATH);
+  const snap = await node.get();
+  if (!snap.exists()) {
+    const seeded = {};
+    DEFAULT_ADULT_IMAGE_GENERATOR_LINKS.forEach(function (item) { seeded[item.id] = item; });
+    await node.set(seeded);
+    return { links: DEFAULT_ADULT_IMAGE_GENERATOR_LINKS };
+  }
+  return { links: adultImageGeneratorLinksFromValue(snap.val()) };
+});
+
+const saveAdultImageGeneratorLinks = onCall(async (request) => {
+  await requireAdmin(request);
+  const links = request.data && request.data.links;
+  if (!Array.isArray(links) || links.length > 100) {
+    throw new HttpsError('invalid-argument', '링크 목록이 올바르지 않습니다.');
+  }
+  const seen = new Set();
+  const normalized = links.map(function (item, index) {
+    const id = String(item && item.id || '').trim();
+    const title = String(item && item.title || '').trim();
+    const url = String(item && item.url || '').trim();
+    const memo = String(item && item.memo || '').trim();
+    if (!ADULT_IMAGE_GENERATOR_ID_RE.test(id) || seen.has(id)) {
+      throw new HttpsError('invalid-argument', '링크 식별자가 올바르지 않거나 중복됩니다.');
+    }
+    if (!title || title.length > 80) {
+      throw new HttpsError('invalid-argument', '링크 이름은 1~80자로 입력해주세요.');
+    }
+    if (!ADULT_IMAGE_GENERATOR_URL_RE.test(url) || url.length > 500) {
+      throw new HttpsError('invalid-argument', 'https://로 시작하는 올바른 링크를 입력해주세요.');
+    }
+    if (memo.length > 200) {
+      throw new HttpsError('invalid-argument', '메모는 200자 이내로 입력해주세요.');
+    }
+    seen.add(id);
+    return { id, title, url, memo, order: index };
+  });
+  const data = {};
+  normalized.forEach(function (item) { data[item.id] = item; });
+  const db = getDatabase();
+  await db.ref(ADULT_IMAGE_GENERATOR_LINKS_PATH).set(data);
+  await logToAdminAuditLog(db, request, 'Adult Image Generator 링크 저장', normalized.length + '개');
+  return { ok: true, links: normalized };
+});
+
 // 22번 — 게시글 홍보 현황(게임 전체로 확장). StreamBet-Market 전용이던
 // bettingMarket/promotedStreamers 개념을 GAME_CATALOG 어떤 게임이든 쓸 수 있는
 // 공용 노드로 옮긴다. 결제·승인·대상 검증이 전혀 없는 "자유 텍스트 라벨 + 시각"
@@ -1957,6 +2043,8 @@ module.exports = {
   revokeAllStreamerPermissions,
   setDevbarLink,
   deleteDevbarLink,
+  getAdultImageGeneratorLinks,
+  saveAdultImageGeneratorLinks,
   listPromotedContent,
   addPromotedContent,
   removePromotedContent,

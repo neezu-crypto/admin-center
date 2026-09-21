@@ -402,6 +402,27 @@
   .session-launcher-badge { min-width: 18px; padding: 2px 6px; border-radius: 999px; background: rgba(226,85,79,0.14); color: #c94742; font-size: 10px; text-align: center; }
   .session-launcher-status { margin-top: 10px; min-height: 18px; color: var(--ink-mute); font-size: 11.5px; }
   .session-panel-placeholder { display: none; }
+  .external-links-list { display: flex; flex-direction: column; gap: 8px; }
+  .external-link-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 12px; border: 1px solid rgba(20,20,22,0.1); border-radius: 14px;
+    background: rgba(255,253,250,0.9); transition: border-color .16s, box-shadow .16s;
+  }
+  .external-link-row.dragging { opacity: .55; border-color: #e8462c; box-shadow: 0 8px 18px -12px rgba(232,70,44,.6); }
+  .external-link-handle {
+    flex: 0 0 26px; color: #8b93a1; cursor: grab; user-select: none; touch-action: none;
+    font-size: 18px; text-align: center; line-height: 1; padding: 4px 0;
+  }
+  .external-link-handle:active { cursor: grabbing; }
+  .external-link-number { flex: 0 0 22px; color: #8b93a1; font-size: 12px; font-weight: 800; text-align: center; }
+  .external-link-main { flex: 1 1 260px; min-width: 180px; display: flex; flex-direction: column; gap: 3px; }
+  .external-link-main a { color: #b93724; font-weight: 800; font-size: 13px; overflow-wrap: anywhere; }
+  .external-link-main span { color: var(--ink-mute); font-size: 11px; overflow-wrap: anywhere; }
+  .external-link-memo { flex: 1 1 220px; min-width: 160px; }
+  .external-link-memo input { width: 100%; box-sizing: border-box; }
+  .external-link-row button { flex: 0 0 auto; }
+  .external-links-list.is-loading { opacity: .65; pointer-events: none; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
   @media (max-width: 1400px) {
     .quicknav { display: none !important; }
   }
@@ -638,6 +659,21 @@
       </p>
       <button id="bootstrapAdminUidBtn" class="perm-refresh-btn" type="button">내 uid 등록하기</button>
     </div>
+
+    <h2 class="card-group-header">운영 도구</h2>
+    <div class="card" id="section-adult-image-generator">
+      <h2>Adult Image Generator</h2>
+      <p class="hint">
+        이미지 생성 도구 링크를 한곳에서 관리합니다. 링크를 클릭하면 새 탭으로 열리고,
+        메모는 관리자 계정에 저장됩니다. 왼쪽 핸들을 드래그해 순서를 바꾼 뒤 저장하세요.
+      </p>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+        <button id="adultImageGeneratorRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+        <button id="adultImageGeneratorSaveBtn" class="perm-refresh-btn" type="button">변경사항 저장</button>
+        <span id="adultImageGeneratorStatus" class="hint" style="margin:0;" role="status" aria-live="polite"></span>
+      </div>
+      <div id="adultImageGeneratorLinksList" class="external-links-list"></div>
+    </div>
   </div>
 
   <!-- 레거시 호환용 셸. 통합 관리 센터는 관리자 전용이므로 항상 숨긴다. -->
@@ -845,6 +881,8 @@
   const sendAdminChatMessageFn = httpsCallable(functions, 'sendAdminChatMessage');
   const setDevbarLinkFn = httpsCallable(functions, 'setDevbarLink');
   const deleteDevbarLinkFn = httpsCallable(functions, 'deleteDevbarLink');
+  const getAdultImageGeneratorLinksFn = httpsCallable(functions, 'getAdultImageGeneratorLinks');
+  const saveAdultImageGeneratorLinksFn = httpsCallable(functions, 'saveAdultImageGeneratorLinks');
   const listPromotedContentFn = httpsCallable(functions, 'listPromotedContent');
   const addPromotedContentFn = httpsCallable(functions, 'addPromotedContent');
   const removePromotedContentFn = httpsCallable(functions, 'removePromotedContent');
@@ -975,6 +1013,10 @@
   const skinPurchasesListEl = document.getElementById('skinPurchasesList');
   const seriesConfigListEl = document.getElementById('seriesConfigList');
   const devbarLinksListEl = document.getElementById('devbarLinksList');
+  const adultImageGeneratorLinksListEl = document.getElementById('adultImageGeneratorLinksList');
+  const adultImageGeneratorRefreshBtn = document.getElementById('adultImageGeneratorRefreshBtn');
+  const adultImageGeneratorSaveBtn = document.getElementById('adultImageGeneratorSaveBtn');
+  const adultImageGeneratorStatusEl = document.getElementById('adultImageGeneratorStatus');
   const promotedContentListEl = document.getElementById('promotedContentList');
   const streamerPromoLinksRefreshBtn = document.getElementById('streamerPromoLinksRefreshBtn');
   const streamerPromoClearCompletedBtn = document.getElementById('streamerPromoClearCompletedBtn');
@@ -1064,6 +1106,10 @@
     {
       id: 'devbar', label: 'devbar 구성', icon: '🔗', permission: 'devbarEdit',
       sections: ['section-devbar'],
+    },
+    {
+      id: 'adult-image-generator', label: 'Adult Image Generator', icon: '🖼️', role: 'admin',
+      sections: ['section-adult-image-generator'],
     },
     {
       id: 'shared', label: '공용 도구', icon: '💬', roles: ['admin', 'streamer'],
@@ -1375,6 +1421,8 @@
         jobs.push(refreshDiscordWebhookStatus());
       } else if (sessionId === 'devbar') {
         jobs.push(refreshDevbarLinks());
+      } else if (sessionId === 'adult-image-generator') {
+        jobs.push(refreshAdultImageGeneratorLinks());
       } else if (sessionId === 'shared') {
         renderPermissionViewList();
         startAdminChatSubscription();
@@ -1826,6 +1874,118 @@
     });
     devbarLinksListEl.appendChild(addRow);
   }
+
+  // Adult Image Generator 링크는 관리자 전용 callable을 통해서만 저장한다.
+  // 링크 자체와 메모·정렬 순서를 한 번에 저장해 드래그 중 일부 항목만 반영되는
+  // 상태를 피한다. 새 세션을 처음 열면 서버가 기본 목록을 자동으로 준비한다.
+  let adultImageGeneratorLinks = [];
+
+  async function refreshAdultImageGeneratorLinks() {
+    adultImageGeneratorStatusEl.textContent = '불러오는 중...';
+    adultImageGeneratorLinksListEl.classList.add('is-loading');
+    try {
+      const result = await getAdultImageGeneratorLinksFn();
+      adultImageGeneratorLinks = Array.isArray(result.data.links) ? result.data.links : [];
+      renderAdultImageGeneratorLinks();
+      adultImageGeneratorStatusEl.textContent = adultImageGeneratorLinks.length + '개 링크';
+    } catch (e) {
+      console.error('Adult Image Generator 링크 조회 실패:', e);
+      adultImageGeneratorLinksListEl.innerHTML = '<div class="empty-state">링크를 불러오지 못했습니다.</div>';
+      adultImageGeneratorStatusEl.textContent = '조회 실패';
+    } finally {
+      adultImageGeneratorLinksListEl.classList.remove('is-loading');
+    }
+  }
+
+  function renderAdultImageGeneratorLinks() {
+    adultImageGeneratorLinksListEl.innerHTML = '';
+    if (!adultImageGeneratorLinks.length) {
+      adultImageGeneratorLinksListEl.innerHTML = '<div class="empty-state">등록된 링크가 없습니다.</div>';
+      return;
+    }
+    adultImageGeneratorLinks.forEach(function (link, index) {
+      const row = document.createElement('div');
+      row.className = 'external-link-row';
+      row.draggable = true;
+      row.dataset.linkId = link.id;
+      row.innerHTML =
+        '<span class="external-link-handle" title="드래그해 순서 변경" aria-label="순서 변경" role="button">⠿</span>' +
+        '<span class="external-link-number">' + (index + 1) + '</span>' +
+        '<div class="external-link-main">' +
+        '<a href="' + escapeHtml(link.url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(link.title || link.url) + '</a>' +
+        '<span>' + escapeHtml(link.url) + '</span>' +
+        '</div>' +
+        '<label class="external-link-memo"><span class="sr-only">메모</span>' +
+        '<input type="text" maxlength="200" value="' + escapeHtml(link.memo || '') + '" placeholder="메모 작성" style="' + DEVBAR_INPUT_STYLE + '"></label>';
+
+      row.addEventListener('dragstart', function (event) {
+        row.classList.add('dragging');
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', link.id);
+        }
+      });
+      row.addEventListener('dragend', function () {
+        row.classList.remove('dragging');
+        adultImageGeneratorLinksListEl.querySelectorAll('.external-link-row').forEach(function (item) {
+          item.classList.remove('drag-over');
+        });
+      });
+      row.addEventListener('dragover', function (event) {
+        event.preventDefault();
+        const dragging = adultImageGeneratorLinksListEl.querySelector('.external-link-row.dragging');
+        if (!dragging || dragging === row) return;
+        const rect = row.getBoundingClientRect();
+        const before = event.clientY < rect.top + rect.height / 2;
+        adultImageGeneratorLinksListEl.insertBefore(dragging, before ? row : row.nextSibling);
+      });
+      row.addEventListener('drop', function (event) {
+        event.preventDefault();
+        persistAdultImageGeneratorLinks('순서를 저장하는 중...');
+      });
+      adultImageGeneratorLinksListEl.appendChild(row);
+    });
+  }
+
+  function collectAdultImageGeneratorLinksFromDom() {
+    return Array.from(adultImageGeneratorLinksListEl.querySelectorAll('.external-link-row')).map(function (row, index) {
+      const original = adultImageGeneratorLinks.find(function (link) { return link.id === row.dataset.linkId; }) || {};
+      const memoInput = row.querySelector('input');
+      return {
+        id: row.dataset.linkId,
+        title: original.title || '',
+        url: original.url || '',
+        memo: memoInput ? memoInput.value : '',
+        order: index,
+      };
+    });
+  }
+
+  async function persistAdultImageGeneratorLinks(statusText) {
+    const links = collectAdultImageGeneratorLinksFromDom();
+    if (!links.length) return;
+    adultImageGeneratorSaveBtn.disabled = true;
+    adultImageGeneratorRefreshBtn.disabled = true;
+    adultImageGeneratorStatusEl.textContent = statusText || '저장하는 중...';
+    try {
+      await saveAdultImageGeneratorLinksFn({ links: links });
+      adultImageGeneratorLinks = links;
+      renderAdultImageGeneratorLinks();
+      adultImageGeneratorStatusEl.textContent = '저장했습니다.';
+    } catch (e) {
+      console.error('Adult Image Generator 링크 저장 실패:', e);
+      adultImageGeneratorStatusEl.textContent = '저장 실패';
+      window.alert('저장에 실패했습니다: ' + (e && e.message ? e.message : e));
+    } finally {
+      adultImageGeneratorSaveBtn.disabled = false;
+      adultImageGeneratorRefreshBtn.disabled = false;
+    }
+  }
+
+  adultImageGeneratorRefreshBtn.addEventListener('click', refreshAdultImageGeneratorLinks);
+  adultImageGeneratorSaveBtn.addEventListener('click', function () {
+    persistAdultImageGeneratorLinks();
+  });
 
   // 22번 — 게시글 홍보 현황(게임 전체로 확장). 단발성 조회(실시간 구독 없음) —
   // 08번 콘텐츠 동결 카드와 동일한 트레이드오프(변경 후 다시 조회해서 반영).
@@ -3580,6 +3740,7 @@
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
     { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin', permKey: 'devbarEdit' },
+    { id: 'section-adult-image-generator', label: '🖼️ Adult Image Generator', role: 'admin', group: '운영 도구' },
     { id: 'section-granted-permissions', label: '🗝️ 부여받은 권한', role: 'streamer' },
     { id: 'section-chat', label: '💬 채팅', role: 'shared' },
   ];
