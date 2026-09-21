@@ -71,48 +71,31 @@ async function isVerifiedStreamerUid(uid) {
   return snap.exists();
 }
 
+// 과거 인증 스트리머 위임을 위해 사용하던 이름은 호환성을 위해 남겨두되,
+// 통합 관리 센터를 관리자 전용으로 전환한 뒤에는 모든 호출을 관리자 판정으로
+// 수렴시킨다. 클라이언트 UI를 우회해 callable을 직접 호출하는 경우도 동일하게 차단한다.
 async function requireAdminOrVerifiedStreamer(request) {
-  const uid = requireAuth(request);
-  if (await isAdminUid(uid)) return { uid, role: 'admin' };
-  const email = request.auth.token && request.auth.token.email;
-  if (isAdminEmail(email)) {
-    console.warn('관리자 판별 이메일 폴백 사용됨(uid 미등록):', uid);
-    return { uid, role: 'admin' };
-  }
-  if (await isVerifiedStreamerUid(uid)) return { uid, role: 'streamer' };
-  throw new HttpsError('permission-denied', '관리자 또는 인증된 스트리머만 이용할 수 있습니다.');
+  const uid = await requireAdmin(request);
+  return { uid, role: 'admin' };
 }
 
-// 07번 4단계 — 위임 권한 카탈로그의 실제 서버측 강제. 관리자는 항상 통과하고,
-// 인증 스트리머는 adminCenter/streamerPermissions/{permissionKey}가 true로
-// 켜져 있을 때만 통과한다(PERMISSION_CATALOG는 UI 표시용일 뿐, 실제 권한은
-// 여기서만 검증한다 — 클라이언트가 체크박스 상태를 위조해도 서버가 다시 확인).
+// 과거 위임 권한 카탈로그용 이름도 관리자 전용 검증으로 고정한다. permissionKey는
+// 호출부 호환을 위해 받지만 더 이상 스트리머에게 권한을 열어주지 않는다.
 async function requireAdminOrDelegatedPermission(request, permissionKey) {
-  const uid = requireAuth(request);
-  if (await isAdminUid(uid)) return { uid, role: 'admin' };
-  const email = request.auth.token && request.auth.token.email;
-  if (isAdminEmail(email)) {
-    console.warn('관리자 판별 이메일 폴백 사용됨(uid 미등록):', uid);
-    return { uid, role: 'admin' };
-  }
-  if (await isVerifiedStreamerUid(uid)) {
-    const db = getDatabase();
-    const granted = (await db.ref('adminCenter/streamerPermissions/' + permissionKey).get()).val();
-    if (granted === true) return { uid, role: 'streamer' };
-  }
-  throw new HttpsError('permission-denied', '이 작업을 수행할 권한이 없습니다.');
+  void permissionKey;
+  const uid = await requireAdmin(request);
+  return { uid, role: 'admin' };
 }
 
-// 통합 관리 센터 — 인증 스트리머 전원에게 공통으로 적용되는 위임 권한 목록을 읽는다.
-// 관리자·인증 스트리머 둘 다 호출 가능(화면에 보여줄 상태를 그대로 반환).
+// 통합 관리 센터 — 관리자만 권한 상태를 조회할 수 있다.
 const getAdminCenterState = onCall(async (request) => {
-  const { role } = await requireAdminOrVerifiedStreamer(request);
+  await requireAdmin(request);
   const db = getDatabase();
   const [permsSnap, killswitchSnap] = await Promise.all([
     db.ref('adminCenter/streamerPermissions').get(),
     db.ref('adminCenter/killswitchLastRun').get(),
   ]);
-  return { role, permissions: permsSnap.val() || {}, killswitchLastRun: killswitchSnap.val() || null };
+  return { role: 'admin', permissions: permsSnap.val() || {}, killswitchLastRun: killswitchSnap.val() || null };
 });
 
 // 통합 관리 센터의 초기 세션 배지용 경량 요약. 전체 목록을 반환하지 않고 각 큐에
@@ -127,7 +110,8 @@ async function hasAnyEntry(db, path, status) {
 }
 
 const getAdminSessionSummary = onCall(async (request) => {
-  const { role } = await requireAdminOrVerifiedStreamer(request);
+  await requireAdmin(request);
+  const role = 'admin';
   const permissions = (await getDatabase().ref('adminCenter/streamerPermissions').get()).val() || {};
   const db = getDatabase();
   const canReview = role === 'admin' || permissions.reviewQueue === true;
@@ -257,7 +241,7 @@ const listStreamerVerificationOverview = onCall(async (request) => {
 // 보여준다. 관리자는 항상, 인증 스트리머는 'viewMonitoring' 위임 권한이 있을 때만.
 const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
-  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  await requireAdmin(request);
   const db = getDatabase();
   const [bmLogSnap, smLogSnap, rgLogSnap, galLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
@@ -394,7 +378,7 @@ const DEVBAR_GAME_ID_RE = /^[a-zA-Z0-9_-]{1,40}$/;
 const setDevbarLink = onCall(async (request) => {
   // 07번 4단계 — devbar 링크 편집은 위임 권한 카탈로그의 첫 항목('devbarEdit').
   // 신원·재화에 영향이 없는 낮은 리스크 작업이라 관리자가 켜면 인증 스트리머도 쓸 수 있다.
-  await requireAdminOrDelegatedPermission(request, 'devbarEdit');
+  await requireAdmin(request);
   const { gameId, label, url, order } = request.data || {};
   const trimmedGameId = String(gameId || '').trim();
   if (!DEVBAR_GAME_ID_RE.test(trimmedGameId)) {
@@ -419,7 +403,7 @@ const setDevbarLink = onCall(async (request) => {
 });
 
 const deleteDevbarLink = onCall(async (request) => {
-  await requireAdminOrDelegatedPermission(request, 'devbarEdit');
+  await requireAdmin(request);
   const { gameId } = request.data || {};
   const trimmedGameId = String(gameId || '').trim();
   if (!trimmedGameId) throw new HttpsError('invalid-argument', 'gameId가 필요합니다.');
@@ -1152,11 +1136,8 @@ const PURCHASE_SOURCES = [
 
 const getPurchaseOverview = onCall(async (request) => {
   const uidFilter = String((request.data || {}).uid || '').trim();
-  // uid 지정 조회(유저 검색/상세)는 특정 개인의 구매 이력을 그대로 보여주는
-  // 민감한 조회라 관리자 전용으로 유지한다. uid 없이 부르는 전체/유형별 목록
-  // 조회(예: 배팅시장 스킨 구매 내역 카드)만 위임 권한으로도 허용한다.
-  if (uidFilter) await requireAdmin(request);
-  else await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  // 개인 조회와 전체/유형별 목록 모두 관리자 전용으로 유지한다.
+  await requireAdmin(request);
   // itemType 필터 - 배팅시장 스킨 구매 내역처럼 특정 유형만 전체 목록으로 보고
   // 싶을 때 쓴다. 필터 없이 전체를 불러오면 12개 소스가 하나의 상위 100건
   // 캡(PURCHASE_OVERVIEW_LIMIT)을 나눠 써서, 빈도가 낮은 유형(스킨 등)이 밀려날
@@ -1242,11 +1223,10 @@ const sampleConcurrentUsers = onSchedule('every 5 minutes', async function () {
   }));
 });
 
-// 관리 센터 UI가 호출하는 조회 전용 함수 — 앱별 최근 hours시간의 시간당 최고
-// 접속자 수 시계열을 반환한다. 관리자는 항상, 인증 스트리머는 'viewMonitoring'
-// 위임 권한이 있을 때만.
+// 관리 센터 UI가 호출하는 관리자 전용 조회 함수 — 앱별 최근 hours시간의 시간당
+// 최고 접속자 수 시계열을 반환한다.
 const getVisitorAnalytics = onCall(async (request) => {
-  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  await requireAdmin(request);
   const hours = Math.min(Math.max(parseInt((request.data || {}).hours, 10) || 24, 1), 168);
   const db = getDatabase();
   const now = Date.now();
@@ -1272,9 +1252,9 @@ const getVisitorAnalytics = onCall(async (request) => {
 // 복사" 클릭 횟수. presetGallery는 interior-3d-viewer가 소유한 노드지만, Admin
 // SDK는 그 저장소의 RTDB 규칙과 무관하게 항상 읽을 수 있다(06번 원칙과 동일하게,
 // 새 로직을 그 저장소에 또 만들지 않고 이미 있는 데이터를 그대로 읽기만 한다).
-// 관리자는 항상, 인증 스트리머는 'viewMonitoring' 위임 권한이 있을 때만.
+// 관리자 전용 조회 함수.
 const getGalleryStats = onCall(async (request) => {
-  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  await requireAdmin(request);
   const db = getDatabase();
   const snap = await db.ref('presetGallery').get();
   const data = snap.val() || {};
@@ -1298,7 +1278,7 @@ const getGalleryStats = onCall(async (request) => {
 // 여기서는 원본 choiceLog를 훑지 않고 그 카운터만 그대로 읽는다 — getGalleryStats와
 // 동일한 원칙(다른 저장소 소유 데이터를 Admin SDK로 읽기만, 새 로직 중복 없음).
 const getLifeGameStats = onCall(async (request) => {
-  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  await requireAdmin(request);
   const db = getDatabase();
   const snap = await db.ref('lifeGame/stats').get();
   const data = snap.val() || {};
@@ -1332,7 +1312,7 @@ const getLifeGameStats = onCall(async (request) => {
 const LIFEGAME_BOT_PERSONALITIES = ['wholesome', 'villain', 'explorer', 'gambler', 'romantic', 'workaholic'];
 
 const getLifeGameBotConfig = onCall(async (request) => {
-  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  await requireAdmin(request);
   const db = getDatabase();
   const [configSnap, botsSnap] = await Promise.all([
     db.ref('lifeGame/botConfig').get(),
@@ -1843,7 +1823,7 @@ async function recordOnyuServerEvent(request, eventName, extra) {
 }
 
 const getOnyuStats = onCall(async (request) => {
-  await requireAdminOrDelegatedPermission(request, 'viewMonitoring');
+  await requireAdmin(request);
   const days = Math.min(Math.max(Number(request.data && request.data.days) || 14, 1), 90);
   const db = getDatabase();
   const dates = [];
