@@ -106,7 +106,21 @@ async function hasAnyEntry(db, path, status) {
   let queryRef = db.ref(path);
   if (status) queryRef = queryRef.orderByChild('status').equalTo(status);
   queryRef = queryRef.limitToFirst(1);
-  return (await queryRef.get()).exists();
+  try {
+    return (await queryRef.get()).exists();
+  } catch (error) {
+    // RTDB 규칙에 해당 인덱스가 빠진 경우에도 관리자 요약 전체가 500으로
+    // 실패하지 않도록 서버에서만 안전하게 보완한다. 규칙에는 인덱스를 계속
+    // 추가하되, 배포 지연·자매 저장소 규칙 불일치 동안의 장애를 흡수한다.
+    if (!status) throw error;
+    console.warn('세션 요약 인덱스 조회 실패 — 서버 보완 조회:', path, error && error.message);
+    const snapshot = await db.ref(path).get();
+    const value = snapshot.val();
+    if (!value || typeof value !== 'object') return false;
+    return Object.keys(value).some(function (key) {
+      return value[key] && value[key].status === status;
+    });
+  }
 }
 
 const getAdminSessionSummary = onCall(async (request) => {
