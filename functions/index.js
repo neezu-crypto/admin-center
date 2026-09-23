@@ -1038,6 +1038,7 @@ const STREAMER_VERIFY_SOURCE_LABELS = {
   'life-game': '인생게임',
   'rocket-game': '로켓게임',
   'streamer-gallery': '갤러리',
+  'streamer-messenger': '스트리머 메신저',
   'onyu-vn': '온 이유',
 };
 const notifyStockVerifyRequest = onValueCreated('/streamerVerificationRequests/{id}', async (event) => {
