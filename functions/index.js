@@ -257,17 +257,19 @@ const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const [bmLogSnap, smLogSnap, rgLogSnap, galLogSnap] = await Promise.all([
+  const [bmLogSnap, smLogSnap, rgLogSnap, galLogSnap, messengerLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('adminAuditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('rocketGame/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('gallery/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    db.ref('streamerMessenger/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
   ]);
 
   const bmLog = bmLogSnap.val() || {};
   const smLog = smLogSnap.val() || {};
   const rgLog = rgLogSnap.val() || {};
   const galLog = galLogSnap.val() || {};
+  const messengerLog = messengerLogSnap.val() || {};
 
   const entries = [];
   Object.keys(bmLog).forEach(function (id) {
@@ -302,6 +304,13 @@ const listAuditLogOverview = onCall(async (request) => {
       actorName: e.actorName, action: e.action, detail: e.detail,
     });
   });
+  Object.keys(messengerLog).forEach(function (id) {
+    const e = messengerLog[id];
+    entries.push({
+      id: id, source: 'streamerMessenger', at: e.at,
+      actorName: e.actorName || e.actorUid, action: e.action, detail: e.detail,
+    });
+  });
 
   entries.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
   return { entries: entries.slice(0, AUDIT_OVERVIEW_LIMIT) };
@@ -321,6 +330,7 @@ const GAME_CATALOG = [
   { id: 'lifeGame', name: '스트리머 인생게임' },
   { id: 'rocketGame', name: '로켓 게임' },
   { id: 'gallery', name: '스트리머 갤러리' },
+  { id: 'streamerMessenger', name: '스트리머 메신저' },
   { id: 'onyuVn', name: '당신이 여기에 온 이유' },
 ];
 
@@ -1045,6 +1055,13 @@ const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}'
 const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval');
 const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval');
 const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
+const notifyMessengerReport = onValueCreated('/streamerMessenger/reports/{id}', async (event) => {
+  const reportId = String(event.params.id || '').replace(/[\r\n`]/g, '').slice(0, 100);
+  const data = event.data.val() || {};
+  const at = Number(data.createdAt) || Date.now();
+  // 신고자의 대화 내용, UID, 사유는 Discord로 보내지 않는다. 자세한 검토는 관리자 전용 페이지에서 한다.
+  await sendDiscordNotification('🔔 **새 스트리머 메신저 신고**\n신고 ID: `' + reportId + '`\n접수 시각: ' + new Date(at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) + '\n' + deepLink('section-review-queue'));
+});
 const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)', 'section-listing-request');
 const notifyOnyuViewerAccessRequest = onValueCreated('/onyuVn/viewerAccessAlerts/{id}', async (event) => {
   const data = event.data.val() || {};
@@ -1284,7 +1301,7 @@ const getPurchaseOverview = onCall(async (request) => {
 // 표준 경로에 { lastSeen } 형태로 쓰기 시작한 뒤에만 실제로 값이 잡힌다(각 저장소
 // 쪽 작업과 짝을 이룸). lifeGame은 자체 lifeGame/presence 경로(다른 용도, 세계관
 // 패널·봇 시스템)와 별개로 이 표준 경로에도 병행 기록한다.
-const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'rocketGame', 'gallery', 'onyuVn'];
+const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'rocketGame', 'gallery', 'onyuVn', 'streamerMessenger'];
 const PRESENCE_GRACE_MS = 60 * 60 * 1000;
 const PRESENCE_HOURLY_RETENTION_DAYS = 30;
 
@@ -2090,6 +2107,7 @@ module.exports = {
   notifyTreasureChestRequest,
   notifyCashChargeRequest,
   notifyUnfreezeDonationRequest,
+  notifyMessengerReport,
   notifyListingRequest,
   notifyLifeGameReportAlert,
   notifyLifeGameReviewReportAlert,
