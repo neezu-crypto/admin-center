@@ -360,27 +360,32 @@
   /* 19번 — 세션 빠른 이동. main(960px, 가운데 정렬)의 우측 여백이 충분한
      넓은 화면에서만 노출한다(soop-stock-market의 #admin-quicknav와 동일한 취지). */
   .quicknav {
-    display: none; position: fixed; right: 16px; top: 90px;
-    max-height: calc(100vh - 110px); overflow-y: auto;
+    display: none; position: fixed; right: 16px; top: 16px; bottom: 16px;
+    height: auto; max-height: none; box-sizing: border-box; overflow: hidden;
     flex-direction: column; gap: 2px; background: var(--tile); border: 1px solid var(--tile-border);
-    border-radius: 18px; padding: 8px; z-index: 200; width: 176px;
+    border-radius: 18px; padding: 8px; z-index: 200; width: 196px;
     box-shadow: 0 18px 34px -16px rgba(20,10,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
   }
   .quicknav.visible { display: flex; }
-  .quicknav-title { font-size: 11px; font-weight: 800; color: #5f6672; padding: 4px 10px 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .quicknav-title { flex: 0 0 auto; font-size: 11px; font-weight: 800; color: #5f6672; padding: 4px 10px 6px; text-transform: uppercase; letter-spacing: .04em; }
+  .quicknav-scroll {
+    flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto;
+    overscroll-behavior: contain; padding: 0 2px 4px 0; scrollbar-width: thin;
+    scrollbar-color: #e8462c transparent;
+  }
   .quicknav-group {
     font-size: 10px; font-weight: 800; color: #e8462c; padding: 10px 10px 2px;
     text-transform: uppercase; letter-spacing: .04em;
   }
   .quicknav-group:first-of-type { padding-top: 0; }
   .quicknav button {
-    background: transparent; color: #8b93a1; border: none; padding: 7px 10px; border-radius: 14px;
+    display: block; width: 100%; box-sizing: border-box; background: transparent; color: #8b93a1; border: none; padding: 7px 10px; border-radius: 14px;
     font-size: 12.5px; font-weight: 600; text-align: left; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; cursor: pointer;
   }
   .quicknav button:hover { background: #1c2027; color: #e8462c; }
-  .quicknav::-webkit-scrollbar { width: 4px; }
-  .quicknav::-webkit-scrollbar-thumb { background: #e8462c; border-radius: 10px; }
+  .quicknav-scroll::-webkit-scrollbar { width: 5px; }
+  .quicknav-scroll::-webkit-scrollbar-thumb { background: #e8462c; border-radius: 10px; }
   #sessionLauncher {
     display: none; margin: 0 0 24px; padding: 18px 20px; border-radius: 18px;
     background: rgba(252,250,247,0.9); border: 1px solid rgba(20,20,22,0.08);
@@ -3754,11 +3759,11 @@
     const items = QUICKNAV_ITEMS.filter(function (item) {
       return item.role === 'admin' || item.role === 'shared' || item.permKey;
     });
-    quicknavEl.innerHTML = '<div class="quicknav-title">🧭 빠른 이동</div>' +
+    quicknavEl.innerHTML = '<div class="quicknav-title">🧭 빠른 이동</div><div class="quicknav-scroll">' +
       items.map(function (item) {
         const groupHtml = item.group ? '<div class="quicknav-group">' + item.group + '</div>' : '';
         return groupHtml + '<button type="button" data-target="' + item.id + '">' + item.label + '</button>';
-      }).join('');
+      }).join('') + '</div>';
     quicknavEl.querySelectorAll('button[data-target]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const targetId = btn.dataset.target;
