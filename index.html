@@ -2617,7 +2617,7 @@
   // 10번 — 페이지별 접속자 분석. 서버가 5분마다 자동 샘플링해둔 시간당
   // 최고치를 앱별 스파크라인 카드로 보여준다(차트 라이브러리 없이 인라인 SVG로
   // 직접 그려서 soop-stock-market의 Chart.js를 새로 끌어오지 않고도 추세를 표현).
-  const VISITOR_APP_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장', onyuVn: '온 이유', lifeGame: '인생게임', rocketGame: '로켓 게임', gallery: '스트리머 갤러리' };
+  const VISITOR_APP_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장', onyuVn: '온 이유', lifeGame: '인생게임', gallery: '스트리머 갤러리' };
   function buildSparklineSvg(values) {
     const w = 400, h = 46, pad = 4;
     const max = Math.max.apply(null, values.concat([1]));

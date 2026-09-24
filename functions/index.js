@@ -257,17 +257,15 @@ const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const [bmLogSnap, smLogSnap, rgLogSnap, galLogSnap, messengerLogSnap] = await Promise.all([
+  const [bmLogSnap, smLogSnap, galLogSnap, messengerLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('adminAuditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
-    db.ref('rocketGame/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('gallery/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('streamerMessenger/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
   ]);
 
   const bmLog = bmLogSnap.val() || {};
   const smLog = smLogSnap.val() || {};
-  const rgLog = rgLogSnap.val() || {};
   const galLog = galLogSnap.val() || {};
   const messengerLog = messengerLogSnap.val() || {};
 
@@ -283,17 +281,6 @@ const listAuditLogOverview = onCall(async (request) => {
     const e = smLog[id];
     entries.push({
       id: id, source: 'stockMarket', at: e.at,
-      actorName: e.actorName, action: e.action, detail: e.detail,
-    });
-  });
-  // 2026-09-05 추가 — rocket-game/streamer-gallery 온보딩 누락분 보완(신규 게임
-  // 온보딩 체크리스트 항목, 관리자 전용 내부 도구이므로 두 사이트가 아직 비공개
-  // 개발 중이어도 무방함). 두 저장소 모두 logAudit(actorUid, actorName, action,
-  // detail, at) 형태가 동일해 위 두 소스와 같은 매핑을 그대로 쓴다.
-  Object.keys(rgLog).forEach(function (id) {
-    const e = rgLog[id];
-    entries.push({
-      id: id, source: 'rocketGame', at: e.at,
       actorName: e.actorName, action: e.action, detail: e.detail,
     });
   });
@@ -318,9 +305,6 @@ const listAuditLogOverview = onCall(async (request) => {
 
 // 시리즈 게임 목록 — 새 게임이 생기면 여기에 한 줄만 추가하면 된다(신규 게임
 // 온보딩 체크리스트의 "통합 관리 센터에 등록" 항목이 사실상 이 배열 하나).
-// lifeGame/rocketGame/gallery는 2026-09-05 추가 — 관리자 전용 도구 노출일 뿐이라
-// rocketGame/gallery가 아직 비공개 개발 중이어도 등록해도 무방(devbarLinks 같은
-// 공개 노출과는 별개 판단, 사용자 확인됨).
 const GAME_CATALOG = [
   { id: 'bettingMarket', name: '스트리머 배팅시장' },
   { id: 'stockMarket', name: '스트리머 주식시장' },
@@ -328,7 +312,6 @@ const GAME_CATALOG = [
   { id: 'midnightMartRun', name: '미드나잇 마트런' },
   { id: 'dontClickAds', name: '절대 광고를 클릭하지 마' },
   { id: 'lifeGame', name: '스트리머 인생게임' },
-  { id: 'rocketGame', name: '로켓 게임' },
   { id: 'gallery', name: '스트리머 갤러리' },
   { id: 'streamerMessenger', name: '스트리머 메신저' },
   { id: 'onyuVn', name: '당신이 여기에 온 이유' },
@@ -1029,14 +1012,8 @@ const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyReq
 // 앱에서 온 신청인지 구분한다 - 이 필드가 생기기 전 신청·기존 주식시장
 // 호출부는 값을 안 보내므로(undefined) '주식시장'으로 폴백
 // (notifyVerifiedStreamerVisit의 marketLabel과 동일한 패턴).
-// 2026-09-05 발견 — rocket-game('rocket-game')·streamer-gallery('streamer-gallery')도
-// 이미 이 공용 함수를 호출하며 각자의 source 값을 보내고 있었는데, 여기 매핑에
-// 등록이 안 돼서 전부 '주식시장'으로 잘못 표시되고 있었다(실제 사용자가 갤러리에서
-// 신청 후 발견). 온이유('onyu-vn')도 같은 공용 노드를 사용하므로 앱별 source를
-// 추가하지 않으면 동일한 문제가 재발한다.
 const STREAMER_VERIFY_SOURCE_LABELS = {
   'life-game': '인생게임',
-  'rocket-game': '로켓게임',
   'streamer-gallery': '갤러리',
   'streamer-messenger': '스트리머 메신저',
   'onyu-vn': '온 이유',
@@ -1298,11 +1275,11 @@ const getPurchaseOverview = onCall(async (request) => {
 // 10번 — 페이지별 접속자 분석. interior-3d-viewer는 아직 presence 구현이 없어
 // 우선 제외한다(별도 후속 작업, 10번 문서 참고). soop-stock-market이 이미 검증한
 // 60분 유예 규칙을 그대로 재사용해 "활성 uid" 수를 센다.
-// lifeGame/rocketGame/gallery는 2026-09-05 추가 — 클라이언트가 presence/{appId}/{uid}
+// lifeGame/gallery는 2026-09-05 추가 — 클라이언트가 presence/{appId}/{uid}
 // 표준 경로에 { lastSeen } 형태로 쓰기 시작한 뒤에만 실제로 값이 잡힌다(각 저장소
 // 쪽 작업과 짝을 이룸). lifeGame은 자체 lifeGame/presence 경로(다른 용도, 세계관
 // 패널·봇 시스템)와 별개로 이 표준 경로에도 병행 기록한다.
-const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'rocketGame', 'gallery', 'onyuVn', 'streamerMessenger'];
+const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'gallery', 'onyuVn', 'streamerMessenger'];
 const PRESENCE_GRACE_MS = 60 * 60 * 1000;
 const PRESENCE_HOURLY_RETENTION_DAYS = 30;
 
