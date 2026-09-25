@@ -436,6 +436,12 @@ const DEFAULT_ADULT_IMAGE_GENERATOR_LINKS = [
   { id: 'pollo', title: 'Pollo AI', url: 'https://pollo.ai/ko/ai-image-generator', memo: '', order: 6 },
   { id: 'mage', title: 'Mage', url: 'https://www.mage.space/explore', memo: '', order: 7 },
   { id: 'live3d', title: 'Live3D', url: 'https://live3d.io/ai-image-editor', memo: '', order: 8 },
+  { id: 'seaart', title: 'SeaArt', url: 'https://www.seaart.ai/create/image?id=dap0erle878c73akrbp0&model_ver_no=4b88d79983d5affc6e71a8f3c2d99cf1', memo: '', order: 9 },
+  { id: 'stabledifffusion', title: 'Stable Diffusion', url: 'https://stabledifffusion.com/features/ai-photo-editor', memo: '', order: 10 },
+  { id: 'dreemy', title: 'Dreemy AI', url: 'https://www.dreemy.ai/image-generator', memo: '', order: 11 },
+  { id: 'animegenius', title: 'AnimeGenius', url: 'https://animegenius.live3d.io/image-to-image', memo: '', order: 12 },
+  { id: 'perchance', title: 'Perchance', url: 'https://perchance.org/generate-anything-com', memo: '', order: 13 },
+  { id: 'picassoia', title: 'Picassoia', url: 'https://picassoia.com/en/toolkit?category=text-to-image&model=picassoia-image-editor-pro', memo: '', order: 14 },
 ];
 
 function adultImageGeneratorLinksFromValue(value) {
@@ -1686,6 +1692,35 @@ const onyuStartSession = onCall(async (request) => {
   }
   await recordOnyuServerEvent(request, 'game_access_granted');
   return Object.assign({ ok: true, uid }, state);
+});
+
+// 연인 엔딩 플레이 후기는 인증된 사용자의 계정·엔딩별 최신 1건으로 저장한다.
+// 클라이언트가 uid나 저장 경로를 지정하지 못하며, onyuVn 노드는 RTDB 규칙에서
+// 클라이언트 읽기/쓰기가 차단되어 있어 후기 본문과 작성자 식별자는 서버에만 노출된다.
+const onyuSubmitReview = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
+  if (provider === 'anonymous') {
+    throw new HttpsError('failed-precondition', '로그인한 계정으로만 후기를 저장할 수 있습니다.');
+  }
+  const endingId = String(request.data && request.data.endingId || '').trim();
+  if (endingId !== 'lover') {
+    throw new HttpsError('invalid-argument', '지원하지 않는 엔딩 후기입니다.');
+  }
+  const review = String(request.data && request.data.review || '').replace(/\0/g, '').trim();
+  if (!review) throw new HttpsError('invalid-argument', '후기 내용을 입력해 주세요.');
+  if (review.length > 1000) throw new HttpsError('invalid-argument', '후기는 1,000자 이내로 작성해 주세요.');
+
+  const now = Date.now();
+  const reviewRef = getDatabase().ref('onyuVn/reviews/' + uid + '/' + endingId);
+  const result = await reviewRef.transaction((current) => ({
+    endingId,
+    review,
+    createdAt: current && Number.isFinite(current.createdAt) ? current.createdAt : now,
+    updatedAt: now,
+  }));
+  if (!result.committed) throw new HttpsError('aborted', '후기를 저장하지 못했습니다. 다시 시도해 주세요.');
+  return { ok: true, updatedAt: now };
 });
 
 const onyuListViewerAccessRequests = onCall(async (request) => {
