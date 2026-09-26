@@ -1712,15 +1712,203 @@ const onyuSubmitReview = onCall(async (request) => {
   if (review.length > 1000) throw new HttpsError('invalid-argument', '후기는 1,000자 이내로 작성해 주세요.');
 
   const now = Date.now();
-  const reviewRef = getDatabase().ref('onyuVn/reviews/' + uid + '/' + endingId);
+  const db = getDatabase();
+  const reviewRef = db.ref('onyuVn/reviews/' + uid + '/' + endingId);
+  const previous = (await reviewRef.get()).val() || {};
+  const reviewId = previous.publicId || db.ref('onyuVn/publicReviews').push().key;
   const result = await reviewRef.transaction((current) => ({
     endingId,
     review,
     createdAt: current && Number.isFinite(current.createdAt) ? current.createdAt : now,
     updatedAt: now,
+    publicId: current && current.publicId || reviewId,
+    visibility: current && current.visibility === 'hidden' ? 'hidden' : 'public',
   }));
   if (!result.committed) throw new HttpsError('aborted', '후기를 저장하지 못했습니다. 다시 시도해 주세요.');
+  const saved = result.snapshot.val();
+  const indexItem = {
+    endingId,
+    review: saved.review,
+    createdAt: saved.createdAt,
+    updatedAt: saved.updatedAt,
+    visibility: saved.visibility,
+    uid,
+  };
+  const updates = {};
+  updates['onyuVn/reviewIndex/' + saved.publicId] = indexItem;
+  updates['onyuVn/reviewOwners/' + saved.publicId] = uid;
+  updates['onyuVn/publicReviews/' + saved.publicId] = saved.visibility === 'public'
+    ? { endingId, review: saved.review, createdAt: saved.createdAt, updatedAt: saved.updatedAt }
+    : null;
+  await db.ref().update(updates);
   return { ok: true, updatedAt: now };
+});
+
+const ONYU_REVIEW_PAGE_SIZE = 30;
+const ONYU_REVIEW_ID_RE = /^[A-Za-z0-9_-]{20}$/;
+
+function publicOnyuReview(item) {
+  return {
+    endingId: item.endingId,
+    review: item.review,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+async function listOnyuReviewPage(db, node, cursor) {
+  let query = db.ref(node).orderByChild('updatedAt');
+  if (cursor && Number.isFinite(cursor.updatedAt) && typeof cursor.id === 'string' && ONYU_REVIEW_ID_RE.test(cursor.id)) {
+    query = query.endAt(cursor.updatedAt, cursor.id);
+  }
+  const snap = await query.limitToLast(ONYU_REVIEW_PAGE_SIZE + 1).get();
+  const entries = [];
+  snap.forEach((child) => {
+    const value = child.val();
+    if (!value || typeof value.review !== 'string') return;
+    const updatedAt = Number(value.updatedAt) || Number(value.createdAt) || 0;
+    if (cursor && (updatedAt > cursor.updatedAt || (updatedAt === cursor.updatedAt && child.key >= cursor.id))) return;
+    entries.push({ id: child.key, updatedAt, value });
+  });
+  const hasMore = entries.length > ONYU_REVIEW_PAGE_SIZE || snap.numChildren() >= ONYU_REVIEW_PAGE_SIZE + 1;
+  const page = entries.slice(-ONYU_REVIEW_PAGE_SIZE);
+  return {
+    reviews: page.map((entry) => Object.assign({ id: entry.id, visibility: entry.value.visibility }, publicOnyuReview(entry.value))),
+    hasMore,
+    nextCursor: hasMore && page.length
+      ? { id: page[0].id, updatedAt: page[0].updatedAt }
+      : null,
+  };
+}
+
+// 공개 열람 API는 익명 Firebase Auth 계정도 사용할 수 있지만, 서버가 허용 필드만
+// 반환한다. uid와 내부 moderation 필드는 RTDB 규칙을 열지 않고 응답에서 제거한다.
+const onyuVnListPublicReviews = onCall(async (request) => {
+  requireAuth(request);
+  const cursor = request.data && request.data.cursor;
+  const page = await listOnyuReviewPage(getDatabase(), 'onyuVn/publicReviews', cursor);
+  page.reviews = page.reviews.map((item) => ({
+    id: item.id,
+    endingId: item.endingId,
+    review: item.review,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  }));
+  return page;
+});
+
+async function ensureOnyuReviewIndex(db, adminUid) {
+  const markerRef = db.ref('onyuVn/reviewIndexMigrationV1');
+  const token = db.ref('onyuVn/reviewIndexMigrationV1').push().key;
+  const lock = await markerRef.transaction((current) => {
+    if (current && current.status === 'complete') return;
+    if (current && current.status === 'running' && Date.now() - Number(current.startedAt || 0) < 600000) return;
+    return { status: 'running', startedAt: Date.now(), token };
+  });
+  const marker = lock.snapshot.val();
+  if (marker && marker.status === 'complete') return;
+  if (!lock.committed || !marker || marker.token !== token) {
+    throw new HttpsError('unavailable', '기존 후기 목록을 준비 중입니다. 잠시 후 새로고침해 주세요.');
+  }
+
+  try {
+    const reviewsSnap = await db.ref('onyuVn/reviews').get();
+    const updates = {};
+    reviewsSnap.forEach((userSnap) => {
+      userSnap.forEach((reviewSnap) => {
+        if (reviewSnap.key !== 'lover') return;
+        const item = reviewSnap.val();
+        if (!item || typeof item.review !== 'string' || !item.review.trim()) return;
+        const id = item.publicId || db.ref('onyuVn/publicReviews').push().key;
+        const visibility = item.visibility === 'hidden' ? 'hidden' : 'public';
+        const createdAt = Number(item.createdAt) || Date.now();
+        const updatedAt = Number(item.updatedAt) || createdAt;
+        const entry = { endingId: reviewSnap.key, review: item.review, createdAt, updatedAt, visibility, uid: userSnap.key };
+        updates['onyuVn/reviewIndex/' + id] = entry;
+        updates['onyuVn/reviewOwners/' + id] = userSnap.key;
+        updates['onyuVn/reviews/' + userSnap.key + '/' + reviewSnap.key + '/publicId'] = id;
+        if (!item.visibility) updates['onyuVn/reviews/' + userSnap.key + '/' + reviewSnap.key + '/visibility'] = visibility;
+        updates['onyuVn/publicReviews/' + id] = visibility === 'public'
+          ? { endingId: reviewSnap.key, review: item.review, createdAt, updatedAt }
+          : null;
+      });
+    });
+    if (Object.keys(updates).length) await db.ref().update(updates);
+    await markerRef.set({ status: 'complete', completedAt: Date.now(), completedBy: adminUid });
+  } catch (error) {
+    await markerRef.set({ status: 'failed', failedAt: Date.now() });
+    throw error;
+  }
+}
+
+const onyuAdminListPlayerReviews = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const db = getDatabase();
+  await ensureOnyuReviewIndex(db, adminUid);
+  const page = await listOnyuReviewPage(db, 'onyuVn/reviewIndex', request.data && request.data.cursor);
+  page.reviews = page.reviews.map((item) => ({
+    id: item.id,
+    endingId: item.endingId,
+    review: item.review,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    visibility: item.visibility === 'hidden' ? 'hidden' : 'public',
+  }));
+  return page;
+});
+
+const onyuAdminSetPlayerReviewVisibility = onCall(async (request) => {
+  await requireAdmin(request);
+  const id = String(request.data && request.data.reviewId || '');
+  const visible = request.data && request.data.visible;
+  if (!ONYU_REVIEW_ID_RE.test(id) || typeof visible !== 'boolean') {
+    throw new HttpsError('invalid-argument', '후기 ID 또는 공개 상태가 올바르지 않습니다.');
+  }
+  const db = getDatabase();
+  const ownerSnap = await db.ref('onyuVn/reviewOwners/' + id).get();
+  const uid = ownerSnap.val();
+  if (typeof uid !== 'string') throw new HttpsError('not-found', '후기를 찾을 수 없습니다.');
+  const indexSnap = await db.ref('onyuVn/reviewIndex/' + id).get();
+  const endingId = indexSnap.child('endingId').val();
+  if (endingId !== 'lover') throw new HttpsError('not-found', '후기를 찾을 수 없습니다.');
+  const reviewRef = db.ref('onyuVn/reviews/' + uid + '/' + endingId);
+  const reviewSnap = await reviewRef.get();
+  const item = reviewSnap.val();
+  if (!item || item.publicId !== id) throw new HttpsError('not-found', '후기를 찾을 수 없습니다.');
+  const visibility = visible ? 'public' : 'hidden';
+  const updates = {};
+  updates['onyuVn/reviews/' + uid + '/lover/visibility'] = visibility;
+  updates['onyuVn/reviewIndex/' + id + '/visibility'] = visibility;
+  updates['onyuVn/publicReviews/' + id] = visible
+    ? publicOnyuReview(item)
+    : null;
+  await db.ref().update(updates);
+  return { ok: true, visibility };
+});
+
+const onyuAdminDeletePlayerReview = onCall(async (request) => {
+  await requireAdmin(request);
+  const id = String(request.data && request.data.reviewId || '');
+  if (!ONYU_REVIEW_ID_RE.test(id)) throw new HttpsError('invalid-argument', '후기 ID가 올바르지 않습니다.');
+  const db = getDatabase();
+  const ownerSnap = await db.ref('onyuVn/reviewOwners/' + id).get();
+  const uid = ownerSnap.val();
+  if (typeof uid !== 'string') throw new HttpsError('not-found', '후기를 찾을 수 없습니다.');
+  const indexSnap = await db.ref('onyuVn/reviewIndex/' + id).get();
+  const endingId = indexSnap.child('endingId').val();
+  if (endingId !== 'lover') throw new HttpsError('not-found', '후기를 찾을 수 없습니다.');
+  const reviewRef = db.ref('onyuVn/reviews/' + uid + '/' + endingId);
+  const reviewSnap = await reviewRef.get();
+  if (!reviewSnap.exists() || reviewSnap.child('publicId').val() !== id) {
+    throw new HttpsError('not-found', '후기를 찾을 수 없습니다.');
+  }
+  const updates = {};
+  updates['onyuVn/reviews/' + uid + '/' + endingId] = null;
+  updates['onyuVn/reviewIndex/' + id] = null;
+  updates['onyuVn/reviewOwners/' + id] = null;
+  updates['onyuVn/publicReviews/' + id] = null;
+  await db.ref().update(updates);
+  return { ok: true };
 });
 
 const onyuListViewerAccessRequests = onCall(async (request) => {
@@ -2135,6 +2323,11 @@ module.exports = {
   sampleConcurrentUsers,
   getVisitorAnalytics,
   onyuRequestViewerAccess,
+  onyuSubmitReview,
+  onyuVnListPublicReviews,
+  onyuAdminListPlayerReviews,
+  onyuAdminSetPlayerReviewVisibility,
+  onyuAdminDeletePlayerReview,
   notifyOnyuViewerAccessRequest,
   onyuGetViewerAccess,
   onyuStartSession,
