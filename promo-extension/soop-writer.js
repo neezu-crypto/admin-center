@@ -9,7 +9,7 @@
     return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
   }
 
-  function findTitleField() {
+  function findTitleField(bodyEditor) {
     const selectors = [
       'input[placeholder*="게시글 제목"]',
       'textarea[placeholder*="게시글 제목"]',
@@ -21,7 +21,24 @@
       const field = Array.from(document.querySelectorAll(selector)).find(isVisible);
       if (field) return field;
     }
-    return null;
+
+    // SOOP may expose the title box as an unlabeled textbox. Locate it by
+    // position relative to the much larger body editor in that case.
+    const editorTop = bodyEditor ? bodyEditor.getBoundingClientRect().top : Infinity;
+    const candidates = Array.from(document.querySelectorAll(
+      'input:not([type="search"]):not([type="hidden"]), textarea, [role="textbox"], [contenteditable="true"]'
+    )).filter(function (field) {
+      if (!isVisible(field) || field === bodyEditor) return false;
+      const rect = field.getBoundingClientRect();
+      const isTextInput = field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement;
+      const type = (field.getAttribute('type') || '').toLowerCase();
+      if (isTextInput && type && type !== 'text') return false;
+      return rect.width > 300 && rect.height >= 20 && rect.height < 140 && rect.top < editorTop;
+    });
+    candidates.sort(function (a, b) {
+      return b.getBoundingClientRect().top - a.getBoundingClientRect().top;
+    });
+    return candidates[0] || null;
   }
 
   function findBodyEditor(titleField) {
@@ -29,6 +46,7 @@
       '[contenteditable="true"].ProseMirror',
       '.ProseMirror[contenteditable="true"]',
       '[contenteditable="true"][data-placeholder]',
+      '[role="textbox"]',
       '[contenteditable="true"]',
     ];
     for (const selector of selectors) {
@@ -55,6 +73,21 @@
     else field.value = value;
     field.dispatchEvent(new Event('input', { bubbles: true }));
     field.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function setTitleValue(field, value) {
+    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) {
+      setInputValue(field, value);
+      return;
+    }
+    field.focus();
+    field.textContent = value;
+    field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function getTitleValue(field) {
+    return typeof field.value === 'string' ? field.value : field.textContent || '';
   }
 
   function sanitizeHtml(html) {
@@ -118,29 +151,21 @@
     const draft = result && result.draft;
     if (!draft) return;
 
-    const titleField = findTitleField();
-    const bodyEditor = findBodyEditor(titleField);
+    const bodyEditor = findBodyEditor(null);
+    const titleField = findTitleField(bodyEditor);
     if (!titleField || !bodyEditor) {
       showStatus('확장 프로그램이 제목 또는 본문 편집 영역을 찾지 못했습니다. 게시하지 않았습니다.', true);
       return;
     }
 
     try {
-      if (titleField.isContentEditable) {
-        titleField.focus();
-        titleField.textContent = draft.title;
-        titleField.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: draft.title }));
-      } else {
-        setInputValue(titleField, draft.title);
-      }
+      setTitleValue(titleField, draft.title);
       bodyEditor.focus();
       document.execCommand('selectAll', false, null);
       setEditorHtml(bodyEditor, draft.html);
       bodyEditor.blur();
 
-      const titleMatches = titleField.isContentEditable
-        ? titleField.textContent.trim() === draft.title
-        : titleField.value.trim() === draft.title;
+      const titleMatches = getTitleValue(titleField).trim() === draft.title;
       const insertedText = bodyEditor.innerText || bodyEditor.textContent || '';
       const imageCount = bodyEditor.querySelectorAll('img').length;
       const bodyMatches = insertedText.includes(draft.nickname) && imageCount >= 2;
