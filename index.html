@@ -2467,6 +2467,10 @@
       generateBtn.addEventListener('click', function () {
         activeStreamerPromoEntry = item;
         streamerPromoGeneratorNameEl.value = item.nickname || '';
+        streamerPromoGeneratorOpenBtn.dataset.writeUrl = item.writeUrl || '';
+        streamerPromoGeneratorOpenBtn.dataset.nickname = item.nickname || '';
+        streamerPromoGeneratorOpenBtn.dataset.promoKey = item.key || '';
+        streamerPromoGeneratorOpenBtn.dataset.soopId = item.soopId || '';
         renderStreamerPromoDraft();
         streamerPromoGeneratorOpenBtn.disabled = !item.writeUrl || item.promotedCompleted;
         streamerPromoGeneratorEl.hidden = false;
