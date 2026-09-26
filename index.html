@@ -287,6 +287,27 @@
   }
   .promoted-chip button:hover { color: #e2554f; background: rgba(226,85,79,0.14); }
 
+  .promo-generator-panel {
+    margin: 16px 0 20px; padding: 18px; border: 1px solid var(--sub-border);
+    border-radius: 16px; background: var(--sub); box-shadow: var(--sub-hi);
+  }
+  .promo-generator-panel[hidden] { display: none; }
+  .promo-generator-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .promo-generator-head h3 { margin: 0; color: var(--ink); font-size: 14px; }
+  .promo-generator-name-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+  .promo-generator-name-row input, .promo-generator-output {
+    width: 100%; min-width: 0; background: #fffdf8; border: 1px solid var(--sub-border);
+    color: var(--ink); border-radius: 10px; padding: 9px 11px; font: inherit; font-size: 12.5px;
+  }
+  .promo-generator-name-row input { flex: 1 1 220px; }
+  .promo-generator-output-card { margin-top: 10px; }
+  .promo-generator-output-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+  .promo-generator-output-head strong { font-size: 12px; color: var(--ink-soft); }
+  .promo-generator-output { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 190px; overflow: auto; line-height: 1.55; }
+  .promo-generator-output.html { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .promo-generate-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .promo-generate-row .hint { margin: 0; }
+
   /* 21번 — 배팅시장 마켓 관리 */
   /* .verif-info span { display:block } 규칙이 명시성(0,1,1)에서 이 규칙(0,1,0)을
      이겨서 상태 태그가 알약이 아니라 풀너비 막대로 렌더링되던 버그 — 조상 클래스를
@@ -634,6 +655,33 @@
       <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
+      <div id="streamerPromoGenerator" class="promo-generator-panel" hidden>
+        <div class="promo-generator-head">
+          <div>
+            <h3>홍보글 생성기</h3>
+            <p class="hint" style="margin:4px 0 0;">스트리머 이름으로 제목·본문·SOOP 게시판용 HTML을 생성합니다. 생성된 내용은 게시되지 않습니다.</p>
+          </div>
+          <button id="streamerPromoGeneratorCloseBtn" class="perm-refresh-btn" type="button">닫기</button>
+        </div>
+        <div class="promo-generator-name-row">
+          <label for="streamerPromoGeneratorName" style="white-space:nowrap; font-size:12px; font-weight:700;">스트리머 이름</label>
+          <input id="streamerPromoGeneratorName" type="text" autocomplete="off" placeholder="스트리머 이름">
+          <button id="streamerPromoGeneratorBuildBtn" class="perm-refresh-btn" type="button">생성</button>
+          <button id="streamerPromoGeneratorOpenBtn" class="perm-refresh-btn" type="button" disabled>글쓰기 열기</button>
+        </div>
+        <div class="promo-generator-output-card">
+          <div class="promo-generator-output-head"><strong>제목</strong><button class="perm-refresh-btn" type="button" data-promo-copy="title">제목 복사</button></div>
+          <div id="streamerPromoGeneratedTitle" class="promo-generator-output"></div>
+        </div>
+        <div class="promo-generator-output-card">
+          <div class="promo-generator-output-head"><strong>본문 (일반 텍스트)</strong><button class="perm-refresh-btn" type="button" data-promo-copy="body">본문 복사</button></div>
+          <div id="streamerPromoGeneratedBody" class="promo-generator-output"></div>
+        </div>
+        <div class="promo-generator-output-card">
+          <div class="promo-generator-output-head"><strong>HTML 코드 (SOOP 게시판용)</strong><button class="perm-refresh-btn" type="button" data-promo-copy="html">HTML 복사</button></div>
+          <div id="streamerPromoGeneratedHtml" class="promo-generator-output html"></div>
+        </div>
+      </div>
       <h3 class="subhead" style="margin-top:16px;">전체 홍보 목록</h3>
       <div id="streamerPromoLinksList" style="margin-top:12px;"></div>
     </div>
@@ -1053,6 +1101,15 @@
   const streamerPromoLinksStatusEl = document.getElementById('streamerPromoLinksStatus');
   const streamerPromoRecentListEl = document.getElementById('streamerPromoRecentList');
   const streamerPromoLinksListEl = document.getElementById('streamerPromoLinksList');
+  const streamerPromoGeneratorEl = document.getElementById('streamerPromoGenerator');
+  const streamerPromoGeneratorNameEl = document.getElementById('streamerPromoGeneratorName');
+  const streamerPromoGeneratedTitleEl = document.getElementById('streamerPromoGeneratedTitle');
+  const streamerPromoGeneratedBodyEl = document.getElementById('streamerPromoGeneratedBody');
+  const streamerPromoGeneratedHtmlEl = document.getElementById('streamerPromoGeneratedHtml');
+  const streamerPromoGeneratorBuildBtn = document.getElementById('streamerPromoGeneratorBuildBtn');
+  const streamerPromoGeneratorCloseBtn = document.getElementById('streamerPromoGeneratorCloseBtn');
+  const streamerPromoGeneratorOpenBtn = document.getElementById('streamerPromoGeneratorOpenBtn');
+  let activeStreamerPromoEntry = null;
   const marketReviewListEl = document.getElementById('marketReviewList');
   const marketManageListEl = document.getElementById('marketManageList');
   const promotedContentMigrateBtn = document.getElementById('promotedContentMigrateBtn');
@@ -2185,6 +2242,124 @@
     });
   }
 
+  const PROMO_GAME_URL = 'https://neezu-crypto.github.io/streamer-life-game/';
+  const PROMO_CREATOR_STATION_URL = 'https://www.sooplive.com/station/skftodwocks2';
+  const PROMO_IMAGE_URLS = [
+    'https://stimg.sooplive.com/NORMAL_BBS/6/27867916/10281788670319832.png',
+    'https://stimg.sooplive.com/NORMAL_BBS/6/27867916/18281788670319843.png',
+  ];
+
+  function escapePromoHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (char) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char];
+    });
+  }
+
+  function buildStreamerPromoTitle(name) {
+    return name + '의 운명은? [스트리머 인생게임]';
+  }
+
+  function buildStreamerPromoBody(name) {
+    return name + '의 인생을 미리 점쳐보는 인생게임 출시!\n\n' +
+      '평범한 직장생활부터 차량 절도범까지 다양한 직업을 체험해보세요\n\n' +
+      '과연 ' + name + '의 인생은 어떻게 마무리될까요?\n\n' +
+      '[게임 정보]\n\n' +
+      '1. 무료\n\n' +
+      '2. 한국어 지원\n\n' +
+      '3. 플레이 타임 약 30분\n\n' +
+      '(다회차 플레이 가능)\n\n' +
+      PROMO_GAME_URL + '\n\n' +
+      '제작: 오목지면시그';
+  }
+
+  function buildStreamerPromoHtml(name) {
+    const safeName = escapePromoHtml(name);
+    const figures = PROMO_IMAGE_URLS.map(function (src) {
+      return '<figure data-paragraph-type="IMAGE_BLOCK" style="width: 1016px; margin-left: auto; margin-right: auto; position: relative; margin-bottom: 0; display: block; min-width: 1px; max-width: 100%; height: auto"><img src="' + src + '" alt="" style="width: 100%; height: auto; transition: opacity 0.3s" /></figure>';
+    }).join('\n');
+    const paragraph = function (text) {
+      return '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"><span style="font-size: 18px">' + text + '</span></p>';
+    };
+    const empty = '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"></p>';
+    return [
+      figures,
+      paragraph(safeName + '의 인생을 미리 점쳐보는 인생게임 출시!'),
+      paragraph('평범한 직장생활부터 차량 절도범까지 다양한 직업을 체험해보세요'),
+      paragraph('과연 ' + safeName + '의 인생은 어떻게 마무리될까요?'),
+      empty,
+      paragraph('[게임 정보]'),
+      paragraph('1. 무료'),
+      paragraph('2. 한국어 지원'),
+      paragraph('3. 플레이 타임 약 30분'),
+      paragraph('(다회차 플레이 가능)'),
+      empty,
+      '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"><span style="font-size: 18px"><a href="' + PROMO_GAME_URL + '" class="editorTextLink">' + PROMO_GAME_URL + '</a></span></p>',
+      empty,
+      '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"><span style="font-size: 18px">제작: </span><span style="color: rgb(74, 144, 226); font-size: 18px"><a href="' + PROMO_CREATOR_STATION_URL + '">오목지면시그</a></span></p>',
+    ].join('\n');
+  }
+
+  function renderStreamerPromoDraft() {
+    const name = streamerPromoGeneratorNameEl.value.trim() || '스트리머명';
+    streamerPromoGeneratedTitleEl.textContent = buildStreamerPromoTitle(name);
+    streamerPromoGeneratedBodyEl.textContent = buildStreamerPromoBody(name);
+    streamerPromoGeneratedHtmlEl.textContent = buildStreamerPromoHtml(name);
+  }
+
+  async function copyStreamerPromoOutput(kind, button) {
+    const outputs = {
+      title: streamerPromoGeneratedTitleEl,
+      body: streamerPromoGeneratedBodyEl,
+      html: streamerPromoGeneratedHtmlEl,
+    };
+    const output = outputs[kind];
+    if (!output || !output.textContent) return;
+    try {
+      await navigator.clipboard.writeText(output.textContent);
+    } catch (err) {
+      const textarea = document.createElement('textarea');
+      textarea.value = output.textContent;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    const original = button.textContent;
+    button.textContent = '복사됨';
+    button.disabled = true;
+    setTimeout(function () { button.textContent = original; button.disabled = false; }, 1200);
+  }
+
+  streamerPromoGeneratorNameEl.addEventListener('input', function () {
+    renderStreamerPromoDraft();
+    streamerPromoGeneratorOpenBtn.disabled = !activeStreamerPromoEntry ||
+      streamerPromoGeneratorNameEl.value.trim() !== String(activeStreamerPromoEntry.nickname || '').trim() ||
+      !activeStreamerPromoEntry.writeUrl || activeStreamerPromoEntry.promotedCompleted;
+  });
+  streamerPromoGeneratorBuildBtn.addEventListener('click', renderStreamerPromoDraft);
+  streamerPromoGeneratorOpenBtn.addEventListener('click', function () {
+    const entry = activeStreamerPromoEntry;
+    if (!entry || !entry.writeUrl || entry.promotedCompleted ||
+        streamerPromoGeneratorNameEl.value.trim() !== String(entry.nickname || '').trim()) return;
+    window.open(entry.writeUrl, '_blank', 'noopener,noreferrer');
+    markStreamerPromoLinkOpenedFn({ promoKey: entry.key, soopId: entry.soopId || '' })
+      .then(refreshStreamerPromoLinks)
+      .catch(function (err) { console.warn('최근 열람 시간 저장 실패:', err); });
+  });
+  streamerPromoGeneratorCloseBtn.addEventListener('click', function () {
+    streamerPromoGeneratorEl.hidden = true;
+  });
+  streamerPromoGeneratorEl.querySelectorAll('[data-promo-copy]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      copyStreamerPromoOutput(button.getAttribute('data-promo-copy'), button).catch(function (err) {
+        console.error('홍보글 복사 실패:', err);
+        window.alert('복사에 실패했습니다. 내용을 선택해 직접 복사해주세요.');
+      });
+    });
+  });
+
   async function refreshStreamerPromoLinks() {
     streamerPromoLinksListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     streamerPromoLinksStatusEl.textContent = '';
@@ -2283,6 +2458,21 @@
       row.appendChild(input);
       row.appendChild(saveBtn);
       row.appendChild(completionLabel);
+      const generateBtn = document.createElement('button');
+      generateBtn.type = 'button';
+      generateBtn.className = 'perm-refresh-btn';
+      generateBtn.textContent = '홍보글 생성';
+      generateBtn.disabled = !item.nickname;
+      generateBtn.title = item.nickname ? '' : '닉네임이 없어 홍보글을 생성할 수 없습니다.';
+      generateBtn.addEventListener('click', function () {
+        activeStreamerPromoEntry = item;
+        streamerPromoGeneratorNameEl.value = item.nickname || '';
+        renderStreamerPromoDraft();
+        streamerPromoGeneratorOpenBtn.disabled = !item.writeUrl || item.promotedCompleted;
+        streamerPromoGeneratorEl.hidden = false;
+        streamerPromoGeneratorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      row.appendChild(generateBtn);
       if (item.writeUrl) {
         openLink = item.promotedCompleted ? document.createElement('button') : document.createElement('a');
         if (openLink.tagName === 'A') {
