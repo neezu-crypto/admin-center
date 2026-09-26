@@ -1696,7 +1696,8 @@ const onyuStartSession = onCall(async (request) => {
 
 // 연인 엔딩 플레이 후기는 인증된 사용자의 계정·엔딩별 최신 1건으로 저장한다.
 // 클라이언트가 uid나 저장 경로를 지정하지 못하며, onyuVn 노드는 RTDB 규칙에서
-// 클라이언트 읽기/쓰기가 차단되어 있어 후기 본문과 작성자 식별자는 서버에만 노출된다.
+// 클라이언트 읽기/쓰기가 차단되어 있다. 계정 식별자는 서버에만 두고, 홍보를
+// 선택한 경우에만 사용자가 직접 입력하거나 서버가 검증한 공개 방송국 정보를 노출한다.
 const onyuSubmitReview = onCall(async (request) => {
   const uid = requireAuth(request);
   const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
@@ -1711,14 +1712,44 @@ const onyuSubmitReview = onCall(async (request) => {
   if (!review) throw new HttpsError('invalid-argument', '후기 내용을 입력해 주세요.');
   if (review.length > 1000) throw new HttpsError('invalid-argument', '후기는 1,000자 이내로 작성해 주세요.');
 
-  const now = Date.now();
+  const rating = Number(request.data && request.data.rating);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    throw new HttpsError('invalid-argument', '별점은 1~5점 중에서 선택해 주세요.');
+  }
   const db = getDatabase();
+  const userSnap = await db.ref('users/' + uid + '/streamerVerified').get();
+  const verified = userSnap.val() === true || await isVerifiedStreamerUid(uid);
+  let nickname = '';
+  let soopId = '';
+  let promoteRequested = false;
+  if (verified) {
+    const profileSnap = await db.ref('streamerVerifications').orderByChild('uid').equalTo(uid).limitToFirst(1).get();
+    profileSnap.forEach((child) => {
+      const profile = child.val() || {};
+      nickname = String(profile.nickname || '').trim().slice(0, 20);
+      soopId = normalizeSoopId(profile.soopId);
+      return true;
+    });
+  } else if (request.data && request.data.promoteBroadcast) {
+    nickname = String(request.data.nickname || '').trim();
+    soopId = normalizeSoopId(request.data.soopId);
+    if (!nickname || nickname.length > 20 || /[<>\x00-\x1F\x7F]/.test(nickname)) {
+      throw new HttpsError('invalid-argument', '스트리머 닉네임을 올바르게 입력해 주세요.');
+    }
+    if (!soopId) throw new HttpsError('invalid-argument', 'SOOP 아이디는 영문 소문자·숫자 2~20자로 입력해 주세요.');
+    promoteRequested = uid !== ONYU_ADMIN_UID;
+  }
+
+  const now = Date.now();
   const reviewRef = db.ref('onyuVn/reviews/' + uid + '/' + endingId);
   const previous = (await reviewRef.get()).val() || {};
   const reviewId = previous.publicId || db.ref('onyuVn/publicReviews').push().key;
   const result = await reviewRef.transaction((current) => ({
     endingId,
     review,
+    rating,
+    nickname,
+    soopId,
     createdAt: current && Number.isFinite(current.createdAt) ? current.createdAt : now,
     updatedAt: now,
     publicId: current && current.publicId || reviewId,
@@ -1729,6 +1760,9 @@ const onyuSubmitReview = onCall(async (request) => {
   const indexItem = {
     endingId,
     review: saved.review,
+    rating: saved.rating,
+    nickname: saved.nickname || '',
+    soopId: saved.soopId || '',
     createdAt: saved.createdAt,
     updatedAt: saved.updatedAt,
     visibility: saved.visibility,
@@ -1738,10 +1772,10 @@ const onyuSubmitReview = onCall(async (request) => {
   updates['onyuVn/reviewIndex/' + saved.publicId] = indexItem;
   updates['onyuVn/reviewOwners/' + saved.publicId] = uid;
   updates['onyuVn/publicReviews/' + saved.publicId] = saved.visibility === 'public'
-    ? { endingId, review: saved.review, createdAt: saved.createdAt, updatedAt: saved.updatedAt }
+    ? { endingId, review: saved.review, rating: saved.rating, nickname: saved.nickname || '', soopId: saved.soopId || '', createdAt: saved.createdAt, updatedAt: saved.updatedAt }
     : null;
   await db.ref().update(updates);
-  return { ok: true, updatedAt: now };
+  return { ok: true, updatedAt: now, promoteRequested, nickname, soopId };
 });
 
 const ONYU_REVIEW_PAGE_SIZE = 30;
@@ -1751,6 +1785,9 @@ function publicOnyuReview(item) {
   return {
     endingId: item.endingId,
     review: item.review,
+    rating: Number.isInteger(Number(item.rating)) && Number(item.rating) >= 1 && Number(item.rating) <= 5 ? Number(item.rating) : null,
+    nickname: String(item.nickname || '').slice(0, 20),
+    soopId: normalizeSoopId(item.soopId),
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };
@@ -1791,6 +1828,9 @@ const onyuVnListPublicReviews = onCall(async (request) => {
     id: item.id,
     endingId: item.endingId,
     review: item.review,
+    rating: item.rating,
+    nickname: item.nickname,
+    soopId: item.soopId,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   }));
@@ -1823,13 +1863,16 @@ async function ensureOnyuReviewIndex(db, adminUid) {
         const visibility = item.visibility === 'hidden' ? 'hidden' : 'public';
         const createdAt = Number(item.createdAt) || Date.now();
         const updatedAt = Number(item.updatedAt) || createdAt;
-        const entry = { endingId: reviewSnap.key, review: item.review, createdAt, updatedAt, visibility, uid: userSnap.key };
+        const rating = Number.isInteger(Number(item.rating)) && Number(item.rating) >= 1 && Number(item.rating) <= 5 ? Number(item.rating) : null;
+        const nickname = String(item.nickname || '').slice(0, 20);
+        const soopId = normalizeSoopId(item.soopId);
+        const entry = { endingId: reviewSnap.key, review: item.review, rating, nickname, soopId, createdAt, updatedAt, visibility, uid: userSnap.key };
         updates['onyuVn/reviewIndex/' + id] = entry;
         updates['onyuVn/reviewOwners/' + id] = userSnap.key;
         updates['onyuVn/reviews/' + userSnap.key + '/' + reviewSnap.key + '/publicId'] = id;
         if (!item.visibility) updates['onyuVn/reviews/' + userSnap.key + '/' + reviewSnap.key + '/visibility'] = visibility;
         updates['onyuVn/publicReviews/' + id] = visibility === 'public'
-          ? { endingId: reviewSnap.key, review: item.review, createdAt, updatedAt }
+          ? { endingId: reviewSnap.key, review: item.review, rating, nickname, soopId, createdAt, updatedAt }
           : null;
       });
     });
@@ -1850,6 +1893,9 @@ const onyuAdminListPlayerReviews = onCall(async (request) => {
     id: item.id,
     endingId: item.endingId,
     review: item.review,
+    rating: item.rating,
+    nickname: item.nickname,
+    soopId: item.soopId,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     visibility: item.visibility === 'hidden' ? 'hidden' : 'public',

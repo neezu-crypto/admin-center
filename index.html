@@ -1583,11 +1583,22 @@
         status.textContent = review.visibility === 'hidden' ? '숨김' : '공개';
         const date = document.createElement('time');
         date.textContent = new Date(review.updatedAt || review.createdAt || Date.now()).toLocaleString('ko-KR');
-        meta.append(ending, status, date);
+        const rating = document.createElement('span');
+        rating.textContent = review.rating ? '★'.repeat(review.rating) + '☆'.repeat(5 - review.rating) : '별점 미등록';
+        meta.append(ending, rating, status, date);
         const body = document.createElement('p');
         body.className = 'onyu-review-body';
         body.textContent = review.review || '';
         content.append(meta, body);
+        if (review.nickname && /^[a-z0-9]{2,20}$/.test(review.soopId || '')) {
+          const promo = document.createElement('a');
+          promo.href = 'https://www.sooplive.com/station/' + encodeURIComponent(review.soopId);
+          promo.target = '_blank';
+          promo.rel = 'noopener noreferrer';
+          promo.textContent = '📢 ' + review.nickname + ' 방송국';
+          promo.style.cssText = 'display:inline-block;margin-top:8px;color:var(--accent);font-size:12px;font-weight:700;';
+          content.appendChild(promo);
+        }
         const actions = document.createElement('div');
         actions.className = 'onyu-review-actions';
         const visibilityBtn = document.createElement('button');
