@@ -17,27 +17,39 @@
   }
 
   document.addEventListener('click', function (event) {
-    const button = event.target instanceof Element
-      ? event.target.closest('#' + OPEN_BUTTON_ID)
+    const target = event.target instanceof Element ? event.target : null;
+    const listLink = target ? target.closest('a[data-promo-write-link="true"]') : null;
+    const button = target
+      ? target.closest('#' + OPEN_BUTTON_ID)
       : null;
-    if (!button) return;
+    if (!button && !listLink) return;
 
-    const nickname = (document.getElementById('streamerPromoGeneratorName') || {}).value || '';
-    const title = (document.getElementById('streamerPromoGeneratedTitle') || {}).textContent || '';
-    const body = (document.getElementById('streamerPromoGeneratedBody') || {}).textContent || '';
-    const html = (document.getElementById('streamerPromoGeneratedHtml') || {}).textContent || '';
-    const writeUrl = button.dataset.writeUrl || '';
+    const nickname = listLink
+      ? listLink.dataset.nickname || ''
+      : (document.getElementById('streamerPromoGeneratorName') || {}).value || '';
+    const title = listLink
+      ? listLink.dataset.promoTitle || ''
+      : (document.getElementById('streamerPromoGeneratedTitle') || {}).textContent || '';
+    const body = listLink
+      ? listLink.dataset.promoBody || ''
+      : (document.getElementById('streamerPromoGeneratedBody') || {}).textContent || '';
+    const html = listLink
+      ? listLink.dataset.promoHtml || ''
+      : (document.getElementById('streamerPromoGeneratedHtml') || {}).textContent || '';
+    const writeUrl = listLink ? listLink.dataset.writeUrl || '' : button.dataset.writeUrl || '';
 
-    if (!nickname.trim() || !title || !body || !html || !writeUrl || button.disabled) {
+    if (!nickname.trim() || !title || !body || !html || !writeUrl || (button && button.disabled)) {
       event.preventDefault();
-      event.stopImmediatePropagation();
+      if (button) event.stopImmediatePropagation();
       showMessage('스트리머를 선택하고 생성된 내용을 확인해주세요.', true);
       return;
     }
 
     event.preventDefault();
-    event.stopImmediatePropagation();
-    button.disabled = true;
+    if (button) {
+      event.stopImmediatePropagation();
+      button.disabled = true;
+    }
     chrome.runtime.sendMessage({
       type: 'openPromoDraft',
       draft: {
@@ -57,7 +69,7 @@
       console.error('SOOP 홍보글 확장 프로그램 연결 실패:', error);
       showMessage('확장 프로그램에 연결하지 못했습니다. 설치 및 사용 설정을 확인해주세요.', true);
     }).finally(function () {
-      button.disabled = false;
+      if (button) button.disabled = false;
     });
   }, true);
 })();

@@ -2491,6 +2491,14 @@
         openLink.className = 'perm-refresh-btn';
         openLink.textContent = item.promotedCompleted ? '홍보 완료' : '글쓰기 열기';
         openLink.style.textDecoration = 'none';
+        if (openLink.tagName === 'A') {
+          openLink.dataset.promoWriteLink = 'true';
+          openLink.dataset.nickname = item.nickname || '';
+          openLink.dataset.writeUrl = item.writeUrl || '';
+          openLink.dataset.promoTitle = buildStreamerPromoTitle(item.nickname || '');
+          openLink.dataset.promoBody = buildStreamerPromoBody(item.nickname || '');
+          openLink.dataset.promoHtml = buildStreamerPromoHtml(item.nickname || '');
+        }
         openLink.addEventListener('click', function () {
           if (item.promotedCompleted) return;
           recentOpened = {
