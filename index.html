@@ -140,6 +140,16 @@
   .verif-actions button.reject { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button.revoke { background: none; border: 1px solid #e2554f; color: #e2554f; }
   .verif-actions button:disabled { opacity: .4; cursor: not-allowed; }
+  .onyu-review-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 14px; margin: 8px 0; border: 1px solid var(--sub-border); border-radius: 14px; background: var(--sub); }
+  .onyu-review-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; color: var(--ink-mute); font-size: 11px; }
+  .onyu-review-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); font-size: 13px; line-height: 1.65; }
+  .onyu-review-status { padding: 2px 8px; border-radius: 999px; background: rgba(63,182,137,.14); color: #217c59; font-weight: 700; }
+  .onyu-review-status.hidden { background: rgba(226,85,79,.12); color: #b3433e; }
+  .onyu-review-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .onyu-review-actions button { border-radius: 10px; padding: 6px 10px; border: 1px solid var(--sub-border); background: var(--paper); color: var(--ink); font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .onyu-review-actions button.danger { border-color: rgba(226,85,79,.5); color: #b3433e; }
+  .onyu-review-actions button:disabled { opacity: .45; cursor: wait; }
+  @media (max-width: 640px) { .onyu-review-row { grid-template-columns: 1fr; } }
   /* 1줄당 2건씩, 스크롤 한 화면엔 6줄(=12건)까지만 보이는 스크롤박스 */
   #auditLogList {
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
@@ -818,6 +828,14 @@
       <h3 class="subhead">프리셋 병합 실패 (배경시장)</h3>
       <div id="presetMergeFailureList"></div>
     </div>
+    <div class="card" id="section-onyu-reviews">
+      <h2>온 이유 플레이 후기 관리</h2>
+      <p class="hint">공개 후기 목록을 관리합니다. 숨긴 후기는 게임 갤러리에서 보이지 않으며, 원본 계정 UID는 이 화면에도 표시하지 않습니다.</p>
+      <button id="onyuReviewsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="onyuReviewsStatus" class="hint" style="margin-top:10px;"></div>
+      <div id="onyuReviewsList" style="margin-top:8px;"></div>
+      <button id="onyuReviewsMoreBtn" class="perm-refresh-btn" type="button" hidden>이전 후기 더 보기</button>
+    </div>
   </div>
 
   <!-- 관리자 전용 채팅 화면. StreamBet-Market의 공용 채널을 재사용한다. -->
@@ -911,6 +929,9 @@
   const onyuApproveViewerAccessFn = httpsCallable(functions, 'onyuApproveViewerAccess');
   const onyuRejectViewerAccessFn = httpsCallable(functions, 'onyuRejectViewerAccess');
   const onyuRevokeViewerAccessFn = httpsCallable(functions, 'onyuRevokeViewerAccess');
+  const onyuAdminListPlayerReviewsFn = httpsCallable(functions, 'onyuAdminListPlayerReviews');
+  const onyuAdminSetPlayerReviewVisibilityFn = httpsCallable(functions, 'onyuAdminSetPlayerReviewVisibility');
+  const onyuAdminDeletePlayerReviewFn = httpsCallable(functions, 'onyuAdminDeletePlayerReview');
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
   const setSeriesConfigFn = httpsCallable(functions, 'setSeriesConfig');
@@ -1012,6 +1033,10 @@
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
   const onyuAccessRefreshBtn = document.getElementById('onyuAccessRefreshBtn');
   const onyuAccessListEl = document.getElementById('onyuAccessList');
+  const onyuReviewsRefreshBtn = document.getElementById('onyuReviewsRefreshBtn');
+  const onyuReviewsStatusEl = document.getElementById('onyuReviewsStatus');
+  const onyuReviewsListEl = document.getElementById('onyuReviewsList');
+  const onyuReviewsMoreBtn = document.getElementById('onyuReviewsMoreBtn');
   const auditRefreshBtn = document.getElementById('auditRefreshBtn');
   const auditLogListEl = document.getElementById('auditLogList');
   const skinPurchasesRefreshBtn = document.getElementById('skinPurchasesRefreshBtn');
@@ -1094,7 +1119,7 @@
     },
     {
       id: 'review', label: '검수·승인', icon: '🔎', permission: 'reviewQueue',
-      sections: ['section-review-queue', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
+      sections: ['section-review-queue', 'section-onyu-reviews', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
     },
     {
       id: 'content', label: '콘텐츠·현황', icon: '📦', role: 'admin',
@@ -1418,6 +1443,7 @@
       } else if (sessionId === 'review') {
         if (role === 'admin') startMarketManagementSubscription();
         startReviewQueueSubscriptions();
+        jobs.push(refreshOnyuPlayerReviews(true));
       } else if (sessionId === 'content') {
         jobs.push(refreshSeriesConfig(), refreshLifeGameBotConfig(), refreshPromotedContent());
       } else if (sessionId === 'promotions') {
@@ -1524,6 +1550,99 @@
     }
   }
   onyuAccessRefreshBtn.addEventListener('click', refreshOnyuAccessRequests);
+
+  let onyuPlayerReviewCursor = null;
+  let onyuPlayerReviewHasMore = false;
+  async function refreshOnyuPlayerReviews(reset) {
+    if (!onyuReviewsListEl) return;
+    if (reset) {
+      onyuPlayerReviewCursor = null;
+      onyuPlayerReviewHasMore = false;
+      onyuReviewsListEl.innerHTML = '';
+    }
+    onyuReviewsStatusEl.textContent = '후기를 불러오는 중...';
+    onyuReviewsRefreshBtn.disabled = true;
+    onyuReviewsMoreBtn.disabled = true;
+    try {
+      const result = await onyuAdminListPlayerReviewsFn({ cursor: reset ? null : onyuPlayerReviewCursor });
+      const data = result.data || {};
+      const reviews = Array.isArray(data.reviews) ? data.reviews : [];
+      onyuPlayerReviewCursor = data.nextCursor || null;
+      onyuPlayerReviewHasMore = !!data.hasMore;
+      reviews.forEach(function (review) {
+        const row = document.createElement('article');
+        row.className = 'onyu-review-row';
+        row.dataset.reviewId = review.id;
+        const content = document.createElement('div');
+        const meta = document.createElement('div');
+        meta.className = 'onyu-review-meta';
+        const ending = document.createElement('b');
+        ending.textContent = review.endingId === 'lover' ? '연인 엔딩' : '플레이 후기';
+        const status = document.createElement('span');
+        status.className = 'onyu-review-status' + (review.visibility === 'hidden' ? ' hidden' : '');
+        status.textContent = review.visibility === 'hidden' ? '숨김' : '공개';
+        const date = document.createElement('time');
+        date.textContent = new Date(review.updatedAt || review.createdAt || Date.now()).toLocaleString('ko-KR');
+        meta.append(ending, status, date);
+        const body = document.createElement('p');
+        body.className = 'onyu-review-body';
+        body.textContent = review.review || '';
+        content.append(meta, body);
+        const actions = document.createElement('div');
+        actions.className = 'onyu-review-actions';
+        const visibilityBtn = document.createElement('button');
+        visibilityBtn.type = 'button';
+        visibilityBtn.dataset.action = 'visibility';
+        visibilityBtn.textContent = review.visibility === 'hidden' ? '다시 공개' : '숨기기';
+        actions.appendChild(visibilityBtn);
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.dataset.action = 'delete';
+        deleteBtn.className = 'danger';
+        deleteBtn.textContent = '삭제';
+        actions.appendChild(deleteBtn);
+        row.append(content, actions);
+        onyuReviewsListEl.appendChild(row);
+      });
+      onyuReviewsStatusEl.textContent = onyuReviewsListEl.children.length
+        ? onyuReviewsListEl.children.length + '건 표시 · 최신순'
+        : '등록된 후기가 없습니다.';
+      onyuReviewsMoreBtn.hidden = !onyuPlayerReviewHasMore;
+    } catch (error) {
+      console.error('온 이유 후기 목록 조회 실패:', error);
+      onyuReviewsStatusEl.textContent = '후기 조회에 실패했습니다. ' + (error && error.message ? error.message : '잠시 후 다시 시도해 주세요.');
+      onyuReviewsMoreBtn.hidden = false;
+      onyuReviewsMoreBtn.textContent = onyuPlayerReviewCursor ? '이전 후기 다시 불러오기' : '다시 불러오기';
+    } finally {
+      onyuReviewsRefreshBtn.disabled = false;
+      onyuReviewsMoreBtn.disabled = false;
+    }
+  }
+  onyuReviewsRefreshBtn.addEventListener('click', function () { refreshOnyuPlayerReviews(true); });
+  onyuReviewsMoreBtn.addEventListener('click', function () {
+    if (!onyuPlayerReviewCursor && !onyuPlayerReviewHasMore) { refreshOnyuPlayerReviews(true); return; }
+    onyuReviewsMoreBtn.textContent = '이전 후기 더 보기';
+    refreshOnyuPlayerReviews(false);
+  });
+  onyuReviewsListEl.addEventListener('click', async function (event) {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const row = button.closest('.onyu-review-row');
+    const reviewId = row && row.dataset.reviewId;
+    if (!reviewId) return;
+    const action = button.dataset.action;
+    if (action === 'delete' && !window.confirm('이 후기를 영구 삭제할까요? 삭제 후 복구할 수 없습니다.')) return;
+    row.querySelectorAll('button').forEach(function (item) { item.disabled = true; });
+    try {
+      if (action === 'delete') await onyuAdminDeletePlayerReviewFn({ reviewId: reviewId });
+      else await onyuAdminSetPlayerReviewVisibilityFn({ reviewId: reviewId, visible: button.textContent === '다시 공개' });
+      await refreshOnyuPlayerReviews(true);
+    } catch (error) {
+      console.error('온 이유 후기 처리 실패:', error);
+      window.alert('후기 처리에 실패했습니다. ' + (error && error.message ? error.message : '잠시 후 다시 시도해 주세요.'));
+      row.querySelectorAll('button').forEach(function (item) { item.disabled = false; });
+    }
+  });
 
   function renderOnyuAccessRequests() {
     if (!onyuAccessRequests.length) {
@@ -3736,6 +3855,7 @@
     { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-skin-purchases', label: '🎨 스킨 구매 내역', role: 'admin', permKey: 'viewMonitoring' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인', permKey: 'reviewQueue' },
+    { id: 'section-onyu-reviews', label: '💬 온 이유 플레이 후기', role: 'admin', permKey: 'reviewQueue' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
