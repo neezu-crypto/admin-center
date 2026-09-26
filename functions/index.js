@@ -421,28 +421,11 @@ const deleteDevbarLink = onCall(async (request) => {
 });
 
 // 통합 관리 센터 운영 도구 — Adult Image Generator 링크 모음. 관리자만 조회·저장할
-// 수 있으며 링크, 메모, 정렬 순서를 하나의 노드에 보관한다. 최초 조회 시 기본 목록을
-// 서버에서 시드해 여러 브라우저의 관리자 세션에서도 동일한 목록을 사용한다.
+// 수 있으며 링크, 메모, 정렬 순서는 RTDB의 비공개 노드에만 보관한다. 기본 링크를
+// 공개 소스에 포함하거나 조회 시 자동 시드하지 않는다.
 const ADULT_IMAGE_GENERATOR_LINKS_PATH = 'adminCenter/adultImageGeneratorLinks';
 const ADULT_IMAGE_GENERATOR_URL_RE = /^https:\/\/\S+$/;
 const ADULT_IMAGE_GENERATOR_ID_RE = /^[a-z0-9][a-z0-9_-]{1,48}$/;
-const DEFAULT_ADULT_IMAGE_GENERATOR_LINKS = [
-  { id: 'kenerateai', title: 'Kenerate AI', url: 'https://kenerateai.com/app/image', memo: '', order: 0 },
-  { id: 'goenhance', title: 'GoEnhance AI', url: 'https://www.goenhance.ai/app/text-to-image', memo: '', order: 1 },
-  { id: 'aireel', title: 'AI Reel', url: 'https://www.aireel.net/ko/image-to-image', memo: '', order: 2 },
-  { id: 'weshop', title: 'WeShop AI', url: 'https://www.weshop.ai/ko/tools/creative-suite-ai-image', memo: '', order: 3 },
-  { id: 'pixai', title: 'PixAI', url: 'https://pixai.art/ko/generator/image', memo: '', order: 4 },
-  { id: 'senzia', title: 'Senzia', url: 'https://www.senzia.cc/ko/ai-image-generator', memo: '', order: 5 },
-  { id: 'pollo', title: 'Pollo AI', url: 'https://pollo.ai/ko/ai-image-generator', memo: '', order: 6 },
-  { id: 'mage', title: 'Mage', url: 'https://www.mage.space/explore', memo: '', order: 7 },
-  { id: 'live3d', title: 'Live3D', url: 'https://live3d.io/ai-image-editor', memo: '', order: 8 },
-  { id: 'seaart', title: 'SeaArt', url: 'https://www.seaart.ai/create/image?id=dap0erle878c73akrbp0&model_ver_no=4b88d79983d5affc6e71a8f3c2d99cf1', memo: '', order: 9 },
-  { id: 'stabledifffusion', title: 'Stable Diffusion', url: 'https://stabledifffusion.com/features/ai-photo-editor', memo: '', order: 10 },
-  { id: 'dreemy', title: 'Dreemy AI', url: 'https://www.dreemy.ai/image-generator', memo: '', order: 11 },
-  { id: 'animegenius', title: 'AnimeGenius', url: 'https://animegenius.live3d.io/image-to-image', memo: '', order: 12 },
-  { id: 'perchance', title: 'Perchance', url: 'https://perchance.org/generate-anything-com', memo: '', order: 13 },
-  { id: 'picassoia', title: 'Picassoia', url: 'https://picassoia.com/en/toolkit?category=text-to-image&model=picassoia-image-editor-pro', memo: '', order: 14 },
-];
 
 function adultImageGeneratorLinksFromValue(value) {
   if (!value || typeof value !== 'object') return [];
@@ -466,14 +449,7 @@ function adultImageGeneratorLinksFromValue(value) {
 const getAdultImageGeneratorLinks = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const node = db.ref(ADULT_IMAGE_GENERATOR_LINKS_PATH);
-  const snap = await node.get();
-  if (!snap.exists()) {
-    const seeded = {};
-    DEFAULT_ADULT_IMAGE_GENERATOR_LINKS.forEach(function (item) { seeded[item.id] = item; });
-    await node.set(seeded);
-    return { links: DEFAULT_ADULT_IMAGE_GENERATOR_LINKS };
-  }
+  const snap = await db.ref(ADULT_IMAGE_GENERATOR_LINKS_PATH).get();
   return { links: adultImageGeneratorLinksFromValue(snap.val()) };
 });
 
