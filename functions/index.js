@@ -2032,7 +2032,13 @@ const ONYU_ANALYTICS_DEDUP_RETENTION_DAYS = 35;
 
 function onyuAnalyticsKey(value, fallback) {
   const text = String(value === undefined || value === null ? (fallback || '') : value).trim();
-  return /^[A-Za-z0-9_.-]{1,80}$/.test(text) ? text : '';
+  // RTDB 경로 키에는 점(.)도 허용되지 않는다.
+  return /^[A-Za-z0-9_-]{1,80}$/.test(text) ? text : '';
+}
+
+function onyuAnalyticsVersionKey(value) {
+  // 앱 버전은 2026.09.17 형식이므로 RTDB 키에 안전한 하이픈 형식으로 저장한다.
+  return String(value || '').trim().replace(/[^A-Za-z0-9_-]+/g, '-').slice(0, 80);
 }
 
 function onyuAnalyticsDate(at) {
@@ -2062,6 +2068,7 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
   const incrementCounts = {};
   const updates = {};
   const rawEntries = [];
+  const reservedDedupRefs = [];
   const now = Date.now();
   const uidKey = onyuAnalyticsUidKey(meta.uid);
   function increment(path) { incrementCounts[path] = (incrementCounts[path] || 0) + 1; }
@@ -2075,11 +2082,14 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
     const date = onyuAnalyticsDate(at);
     const eventId = onyuAnalyticsKey(event.eventId);
     if (eventId) {
-      const dedupRef = db.ref('onyuVn/analytics/dedup/' + date + '/' + eventId);
+      // v2 공간을 사용해 과거 버전에서 카운터 저장 전에 남은 dedup 마커를
+      // 재전송 이벤트가 영구히 가로막지 않게 한다.
+      const dedupRef = db.ref('onyuVn/analytics/dedup/' + date + '/v2-' + eventId);
       const dedupResult = await dedupRef.transaction(function (value) {
         return value === true ? undefined : true;
       });
       if (!dedupResult.committed) continue;
+      reservedDedupRefs.push(dedupRef);
     }
     accepted++;
     const base = 'onyuVn/analytics/daily/' + date;
@@ -2105,7 +2115,7 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
     if (mode) increment(base + '/requestedModes/' + mode);
     const deviceType = onyuAnalyticsKey(event.deviceType);
     const orientation = onyuAnalyticsKey(event.orientation);
-    const clientVersion = onyuAnalyticsKey(event.clientVersion);
+    const clientVersion = onyuAnalyticsVersionKey(event.clientVersion);
     if (deviceType) increment(base + '/devices/' + deviceType);
     if (orientation) increment(base + '/orientations/' + orientation);
     if (clientVersion) increment(base + '/clientVersions/' + clientVersion);
@@ -2149,7 +2159,17 @@ async function writeOnyuAnalyticsEvents(db, meta, events) {
     const key = db.ref('onyuVn/analytics/raw/' + entry.date).push().key;
     updates['onyuVn/analytics/raw/' + entry.date + '/' + key] = entry.value;
   });
-  if (Object.keys(updates).length) await db.ref().update(updates);
+  if (Object.keys(updates).length) {
+    try {
+      await db.ref().update(updates);
+    } catch (error) {
+      // dedup 선점 뒤 집계 저장이 실패하면 마커를 되돌려 다음 재전송에서 복구한다.
+      await Promise.all(reservedDedupRefs.map(function (ref) {
+        return ref.remove().catch(function () {});
+      }));
+      throw error;
+    }
+  }
   return { accepted };
 }
 
