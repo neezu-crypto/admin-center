@@ -1034,6 +1034,18 @@ const notifyOnyuViewerAccessRequest = onValueCreated('/onyuVn/viewerAccessAlerts
     deepLink('section-onyu-access')
   );
 });
+const notifyOnyuStreamerGameGiftRequest = onValueCreated('/onyuVn/streamerGameGiftRequests/{requestId}', async (event) => {
+  const data = event.data.val() || {};
+  const target = String(data.targetNickname || '(닉네임 없음)').replace(/[\r\n`]/g, ' ').slice(0, 60);
+  const donor = String(data.donorNickname || '(닉네임 미입력)').replace(/[\r\n`]/g, ' ').slice(0, 60);
+  const balloons = Math.max(0, Number(data.balloons) || 50);
+  await sendDiscordNotification(
+    '🎁 **온 이유 스트리머 게임 선물 신청**\n' +
+    '선물 대상: ' + target + ' (@' + String(data.targetSoopId || '').replace(/[\r\n`]/g, '').slice(0, 30) + ')\n' +
+    '후원자 닉네임: ' + donor + ' · 별풍선 ' + balloons + '개\n' +
+    '실제 후원을 확인한 뒤 관리자센터에서 승인해 주세요.\n' + deepLink('section-onyu-access')
+  );
+});
 
 // 2026-09-05 추가(신규 게임 온보딩 체크리스트) — 인생게임/갤러리의 신고 큐는
 // admin-center 페이지 안에 대응하는 섹션이 없고, 각 사이트 자체 관리 패널에서
@@ -1603,7 +1615,14 @@ async function getOnyuAccessState(uid, request) {
   // 시청자 경로로 판정한다. 관리자 모드일 때만 위에서 모든 접근을 허용한다.
   // 그 외 계정은 users 플래그가 없는 레거시 인증 기록도 스트리머로 인식한다.
   const streamerVerified = !isAdmin && (user.streamerVerified === true || await isVerifiedStreamerUid(uid));
-  if (streamerVerified) return { role: 'streamer', accessMode: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin, adminMode: false };
+  if (streamerVerified) {
+    const entitlementSnap = await db.ref('onyuVn/streamerGameEntitlements/' + uid).get();
+    const hasGiftEntitlement = entitlementSnap.exists() && entitlementSnap.val().status === 'active';
+    return {
+      role: 'streamer', accessMode: 'streamer', accessStatus: hasGiftEntitlement ? 'approved' : 'gift-required',
+      canStartGame: hasGiftEntitlement, authenticated: true, loginMethod, isAdmin, adminMode: false,
+    };
+  }
   const access = accessSnap.val() || {};
   const req = requestSnap.val() || {};
   const status = access.status || req.status || 'none';
@@ -1658,12 +1677,152 @@ const onyuGetViewerAccess = onCall(async (request) => {
   return Object.assign({ ok: true, uid }, await getOnyuAccessState(uid, request));
 });
 
+// 일반 로그인 유저가 관리자 방송국에 후원하고, 인증 스트리머에게 온이유 이용권을
+// 선물하는 신청 흐름. 후원 금액은 기존 기준(별풍선 50개)이며 지급은 관리자 검수 후다.
+const ONYU_STREAMER_GIFT_BALLOONS = 50;
+const onyuListStreamerGiftTargets = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
+  const userSnap = await getDatabase().ref('users/' + uid).get();
+  const user = userSnap.val() || {};
+  if (provider === 'anonymous' && user.googleLinked !== true && user.kakaoLinked !== true) {
+    throw new HttpsError('failed-precondition', '로그인 후 이용할 수 있습니다.');
+  }
+  const snap = await getDatabase().ref('streamerVerifications').get();
+  const byUid = new Map();
+  Object.keys(snap.val() || {}).forEach((verificationId) => {
+    const row = snap.val()[verificationId] || {};
+    const targetUid = String(row.uid || '').trim();
+    if (!targetUid || targetUid === uid || byUid.has(targetUid)) return;
+    const nickname = String(row.nickname || '').trim();
+    const soopId = normalizeSoopId(row.soopId);
+    if (!nickname || !soopId) return;
+    byUid.set(targetUid, { verificationId, nickname, soopId });
+  });
+  const candidates = Array.from(byUid.entries());
+  const eligibility = await Promise.all(candidates.map(async ([targetUid, streamer]) => {
+    const entitlementSnap = await getDatabase().ref('onyuVn/streamerGameEntitlements/' + targetUid).get();
+    return entitlementSnap.exists() && entitlementSnap.val().status === 'active' ? null : streamer;
+  }));
+  const streamers = eligibility.filter(Boolean).sort((a, b) => a.nickname.localeCompare(b.nickname, 'ko'));
+  return { streamers, balloons: ONYU_STREAMER_GIFT_BALLOONS };
+});
+
+const onyuSubmitStreamerGameGift = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
+  const db = getDatabase();
+  const userSnap = await db.ref('users/' + uid).get();
+  const user = userSnap.val() || {};
+  if (provider === 'anonymous' && user.googleLinked !== true && user.kakaoLinked !== true) {
+    throw new HttpsError('failed-precondition', 'Google 또는 Kakao 로그인 후 선물할 수 있습니다.');
+  }
+  const verificationId = String(request.data && request.data.verificationId || '').trim();
+  const donorNickname = String(request.data && request.data.donorNickname || '').trim();
+  if (!verificationId || verificationId.length > 200) throw new HttpsError('invalid-argument', '선물 받을 인증 스트리머를 선택해 주세요.');
+  if (!donorNickname || donorNickname.length > 30) throw new HttpsError('invalid-argument', '후원자 SOOP 닉네임을 1~30자로 입력해 주세요.');
+  const streamerSnap = await db.ref('streamerVerifications/' + verificationId).get();
+  const streamer = streamerSnap.val() || {};
+  const targetUid = String(streamer.uid || '').trim();
+  const targetNickname = String(streamer.nickname || '').trim();
+  const targetSoopId = normalizeSoopId(streamer.soopId);
+  if (!targetUid || !targetNickname || !targetSoopId || !(await isVerifiedStreamerUid(targetUid))) {
+    throw new HttpsError('failed-precondition', '인증 상태를 확인할 수 없는 스트리머입니다. 목록을 새로고침해 주세요.');
+  }
+  if (targetUid === uid) throw new HttpsError('failed-precondition', '본인에게는 선물할 수 없습니다.');
+  const entitlementSnap = await db.ref('onyuVn/streamerGameEntitlements/' + targetUid).get();
+  if (entitlementSnap.exists() && entitlementSnap.val().status === 'active') {
+    throw new HttpsError('already-exists', '해당 스트리머는 이미 온이유 게임 이용권을 보유하고 있습니다.');
+  }
+  const now = Date.now();
+  const requestRef = db.ref('onyuVn/streamerGameGiftRequests').push();
+  const giftRequest = {
+    requestId: requestRef.key,
+    requesterUid: uid,
+    provider: provider === 'google.com' || user.googleLinked === true ? 'google' : 'kakao',
+    donorNickname,
+    targetUid,
+    targetNickname,
+    targetSoopId,
+    balloons: ONYU_STREAMER_GIFT_BALLOONS,
+    status: 'pending',
+    requestedAt: now,
+    updatedAt: now,
+  };
+  await requestRef.set(giftRequest);
+  await recordOnyuServerEvent(request, 'streamer_game_gift_requested', { targetUid });
+  return { ok: true, requestId: requestRef.key, balloons: ONYU_STREAMER_GIFT_BALLOONS };
+});
+
+const onyuListStreamerGameGifts = onCall(async (request) => {
+  await requireAdmin(request);
+  const snap = await getDatabase().ref('onyuVn/streamerGameGiftRequests').get();
+  const data = snap.val() || {};
+  const requests = Object.keys(data).map((id) => Object.assign({ requestId: id }, data[id]))
+    .sort((a, b) => (b.updatedAt || b.requestedAt || 0) - (a.updatedAt || a.requestedAt || 0));
+  return { requests };
+});
+
+const onyuReviewStreamerGameGift = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const requestId = String(request.data && request.data.requestId || '').trim();
+  const decision = String(request.data && request.data.decision || '').trim();
+  if (!requestId || requestId.length > 200) throw new HttpsError('invalid-argument', '선물 신청을 선택해 주세요.');
+  if (!['approve', 'reject'].includes(decision)) throw new HttpsError('invalid-argument', '처리 유형이 올바르지 않습니다.');
+  const db = getDatabase();
+  const giftRef = db.ref('onyuVn/streamerGameGiftRequests/' + requestId);
+  const giftSnap = await giftRef.get();
+  const gift = giftSnap.val() || {};
+  if (!gift.requestId || gift.status !== 'pending') throw new HttpsError('failed-precondition', '대기 중인 선물 신청이 아닙니다.');
+  const now = Date.now();
+  if (decision === 'approve') {
+    if (!(await isVerifiedStreamerUid(gift.targetUid))) {
+      throw new HttpsError('failed-precondition', '선물 받을 계정이 더 이상 인증 스트리머가 아닙니다.');
+    }
+    const entitlementRef = db.ref('onyuVn/streamerGameEntitlements/' + gift.targetUid);
+    const grant = {
+      status: 'active',
+      grantedAt: now,
+      grantedBy: adminUid,
+      giftRequestId: requestId,
+      donorNickname: gift.donorNickname || '',
+      targetNickname: gift.targetNickname || '',
+    };
+    const currentEntitlement = (await entitlementRef.get()).val();
+    if (currentEntitlement && currentEntitlement.status === 'active') {
+      if (currentEntitlement.giftRequestId !== requestId) {
+        throw new HttpsError('already-exists', '해당 스트리머에게 이미 이용권이 부여되어 있습니다.');
+      }
+    } else {
+      const result = await entitlementRef.transaction((current) => current === null ? grant : undefined);
+      if (!result.committed) throw new HttpsError('already-exists', '해당 스트리머에게 이미 이용권이 부여되어 있습니다.');
+    }
+  }
+  await giftRef.update({
+    status: decision === 'approve' ? 'approved' : 'rejected',
+    reviewedAt: now,
+    reviewedBy: adminUid,
+    updatedAt: now,
+  });
+  await logToAdminAuditLog(db, request, '온 이유 스트리머 게임 선물 ' + (decision === 'approve' ? '승인' : '거절'), gift.targetNickname + ' · ' + requestId);
+  await recordOnyuServerEvent(request, 'streamer_game_gift_' + (decision === 'approve' ? 'approved' : 'rejected'), { targetUid: gift.targetUid });
+  return { ok: true, status: decision === 'approve' ? 'approved' : 'rejected', targetUid: gift.targetUid };
+});
+
 // 게임 시작 직전에 호출하는 최종 서버 판정. 정적 콘텐츠 파일 자체를 숨기는 함수는
 // 아니지만, 정상적인 시작 경로의 승인 우회는 이 함수에서 차단한다.
 const onyuStartSession = onCall(async (request) => {
   const uid = requireAuth(request);
   if (uid !== ONYU_ADMIN_UID) {
-    throw new HttpsError('permission-denied', '온이유 게임은 아직 정식 출시 전입니다. 정식 출시 후 다시 이용해 주세요.');
+    const streamerFlagSnap = await getDatabase().ref('users/' + uid + '/streamerVerified').get();
+    const isVerified = streamerFlagSnap.val() === true || await isVerifiedStreamerUid(uid);
+    if (!isVerified) {
+      throw new HttpsError('permission-denied', '온이유 게임은 아직 정식 출시 전입니다. 정식 출시 후 다시 이용해 주세요.');
+    }
+    const entitlementSnap = await getDatabase().ref('onyuVn/streamerGameEntitlements/' + uid).get();
+    if (!entitlementSnap.exists() || entitlementSnap.val().status !== 'active') {
+      throw new HttpsError('permission-denied', '아직 온이유 게임 이용권이 없습니다. 선물 이용권을 받은 인증 스트리머만 시작할 수 있습니다.');
+    }
   }
   const adminRequest = Object.assign({}, request, {
     data: Object.assign({}, request.data || {}, { accessMode: 'admin' }),
@@ -1986,6 +2145,7 @@ const ONYU_ANALYTICS_EVENTS = new Set([
   'sound_unlock_clicked', 'login_success', 'viewer_access_requested', 'viewer_access_approved',
   'viewer_access_rejected', 'viewer_access_revoked', 'streamer_verification_requested',
   'streamer_verification_approved', 'streamer_verification_rejected',
+  'streamer_game_gift_requested', 'streamer_game_gift_approved', 'streamer_game_gift_rejected',
   'access_check_success', 'access_check_denied', 'game_access_granted', 'game_access_denied',
   'game_started', 'game_paused', 'game_resumed', 'game_abandoned', 'game_completed',
   'name_submitted', 'chapter_started', 'chapter_completed', 'choice_shown', 'choice_selected',
@@ -2374,7 +2534,12 @@ module.exports = {
   onyuAdminSetPlayerReviewVisibility,
   onyuAdminDeletePlayerReview,
   notifyOnyuViewerAccessRequest,
+  notifyOnyuStreamerGameGiftRequest,
   onyuGetViewerAccess,
+  onyuListStreamerGiftTargets,
+  onyuSubmitStreamerGameGift,
+  onyuListStreamerGameGifts,
+  onyuReviewStreamerGameGift,
   onyuStartSession,
   onyuListViewerAccessRequests,
   onyuApproveViewerAccess,
