@@ -1662,10 +1662,13 @@ const onyuGetViewerAccess = onCall(async (request) => {
 // 아니지만, 정상적인 시작 경로의 승인 우회는 이 함수에서 차단한다.
 const onyuStartSession = onCall(async (request) => {
   const uid = requireAuth(request);
-  const state = await getOnyuAccessState(uid, request);
-  if (!state.canStartGame) {
-    throw new HttpsError('permission-denied', state.authenticated ? '별풍선 후원 확인 및 관리자 승인이 필요합니다.' : 'Google 또는 카카오 로그인 후 접근 승인을 받아야 합니다.');
+  if (uid !== ONYU_ADMIN_UID) {
+    throw new HttpsError('permission-denied', '온이유 게임은 아직 정식 출시 전입니다. 정식 출시 후 다시 이용해 주세요.');
   }
+  const adminRequest = Object.assign({}, request, {
+    data: Object.assign({}, request.data || {}, { accessMode: 'admin' }),
+  });
+  const state = await getOnyuAccessState(uid, adminRequest);
   await recordOnyuServerEvent(request, 'game_access_granted');
   return Object.assign({ ok: true, uid }, state);
 });
