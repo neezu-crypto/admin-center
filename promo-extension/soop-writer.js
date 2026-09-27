@@ -64,6 +64,17 @@
     return null;
   }
 
+  async function waitForEditor(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const bodyEditor = findBodyEditor(null);
+      const titleField = findTitleField(bodyEditor);
+      if (titleField && bodyEditor) return { titleField: titleField, bodyEditor: bodyEditor };
+      await new Promise(function (resolve) { setTimeout(resolve, 250); });
+    }
+    return { titleField: findTitleField(null), bodyEditor: findBodyEditor(null) };
+  }
+
   function setInputValue(field, value) {
     const prototype = field instanceof HTMLTextAreaElement
       ? HTMLTextAreaElement.prototype
@@ -147,12 +158,15 @@
     status._hideTimer = setTimeout(function () { status.remove(); }, 9000);
   }
 
-  chrome.runtime.sendMessage({ type: 'takePromoDraft' }).then(function (result) {
+  chrome.runtime.sendMessage({ type: 'takePromoDraft' }).then(async function (result) {
     const draft = result && result.draft;
     if (!draft) return;
 
-    const bodyEditor = findBodyEditor(null);
-    const titleField = findTitleField(bodyEditor);
+    // SOOP renders the editor asynchronously after the page shell; wait for
+    // both fields instead of consuming the one-shot draft before they exist.
+    const fields = await waitForEditor(20000);
+    const bodyEditor = fields.bodyEditor;
+    const titleField = fields.titleField;
     if (!titleField || !bodyEditor) {
       showStatus('확장 프로그램이 제목 또는 본문 편집 영역을 찾지 못했습니다. 게시하지 않았습니다.', true);
       return;
