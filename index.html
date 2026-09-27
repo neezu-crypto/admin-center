@@ -545,13 +545,13 @@
     <div class="card" id="section-onyu-access">
       <h2>온 이유 기존 일반 시청자 접근 신청</h2>
       <p class="hint">
-        기존 접근 신청 기록입니다. 이 목록의 승인 정보는 현재 게임 시작 권한에 반영되지 않습니다. 아래의 스트리머 선물 신청을 승인하면 선물 대상 인증 스트리머에게만 이용권이 부여됩니다.
+        기존 접근 신청 기록입니다. 이 목록의 승인 정보는 현재 게임 시작 권한에 반영되지 않습니다. 아래 구매·선물 신청을 승인하면 해당 인증 스트리머 계정에 이용권이 부여됩니다.
       </p>
       <button id="onyuAccessRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <div id="onyuAccessList"></div>
-      <h3 class="subhead" style="margin-top:20px;">인증 스트리머 이용권 선물 신청</h3>
-      <p class="hint">일반 로그인 유저가 관리자 방송국에 별풍선 50개를 후원하고 인증 스트리머에게 선물한 신청입니다. 실제 후원 내역 확인 후 승인하면 선택된 스트리머 계정에만 이용권이 부여됩니다.</p>
-      <button id="onyuGiftRefreshBtn" class="perm-refresh-btn" type="button">선물 신청 새로고침</button>
+      <h3 class="subhead" style="margin-top:20px;">온이유 이용권 구매·선물 신청</h3>
+      <p class="hint">신청자는 관리자 방송국에 별풍선 50개를 후원합니다. 직접 구매는 인증 스트리머 본인에게, 선물은 선택된 인증 스트리머에게 지급됩니다. 실제 후원 내역과 신청 유형을 확인한 뒤 승인해 주세요.</p>
+      <button id="onyuGiftRefreshBtn" class="perm-refresh-btn" type="button">구매·선물 신청 새로고침</button>
       <div id="onyuGiftList"></div>
     </div>
 
@@ -1618,14 +1618,14 @@
 
   let onyuGiftRequests = [];
   async function refreshOnyuGiftRequests() {
-    onyuGiftListEl.innerHTML = '<div class="empty-state">선물 신청을 불러오는 중...</div>';
+    onyuGiftListEl.innerHTML = '<div class="empty-state">구매·선물 신청을 불러오는 중...</div>';
     onyuGiftRefreshBtn.disabled = true;
     try {
       const result = await onyuListStreamerGameGiftsFn();
       onyuGiftRequests = result.data && Array.isArray(result.data.requests) ? result.data.requests : [];
       renderOnyuGiftRequests();
     } catch (error) {
-      console.error('온 이유 스트리머 선물 신청 조회 실패:', error);
+      console.error('온 이유 이용권 구매·선물 신청 조회 실패:', error);
       onyuGiftListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다. ' + escapeHtml(error && error.message || '') + '</div>';
     } finally {
       onyuGiftRefreshBtn.disabled = false;
@@ -1636,17 +1636,20 @@
   function renderOnyuGiftRequests() {
     onyuGiftListEl.innerHTML = '';
     if (!onyuGiftRequests.length) {
-      onyuGiftListEl.innerHTML = '<div class="empty-state">선물 신청이 없습니다.</div>';
+      onyuGiftListEl.innerHTML = '<div class="empty-state">구매·선물 신청이 없습니다.</div>';
       return;
     }
     onyuGiftRequests.forEach(function (request) {
       const row = document.createElement('div');
       row.className = 'verif-row';
       const statusLabel = request.status === 'approved' ? '이용권 지급 완료' : request.status === 'rejected' ? '거절됨' : '후원 확인 대기';
+      const isSelfPurchase = request.purchaseType === 'self';
+      const requestTypeLabel = isSelfPurchase ? '본인 직접 구매' : '스트리머 선물';
       const requestedAt = request.requestedAt ? new Date(request.requestedAt).toLocaleString('ko-KR') : '';
       row.innerHTML =
-        '<div class="verif-info"><b>🎁 ' + escapeHtml(request.targetNickname || '(닉네임 없음)') +
+        '<div class="verif-info"><b>' + (isSelfPurchase ? '🎟️ ' : '🎁 ') + escapeHtml(request.targetNickname || '(닉네임 없음)') +
         ' <span class="source-tag stockMarket">' + statusLabel + '</span></b>' +
+        '<span>신청 유형: ' + requestTypeLabel + '</span>' +
         '<span>대상 방송국: @' + escapeHtml(request.targetSoopId || '') + ' · 대상 UID: ' + escapeHtml(request.targetUid || '') + '</span>' +
         '<span>신청자 SOOP 닉네임: ' + escapeHtml(request.donorNickname || '(미입력)') + ' · 별풍선 ' + Number(request.balloons || 50) + '개</span>' +
         '<span>신청자 UID: ' + escapeHtml(request.requesterUid || '') + (requestedAt ? ' · ' + requestedAt : '') + '</span></div>' +
@@ -1659,7 +1662,7 @@
           button.className = item[1] === 'approve' ? 'approve' : 'reject';
           button.textContent = item[0];
           button.addEventListener('click', async function () {
-            if (item[1] === 'approve' && !window.confirm(request.targetNickname + '님에게 온이유 게임 이용권을 선물할까요? 후원 내역을 확인했는지 먼저 확인해 주세요.')) return;
+            if (item[1] === 'approve' && !window.confirm(request.targetNickname + '님에게 온이유 게임 이용권을 ' + (isSelfPurchase ? '구매 승인으로 지급' : '선물 지급') + '할까요? 후원 내역을 확인했는지 먼저 확인해 주세요.')) return;
             button.disabled = true;
             try {
               await onyuReviewStreamerGameGiftFn({ requestId: request.requestId, decision: item[1] });

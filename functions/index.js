@@ -1039,9 +1039,10 @@ const notifyOnyuStreamerGameGiftRequest = onValueCreated('/onyuVn/streamerGameGi
   const target = String(data.targetNickname || '(닉네임 없음)').replace(/[\r\n`]/g, ' ').slice(0, 60);
   const donor = String(data.donorNickname || '(닉네임 미입력)').replace(/[\r\n`]/g, ' ').slice(0, 60);
   const balloons = Math.max(0, Number(data.balloons) || 50);
+  const isSelfPurchase = data.purchaseType === 'self';
   await sendDiscordNotification(
-    '🎁 **온 이유 스트리머 게임 선물 신청**\n' +
-    '선물 대상: ' + target + ' (@' + String(data.targetSoopId || '').replace(/[\r\n`]/g, '').slice(0, 30) + ')\n' +
+    (isSelfPurchase ? '🎟️ **온 이유 스트리머 게임 이용권 직접 구매 신청**\n' : '🎁 **온 이유 스트리머 게임 선물 신청**\n') +
+    (isSelfPurchase ? '구매자/이용권 대상: ' : '선물 대상: ') + target + ' (@' + String(data.targetSoopId || '').replace(/[\r\n`]/g, '').slice(0, 30) + ')\n' +
     '후원자 닉네임: ' + donor + ' · 별풍선 ' + balloons + '개\n' +
     '실제 후원을 확인한 뒤 관리자센터에서 승인해 주세요.\n' + deepLink('section-onyu-access')
   );
@@ -1677,8 +1678,8 @@ const onyuGetViewerAccess = onCall(async (request) => {
   return Object.assign({ ok: true, uid }, await getOnyuAccessState(uid, request));
 });
 
-// 일반 로그인 유저가 관리자 방송국에 후원하고, 인증 스트리머에게 온이유 이용권을
-// 선물하는 신청 흐름. 후원 금액은 기존 기준(별풍선 50개)이며 지급은 관리자 검수 후다.
+// 로그인 유저가 관리자 방송국에 후원해 본인(인증 스트리머) 이용권을 구매하거나
+// 인증 스트리머에게 선물하는 신청 흐름. 별풍선 50개, 지급은 관리자 검수 후다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
 const onyuListStreamerGiftTargets = onCall(async (request) => {
   const uid = requireAuth(request);
@@ -1690,22 +1691,36 @@ const onyuListStreamerGiftTargets = onCall(async (request) => {
   }
   const snap = await getDatabase().ref('streamerVerifications').get();
   const byUid = new Map();
+  let selfStreamer = null;
   Object.keys(snap.val() || {}).forEach((verificationId) => {
     const row = snap.val()[verificationId] || {};
     const targetUid = String(row.uid || '').trim();
-    if (!targetUid || targetUid === uid || byUid.has(targetUid)) return;
+    if (!targetUid || byUid.has(targetUid)) return;
     const nickname = String(row.nickname || '').trim();
     const soopId = normalizeSoopId(row.soopId);
     if (!nickname || !soopId) return;
-    byUid.set(targetUid, { verificationId, nickname, soopId });
+    const streamer = { verificationId, nickname, soopId };
+    byUid.set(targetUid, streamer);
+    if (targetUid === uid) selfStreamer = streamer;
   });
-  const candidates = Array.from(byUid.entries());
+  const streamerFlag = user.streamerVerified === true || await isVerifiedStreamerUid(uid);
+  const ownEntitlementSnap = await getDatabase().ref('onyuVn/streamerGameEntitlements/' + uid).get();
+  const selfEligible = streamerFlag && !(ownEntitlementSnap.exists() && ownEntitlementSnap.val().status === 'active');
+  const candidates = Array.from(byUid.entries()).filter(([targetUid]) => targetUid !== uid);
   const eligibility = await Promise.all(candidates.map(async ([targetUid, streamer]) => {
     const entitlementSnap = await getDatabase().ref('onyuVn/streamerGameEntitlements/' + targetUid).get();
     return entitlementSnap.exists() && entitlementSnap.val().status === 'active' ? null : streamer;
   }));
   const streamers = eligibility.filter(Boolean).sort((a, b) => a.nickname.localeCompare(b.nickname, 'ko'));
-  return { streamers, balloons: ONYU_STREAMER_GIFT_BALLOONS };
+  return {
+    streamers,
+    selfEligible,
+    selfStreamer: selfEligible ? {
+      nickname: selfStreamer ? selfStreamer.nickname : String(user.nickname || user.displayName || '인증 스트리머'),
+      soopId: selfStreamer ? selfStreamer.soopId : normalizeSoopId(user.soopId || user.streamerId),
+    } : null,
+    balloons: ONYU_STREAMER_GIFT_BALLOONS,
+  };
 });
 
 const onyuSubmitStreamerGameGift = onCall(async (request) => {
@@ -1717,19 +1732,33 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
   if (provider === 'anonymous' && user.googleLinked !== true && user.kakaoLinked !== true) {
     throw new HttpsError('failed-precondition', 'Google 또는 Kakao 로그인 후 선물할 수 있습니다.');
   }
+  const purchaseType = request.data && request.data.purchaseType === 'self' ? 'self' : 'gift';
   const verificationId = String(request.data && request.data.verificationId || '').trim();
   const donorNickname = String(request.data && request.data.donorNickname || '').trim();
-  if (!verificationId || verificationId.length > 200) throw new HttpsError('invalid-argument', '선물 받을 인증 스트리머를 선택해 주세요.');
   if (!donorNickname || donorNickname.length > 30) throw new HttpsError('invalid-argument', '후원자 SOOP 닉네임을 1~30자로 입력해 주세요.');
-  const streamerSnap = await db.ref('streamerVerifications/' + verificationId).get();
-  const streamer = streamerSnap.val() || {};
-  const targetUid = String(streamer.uid || '').trim();
-  const targetNickname = String(streamer.nickname || '').trim();
-  const targetSoopId = normalizeSoopId(streamer.soopId);
-  if (!targetUid || !targetNickname || !targetSoopId || !(await isVerifiedStreamerUid(targetUid))) {
-    throw new HttpsError('failed-precondition', '인증 상태를 확인할 수 없는 스트리머입니다. 목록을 새로고침해 주세요.');
+  let targetUid;
+  let targetNickname;
+  let targetSoopId;
+  if (purchaseType === 'self') {
+    const verified = user.streamerVerified === true || await isVerifiedStreamerUid(uid);
+    if (!verified) throw new HttpsError('permission-denied', '직접 구매는 인증 스트리머만 신청할 수 있습니다.');
+    targetUid = uid;
+    const ownVerificationSnap = await db.ref('streamerVerifications').orderByChild('uid').equalTo(uid).limitToFirst(1).get();
+    const ownVerification = Object.values(ownVerificationSnap.val() || {})[0] || {};
+    targetNickname = String(ownVerification.nickname || user.nickname || user.displayName || '인증 스트리머').trim();
+    targetSoopId = normalizeSoopId(ownVerification.soopId || user.soopId || user.streamerId);
+  } else {
+    if (!verificationId || verificationId.length > 200) throw new HttpsError('invalid-argument', '선물 받을 인증 스트리머를 선택해 주세요.');
+    const streamerSnap = await db.ref('streamerVerifications/' + verificationId).get();
+    const streamer = streamerSnap.val() || {};
+    targetUid = String(streamer.uid || '').trim();
+    targetNickname = String(streamer.nickname || '').trim();
+    targetSoopId = normalizeSoopId(streamer.soopId);
+    if (!targetUid || !targetNickname || !targetSoopId || !(await isVerifiedStreamerUid(targetUid))) {
+      throw new HttpsError('failed-precondition', '인증 상태를 확인할 수 없는 스트리머입니다. 목록을 새로고침해 주세요.');
+    }
+    if (targetUid === uid) throw new HttpsError('failed-precondition', '본인 구매를 선택해 주세요.');
   }
-  if (targetUid === uid) throw new HttpsError('failed-precondition', '본인에게는 선물할 수 없습니다.');
   const entitlementSnap = await db.ref('onyuVn/streamerGameEntitlements/' + targetUid).get();
   if (entitlementSnap.exists() && entitlementSnap.val().status === 'active') {
     throw new HttpsError('already-exists', '해당 스트리머는 이미 온이유 게임 이용권을 보유하고 있습니다.');
@@ -1739,6 +1768,7 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
   const giftRequest = {
     requestId: requestRef.key,
     requesterUid: uid,
+    purchaseType,
     provider: provider === 'google.com' || user.googleLinked === true ? 'google' : 'kakao',
     donorNickname,
     targetUid,
@@ -1750,7 +1780,7 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
     updatedAt: now,
   };
   await requestRef.set(giftRequest);
-  await recordOnyuServerEvent(request, 'streamer_game_gift_requested', { targetUid });
+  await recordOnyuServerEvent(request, purchaseType === 'self' ? 'streamer_game_license_purchase_requested' : 'streamer_game_gift_requested', { targetUid });
   return { ok: true, requestId: requestRef.key, balloons: ONYU_STREAMER_GIFT_BALLOONS };
 });
 
@@ -1776,7 +1806,8 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
   if (!gift.requestId || gift.status !== 'pending') throw new HttpsError('failed-precondition', '대기 중인 선물 신청이 아닙니다.');
   const now = Date.now();
   if (decision === 'approve') {
-    if (!(await isVerifiedStreamerUid(gift.targetUid))) {
+    const streamerFlagSnap = await db.ref('users/' + gift.targetUid + '/streamerVerified').get();
+    if (streamerFlagSnap.val() !== true && !(await isVerifiedStreamerUid(gift.targetUid))) {
       throw new HttpsError('failed-precondition', '선물 받을 계정이 더 이상 인증 스트리머가 아닙니다.');
     }
     const entitlementRef = db.ref('onyuVn/streamerGameEntitlements/' + gift.targetUid);
@@ -1785,6 +1816,8 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
       grantedAt: now,
       grantedBy: adminUid,
       giftRequestId: requestId,
+      purchaseType: gift.purchaseType === 'self' ? 'self' : 'gift',
+      requesterUid: gift.requesterUid || '',
       donorNickname: gift.donorNickname || '',
       targetNickname: gift.targetNickname || '',
     };
@@ -1804,8 +1837,9 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
     reviewedBy: adminUid,
     updatedAt: now,
   });
-  await logToAdminAuditLog(db, request, '온 이유 스트리머 게임 선물 ' + (decision === 'approve' ? '승인' : '거절'), gift.targetNickname + ' · ' + requestId);
-  await recordOnyuServerEvent(request, 'streamer_game_gift_' + (decision === 'approve' ? 'approved' : 'rejected'), { targetUid: gift.targetUid });
+  const requestLabel = gift.purchaseType === 'self' ? '스트리머 게임 이용권 직접 구매' : '스트리머 게임 선물';
+  await logToAdminAuditLog(db, request, '온 이유 ' + requestLabel + ' ' + (decision === 'approve' ? '승인' : '거절'), gift.targetNickname + ' · ' + requestId);
+  await recordOnyuServerEvent(request, (gift.purchaseType === 'self' ? 'streamer_game_license_purchase_' : 'streamer_game_gift_') + (decision === 'approve' ? 'approved' : 'rejected'), { targetUid: gift.targetUid });
   return { ok: true, status: decision === 'approve' ? 'approved' : 'rejected', targetUid: gift.targetUid };
 });
 
@@ -1821,7 +1855,7 @@ const onyuStartSession = onCall(async (request) => {
     }
     const entitlementSnap = await getDatabase().ref('onyuVn/streamerGameEntitlements/' + uid).get();
     if (!entitlementSnap.exists() || entitlementSnap.val().status !== 'active') {
-      throw new HttpsError('permission-denied', '아직 온이유 게임 이용권이 없습니다. 선물 이용권을 받은 인증 스트리머만 시작할 수 있습니다.');
+      throw new HttpsError('permission-denied', '아직 온이유 게임 이용권이 없습니다. 직접 구매하거나 선물 받은 뒤 이용할 수 있습니다.');
     }
   }
   const adminRequest = Object.assign({}, request, {
