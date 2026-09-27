@@ -1606,16 +1606,26 @@ async function getOnyuAccessState(uid, request) {
   const adminAccessMode = isAdmin && ['admin', 'streamer', 'viewer'].includes(requestedMode)
     ? requestedMode
     : isAdmin && request && request.data && request.data.adminMode === true ? 'admin' : 'viewer';
-  if (isAdmin && adminAccessMode === 'admin') {
-    return { role: 'admin', accessMode: 'admin', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin: true, adminMode: true };
+  if (isAdmin) {
+    if (adminAccessMode === 'admin') {
+      return { role: 'admin', accessMode: 'admin', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin: true, adminMode: true };
+    }
+    if (adminAccessMode === 'streamer') {
+      const entitlementSnap = await db.ref('onyuVn/streamerGameEntitlements/' + uid).get();
+      const hasEntitlement = entitlementSnap.exists() && entitlementSnap.val().status === 'active';
+      return {
+        role: 'streamer', accessMode: 'streamer', accessStatus: hasEntitlement ? 'approved' : 'gift-required',
+        canStartGame: hasEntitlement, authenticated: true, loginMethod, isAdmin: true, adminMode: false,
+      };
+    }
+    // 관리자도 일반 로그인 유저 모드에서는 기존 시청자 승인 상태만 사용한다.
+    const access = accessSnap.val() || {};
+    const req = requestSnap.val() || {};
+    const status = access.status || req.status || 'none';
+    return { role: 'viewer', accessMode: 'viewer', accessStatus: status, canStartGame: authenticatedViewer && status === 'approved', authenticated: authenticatedViewer, loginMethod, isAdmin: true, adminMode: false };
   }
-  if (isAdmin && adminAccessMode === 'streamer') {
-    return { role: 'streamer', accessMode: 'streamer', accessStatus: 'approved', canStartGame: true, authenticated: true, loginMethod, isAdmin: true, adminMode: false };
-  }
-  // 관리자 계정은 일반 유저 모드에서 스트리머 인증 혜택까지 우회하지 않도록
-  // 시청자 경로로 판정한다. 관리자 모드일 때만 위에서 모든 접근을 허용한다.
-  // 그 외 계정은 users 플래그가 없는 레거시 인증 기록도 스트리머로 인식한다.
-  const streamerVerified = !isAdmin && (user.streamerVerified === true || await isVerifiedStreamerUid(uid));
+  // 관리자가 아닌 계정은 users 플래그가 없는 레거시 인증 기록도 스트리머로 인식한다.
+  const streamerVerified = user.streamerVerified === true || await isVerifiedStreamerUid(uid);
   if (streamerVerified) {
     const entitlementSnap = await db.ref('onyuVn/streamerGameEntitlements/' + uid).get();
     const hasGiftEntitlement = entitlementSnap.exists() && entitlementSnap.val().status === 'active';
@@ -1843,10 +1853,11 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
   return { ok: true, status: decision === 'approve' ? 'approved' : 'rejected', targetUid: gift.targetUid };
 });
 
-// 게임 시작 직전에 호출하는 최종 서버 판정. 정적 콘텐츠 파일 자체를 숨기는 함수는
-// 아니지만, 정상적인 시작 경로의 승인 우회는 이 함수에서 차단한다.
+// 게임 시작 직전에 호출하는 최종 서버 판정. 관리자는 설정에서 선택한 모드의 권한으로
+// 판정하고, 나머지 계정은 서버가 검증한 스트리머 이용권만 허용한다.
 const onyuStartSession = onCall(async (request) => {
   const uid = requireAuth(request);
+  const isAdmin = uid === ONYU_ADMIN_UID;
   if (uid !== ONYU_ADMIN_UID) {
     const streamerFlagSnap = await getDatabase().ref('users/' + uid + '/streamerVerified').get();
     const isVerified = streamerFlagSnap.val() === true || await isVerifiedStreamerUid(uid);
@@ -1858,10 +1869,21 @@ const onyuStartSession = onCall(async (request) => {
       throw new HttpsError('permission-denied', '아직 온이유 게임 이용권이 없습니다. 직접 구매하거나 선물 받은 뒤 이용할 수 있습니다.');
     }
   }
-  const adminRequest = Object.assign({}, request, {
-    data: Object.assign({}, request.data || {}, { accessMode: 'admin' }),
+  const requestedMode = request.data && request.data.accessMode;
+  const accessMode = isAdmin
+    ? (['admin', 'streamer', 'viewer'].includes(requestedMode) ? requestedMode : 'admin')
+    : 'streamer';
+  const modeRequest = Object.assign({}, request, {
+    data: Object.assign({}, request.data || {}, { accessMode }),
   });
-  const state = await getOnyuAccessState(uid, adminRequest);
+  const state = await getOnyuAccessState(uid, modeRequest);
+  if (!state.canStartGame) {
+    const messages = {
+      streamer: '스트리머 모드에서는 인증 스트리머 이용권이 필요합니다.',
+      viewer: '일반 로그인 유저 모드에서는 승인된 접근 권한이 필요합니다.',
+    };
+    throw new HttpsError('permission-denied', messages[accessMode] || '게임 시작 권한이 없습니다.');
+  }
   await recordOnyuServerEvent(request, 'game_access_granted');
   return Object.assign({ ok: true, uid }, state);
 });
