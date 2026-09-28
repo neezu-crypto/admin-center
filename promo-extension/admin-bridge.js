@@ -1,6 +1,7 @@
 (function () {
   const OPEN_BUTTON_ID = 'streamerPromoGeneratorOpenBtn';
   const completionReplies = new Map();
+  let extensionContextUnavailable = false;
 
   function showMessage(message, isError) {
     let status = document.getElementById('soop-promo-extension-status');
@@ -15,6 +16,14 @@
     status.style.border = isError ? '1px solid #e2554f' : '1px solid #3fb689';
     clearTimeout(status._hideTimer);
     status._hideTimer = setTimeout(function () { status.remove(); }, 5000);
+  }
+
+  function hasValidExtensionContext() {
+    try {
+      return !!(chrome.runtime && chrome.runtime.id);
+    } catch (error) {
+      return false;
+    }
   }
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
@@ -54,6 +63,14 @@
       : null;
     if (!button && !listLink) return;
 
+    if (extensionContextUnavailable || !hasValidExtensionContext()) {
+      extensionContextUnavailable = true;
+      event.preventDefault();
+      if (button) event.stopImmediatePropagation();
+      showMessage('확장 프로그램이 갱신되었습니다. 관리자 센터 탭을 새로고침한 뒤 다시 눌러주세요.', true);
+      return;
+    }
+
     const nickname = listLink
       ? listLink.dataset.nickname || ''
       : (document.getElementById('streamerPromoGeneratorName') || {}).value || '';
@@ -82,26 +99,41 @@
       event.stopImmediatePropagation();
       button.disabled = true;
     }
-    chrome.runtime.sendMessage({
-      type: 'openPromoDraft',
-      draft: {
-        nickname: nickname.trim(),
-        title: title,
-        body: body,
-        html: html,
-        writeUrl: writeUrl,
-        promoKey: promoKey,
-        soopId: soopId,
-      },
-    }).then(function (result) {
+    let sendRequest;
+    try {
+      sendRequest = chrome.runtime.sendMessage({
+        type: 'openPromoDraft',
+        draft: {
+          nickname: nickname.trim(),
+          title: title,
+          body: body,
+          html: html,
+          writeUrl: writeUrl,
+          promoKey: promoKey,
+          soopId: soopId,
+        },
+      });
+    } catch (error) {
+      extensionContextUnavailable = true;
+      if (button) button.disabled = false;
+      showMessage('확장 프로그램이 갱신되었습니다. 관리자 센터 탭을 새로고침한 뒤 다시 눌러주세요.', true);
+      return;
+    }
+    sendRequest.then(function (result) {
       if (!result || !result.ok) {
         showMessage((result && result.error) || '확장 프로그램 요청을 처리하지 못했습니다.', true);
         return;
       }
       showMessage('SOOP 글쓰기 탭을 열었습니다. 입력 결과를 검수한 뒤 직접 게시해주세요.');
     }).catch(function (error) {
-      console.error('SOOP 홍보글 확장 프로그램 연결 실패:', error);
-      showMessage('확장 프로그램에 연결하지 못했습니다. 설치 및 사용 설정을 확인해주세요.', true);
+      const contextInvalidated = !hasValidExtensionContext() || /Extension context invalidated/i.test(String(error && error.message || error));
+      if (contextInvalidated) {
+        extensionContextUnavailable = true;
+        showMessage('확장 프로그램이 갱신되었습니다. 관리자 센터 탭을 새로고침한 뒤 다시 눌러주세요.', true);
+      } else {
+        console.error('SOOP 홍보글 확장 프로그램 연결 실패:', error);
+        showMessage('확장 프로그램에 연결하지 못했습니다. 설치 및 사용 설정을 확인해주세요.', true);
+      }
     }).finally(function () {
       if (button) button.disabled = false;
     });
