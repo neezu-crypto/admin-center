@@ -218,6 +218,7 @@
     let checking = false;
     let lastCheckAt = 0;
     let failureShown = false;
+    let mismatchLogged = false;
     let contentMismatchSince = 0;
     let timer = null;
     let observer = null;
@@ -241,9 +242,13 @@
             showStatus('게시글은 확인했지만 관리 센터에 완료 상태를 저장하지 못했습니다. 관리 센터 탭과 로그인을 확인해주세요.', true);
           } else if (result && result.reason === 'post-content-not-confirmed') {
             if (!contentMismatchSince) contentMismatchSince = Date.now();
+            if (!mismatchLogged) {
+              mismatchLogged = true;
+              console.warn('[SOOP 홍보 보조] 게시글 상세 화면은 찾았지만 작성한 홍보글과 제목/게임 링크가 일치하지 않습니다.');
+            }
             if (!failureShown && Date.now() - contentMismatchSince > 10000) {
               failureShown = true;
-              showStatus('게시글 상세 화면은 감지했지만 홍보글 제목·본문이 작성 내용과 일치하지 않아 완료 처리하지 않았습니다.', true);
+              showStatus('게시글은 열렸지만 홍보글 제목 또는 게임 링크를 확인하지 못해 완료 처리하지 않았습니다. 확장 프로그램 버전과 게시글 내용을 확인해주세요.', true);
             }
           } else if (result && result.reason === 'multiple-pending-promos' && !failureShown) {
             failureShown = true;

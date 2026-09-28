@@ -152,10 +152,13 @@ async function confirmPromoPost(message, sender) {
     sameStation.push({ key, pending });
     const expectedTitle = normalizeText(pending.title);
     const expectedBody = normalizeText(pending.body);
-    // Require the generated title and a body signature so an unrelated post
-    // in the same station cannot accidentally mark a promo as complete.
-    const bodySignature = expectedBody.slice(0, Math.min(32, expectedBody.length));
-    if (expectedTitle && bodySignature && visibleText.includes(expectedTitle) && visibleText.includes(bodySignature)) {
+    // The opening sentence is easy to edit or normalize in SOOP's editor.
+    // Prefer the stable game URL embedded in this promo's body as its marker.
+    const gameUrlMarker = 'neezu-crypto.github.io/streamer-life-game';
+    const bodyMarker = expectedBody.includes(gameUrlMarker)
+      ? gameUrlMarker
+      : expectedBody.slice(0, Math.min(24, expectedBody.length));
+    if (expectedTitle && bodyMarker && visibleText.includes(expectedTitle) && visibleText.includes(bodyMarker)) {
       confirmed.push({ key, pending });
     }
   });
