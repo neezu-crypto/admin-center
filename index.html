@@ -966,6 +966,30 @@
   const saveStreamerPromoLinkFn = httpsCallable(functions, 'saveStreamerPromoLink');
   const markStreamerPromoLinkOpenedFn = httpsCallable(functions, 'markStreamerPromoLinkOpened');
   const setStreamerPromoCompletionFn = httpsCallable(functions, 'setStreamerPromoCompletion');
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__soopPromoCompletionRequest !== true || typeof data.requestId !== 'string') return;
+    const reply = function (ok, error) {
+      window.postMessage({
+        __soopPromoCompletionResult: true,
+        requestId: data.requestId,
+        ok: ok,
+        error: error || '',
+      }, location.origin);
+    };
+    setStreamerPromoCompletionFn({
+      promoKey: String(data.promoKey || ''),
+      soopId: String(data.soopId || ''),
+      completed: true,
+    }).then(function () {
+      refreshStreamerPromoLinks();
+      reply(true);
+    }).catch(function (error) {
+      console.error('SOOP 게시 성공 후 홍보 완료 상태 저장 실패:', error);
+      reply(false, error && error.message ? error.message : '완료 상태 저장에 실패했습니다.');
+    });
+  });
   const clearAllStreamerPromoCompletionFn = httpsCallable(functions, 'clearAllStreamerPromoCompletion');
   // 21번 — 배팅시장 마켓 관리. StreamBet-Market이 이미 배포한 함수를 그대로 호출한다
   // (17번 채팅·22번 게시글 홍보 현황과 동일한 "codebase가 달라도 함수 이름만 맞으면
@@ -2576,6 +2600,8 @@
         if (openLink.tagName === 'A') {
           openLink.dataset.promoWriteLink = 'true';
           openLink.dataset.nickname = item.nickname || '';
+          openLink.dataset.promoKey = item.key || '';
+          openLink.dataset.soopId = item.soopId || '';
           openLink.dataset.writeUrl = item.writeUrl || '';
           openLink.dataset.promoTitle = buildStreamerPromoTitle(item.nickname || '');
           openLink.dataset.promoBody = buildStreamerPromoBody(item.nickname || '');

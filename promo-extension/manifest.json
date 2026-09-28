@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "SOOP 홍보글 작성 보조",
-  "version": "0.2.0",
-  "description": "관리자 센터에서 만든 홍보글을 SOOP 글쓰기 화면에 옮기고 게시 전 검수할 수 있게 돕습니다.",
+  "version": "0.3.0",
+  "description": "관리자 센터 홍보글을 SOOP에 채우고, 게시 성공이 확인되면 홍보 완료를 표시합니다.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://neezu-crypto.github.io/admin-center/*",
-    "https://sooplive.com/station/*/post/write/*",
-    "https://www.sooplive.com/station/*/post/write/*"
+    "https://sooplive.com/station/*/post/*",
+    "https://www.sooplive.com/station/*/post/*"
   ],
   "background": {
     "service_worker": "service-worker.js"
@@ -20,8 +20,8 @@
     },
     {
       "matches": [
-        "https://sooplive.com/station/*/post/write/*",
-        "https://www.sooplive.com/station/*/post/write/*"
+        "https://sooplive.com/station/*/post/*",
+        "https://www.sooplive.com/station/*/post/*"
       ],
       "js": ["soop-writer.js"],
       "run_at": "document_idle"

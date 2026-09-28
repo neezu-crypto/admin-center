@@ -1,5 +1,6 @@
 (function () {
   const OPEN_BUTTON_ID = 'streamerPromoGeneratorOpenBtn';
+  const completionReplies = new Map();
 
   function showMessage(message, isError) {
     let status = document.getElementById('soop-promo-extension-status');
@@ -15,6 +16,35 @@
     clearTimeout(status._hideTimer);
     status._hideTimer = setTimeout(function () { status.remove(); }, 5000);
   }
+
+  chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (!message || message.type !== 'markPromoCompleted' ||
+        typeof message.requestId !== 'string' || typeof message.promoKey !== 'string') return false;
+    const timeout = setTimeout(function () {
+      completionReplies.delete(message.requestId);
+      sendResponse({ ok: false, error: '관리 센터 응답 시간이 초과되었습니다.' });
+    }, 15000);
+    completionReplies.set(message.requestId, function (result) {
+      clearTimeout(timeout);
+      completionReplies.delete(message.requestId);
+      sendResponse(result);
+    });
+    window.postMessage({
+      __soopPromoCompletionRequest: true,
+      requestId: message.requestId,
+      promoKey: message.promoKey,
+      soopId: message.soopId || '',
+    }, location.origin);
+    return true;
+  });
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__soopPromoCompletionResult !== true || typeof data.requestId !== 'string') return;
+    const reply = completionReplies.get(data.requestId);
+    if (reply) reply({ ok: data.ok === true, error: String(data.error || '') });
+  });
 
   document.addEventListener('click', function (event) {
     const target = event.target instanceof Element ? event.target : null;
@@ -37,8 +67,10 @@
       ? listLink.dataset.promoHtml || ''
       : (document.getElementById('streamerPromoGeneratedHtml') || {}).textContent || '';
     const writeUrl = listLink ? listLink.dataset.writeUrl || '' : button.dataset.writeUrl || '';
+    const promoKey = listLink ? listLink.dataset.promoKey || '' : button.dataset.promoKey || '';
+    const soopId = listLink ? listLink.dataset.soopId || '' : button.dataset.soopId || '';
 
-    if (!nickname.trim() || !title || !body || !html || !writeUrl || (button && button.disabled)) {
+    if (!nickname.trim() || !title || !body || !html || !writeUrl || !promoKey || (button && button.disabled)) {
       event.preventDefault();
       if (button) event.stopImmediatePropagation();
       showMessage('스트리머를 선택하고 생성된 내용을 확인해주세요.', true);
@@ -58,6 +90,8 @@
         body: body,
         html: html,
         writeUrl: writeUrl,
+        promoKey: promoKey,
+        soopId: soopId,
       },
     }).then(function (result) {
       if (!result || !result.ok) {
