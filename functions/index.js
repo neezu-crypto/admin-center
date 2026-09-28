@@ -314,6 +314,7 @@ const GAME_CATALOG = [
   { id: 'lifeGame', name: '스트리머 인생게임' },
   { id: 'gallery', name: '스트리머 갤러리' },
   { id: 'streamerMessenger', name: '스트리머 메신저' },
+  { id: 'streamerJurumable', name: '스트리머 주루마블' },
   { id: 'onyuVn', name: '당신이 여기에 온 이유' },
 ];
 
