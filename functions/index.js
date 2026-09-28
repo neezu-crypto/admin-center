@@ -689,7 +689,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
   });
   return {
     streamers: streamers.map(function (entry) {
-      const key = promoStorageKey(entry.id, entry.soopId);
+      const key = entry.key || promoStorageKey(entry.id, entry.soopId);
       const saved = links[key] || {};
       return {
         key: key,
@@ -726,7 +726,7 @@ const saveStreamerPromoLink = onCall(async (request) => {
   });
   if (!entry) throw new HttpsError('failed-precondition', '등록된 스트리머만 수정할 수 있습니다.');
 
-  const key = promoStorageKey(entry.id, entry.soopId);
+  const key = entry.key || promoStorageKey(entry.id, entry.soopId);
   const ref = db.ref('adminCenter/streamerPromoLinks/' + key);
   const existing = (await ref.get()).val() || {};
   if (!writeUrl) {
