@@ -2471,7 +2471,13 @@
         }).join('')
       : '<div class="empty-state">아직 글쓰기 링크를 연 기록이 없습니다.</div>';
     streamerPromoLinksListEl.innerHTML = '';
-    streamers.forEach(function (item) {
+    const orderedStreamers = streamers.slice().sort(function (a, b) {
+      const completionOrder = Number(a.promotedCompleted === true) - Number(b.promotedCompleted === true);
+      if (completionOrder) return completionOrder;
+      const nicknameOrder = (a.nickname || a.soopId || '').localeCompare(b.nickname || b.soopId || '', 'ko');
+      return nicknameOrder || (a.soopId || '').localeCompare(b.soopId || '');
+    });
+    orderedStreamers.forEach(function (item) {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid rgba(20,20,22,0.08);';
       const identity = document.createElement('div');
