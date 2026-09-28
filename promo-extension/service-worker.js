@@ -47,7 +47,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const key = PENDING_KEY_PREFIX + tab.id;
       const pendingKey = PENDING_POST_PREFIX + tab.id;
       const createdAt = Date.now();
-      await chrome.storage.session.set({ [key]: {
+      await chrome.storage.local.set({ [key]: {
         nickname: draft.nickname,
         title: draft.title,
         body: draft.body,
@@ -80,9 +80,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
     const key = PENDING_KEY_PREFIX + tabId;
-    chrome.storage.session.get(key).then(async (result) => {
+    chrome.storage.local.get(key).then(async (result) => {
       const draft = result[key] || null;
-      if (draft) await chrome.storage.session.remove(key);
+      if (draft) await chrome.storage.local.remove(key);
       sendResponse({ ok: true, draft: draft });
     }).catch((error) => {
       console.error('홍보글 임시 데이터 조회 실패:', error);
@@ -106,8 +106,17 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   // A successful post may open its detail page in a different tab. Keep the
   // short-lived completion record even if the compose tab closes; it expires
   // automatically after PROMO_PENDING_TTL_MS.
-  chrome.storage.session.remove(PENDING_KEY_PREFIX + tabId)
+  chrome.storage.local.remove(PENDING_KEY_PREFIX + tabId)
     .catch((error) => console.warn('홍보 탭 임시 상태 정리 실패:', error));
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.get(null).then((allData) => {
+    const sessionKeys = Object.keys(allData).filter((key) =>
+      key.startsWith(PENDING_KEY_PREFIX) || key.startsWith(PENDING_POST_PREFIX));
+    if (sessionKeys.length) return chrome.storage.local.remove(sessionKeys);
+    return undefined;
+  }).catch((error) => console.warn('이전 브라우저 세션의 홍보 데이터 정리 실패:', error));
 });
 
 async function findAdminTab(preferredTabId) {
@@ -137,7 +146,7 @@ async function confirmPromoPost(message, sender) {
   }
 
   const now = Date.now();
-  const allSessionData = await chrome.storage.session.get(null);
+  const allSessionData = await chrome.storage.local.get(null);
   const visibleText = normalizeText(message.visibleText).slice(0, 30000);
   const sameStation = [];
   const confirmed = [];
@@ -162,7 +171,7 @@ async function confirmPromoPost(message, sender) {
       confirmed.push({ key, pending });
     }
   });
-  if (expiredKeys.length) await chrome.storage.session.remove(expiredKeys);
+  if (expiredKeys.length) await chrome.storage.local.remove(expiredKeys);
   if (!confirmed.length) {
     return { ok: false, reason: sameStation.length ? 'post-content-not-confirmed' : 'no-pending-promo' };
   }
@@ -184,7 +193,7 @@ async function confirmPromoPost(message, sender) {
   const requestId = 'promo-' + tabId + '-' + now;
   pending.completionRequested = true;
   pending.lastAttemptAt = now;
-  await chrome.storage.session.set({ [pendingKey]: pending });
+  await chrome.storage.local.set({ [pendingKey]: pending });
   try {
     const response = await chrome.tabs.sendMessage(adminTab.id, {
       type: 'markPromoCompleted',
@@ -194,14 +203,14 @@ async function confirmPromoPost(message, sender) {
     });
     if (!response || response.ok !== true) {
       pending.completionRequested = false;
-      await chrome.storage.session.set({ [pendingKey]: pending });
+      await chrome.storage.local.set({ [pendingKey]: pending });
       return { ok: false, reason: 'admin-save-failed' };
     }
-    await chrome.storage.session.remove(matchingPendingKeys);
+    await chrome.storage.local.remove(matchingPendingKeys);
     return { ok: true, completed: true, articleId: match[2] };
   } catch (error) {
     pending.completionRequested = false;
-    await chrome.storage.session.set({ [pendingKey]: pending });
+    await chrome.storage.local.set({ [pendingKey]: pending });
     console.error('관리 센터 홍보 완료 저장 실패:', error);
     return { ok: false, reason: 'admin-save-failed' };
   }

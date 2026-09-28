@@ -273,6 +273,10 @@
     return;
   }
 
+  // Keep watching even if the extension is reloaded after taking the draft.
+  // The completion token is persisted separately from the one-shot draft.
+  startPublishedPostWatch();
+
   chrome.runtime.sendMessage({ type: 'takePromoDraft' }).then(async function (result) {
     const draft = result && result.draft;
     if (!draft) return;
@@ -308,7 +312,6 @@
         return;
       }
       showStatus('제목과 본문을 편집기에 입력했습니다. 게시 전에 본문이 유지되는지와 이미지 2장을 확인해주세요. 자동 게시·임시저장은 하지 않았습니다.');
-      startPublishedPostWatch();
     } catch (error) {
       console.error('SOOP 작성란 자동 입력 실패:', error);
       showStatus('입력 중 문제가 발생했습니다. 작성 내용을 확인해주세요. 게시하지 않았습니다.', true);
