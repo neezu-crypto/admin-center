@@ -103,10 +103,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  chrome.storage.session.remove([
-    PENDING_KEY_PREFIX + tabId,
-    PENDING_POST_PREFIX + tabId,
-  ]).catch((error) => console.warn('홍보 탭 임시 상태 정리 실패:', error));
+  // A successful post may open its detail page in a different tab. Keep the
+  // short-lived completion record even if the compose tab closes; it expires
+  // automatically after PROMO_PENDING_TTL_MS.
+  chrome.storage.session.remove(PENDING_KEY_PREFIX + tabId)
+    .catch((error) => console.warn('홍보 탭 임시 상태 정리 실패:', error));
 });
 
 async function findAdminTab(preferredTabId) {
@@ -135,24 +136,41 @@ async function confirmPromoPost(message, sender) {
     return { ok: false, reason: 'not-post-detail' };
   }
 
-  const pendingKey = PENDING_POST_PREFIX + tabId;
-  const result = await chrome.storage.session.get(pendingKey);
-  const pending = result[pendingKey];
-  if (!pending) return { ok: false, reason: 'no-pending-promo' };
   const now = Date.now();
-  if (now - pending.createdAt > PROMO_PENDING_TTL_MS) {
-    await chrome.storage.session.remove(pendingKey);
-    return { ok: false, reason: 'expired' };
-  }
-  if (match[1].toLowerCase() !== pending.stationId) return { ok: false, reason: 'different-station' };
-
+  const allSessionData = await chrome.storage.session.get(null);
   const visibleText = normalizeText(message.visibleText).slice(0, 30000);
-  const expectedTitle = normalizeText(pending.title);
-  const expectedBody = normalizeText(pending.body);
-  const bodySignature = expectedBody.slice(0, Math.min(32, expectedBody.length));
-  if (!expectedTitle || !bodySignature || !visibleText.includes(expectedTitle) || !visibleText.includes(bodySignature)) {
-    return { ok: false, reason: 'post-content-not-confirmed' };
+  const sameStation = [];
+  const confirmed = [];
+  const expiredKeys = [];
+  Object.entries(allSessionData).forEach(([key, pending]) => {
+    if (!key.startsWith(PENDING_POST_PREFIX) || !pending || !pending.createdAt) return;
+    if (now - pending.createdAt > PROMO_PENDING_TTL_MS) {
+      expiredKeys.push(key);
+      return;
+    }
+    if (pending.stationId !== match[1].toLowerCase()) return;
+    sameStation.push({ key, pending });
+    const expectedTitle = normalizeText(pending.title);
+    const expectedBody = normalizeText(pending.body);
+    // Require the generated title and a body signature so an unrelated post
+    // in the same station cannot accidentally mark a promo as complete.
+    const bodySignature = expectedBody.slice(0, Math.min(32, expectedBody.length));
+    if (expectedTitle && bodySignature && visibleText.includes(expectedTitle) && visibleText.includes(bodySignature)) {
+      confirmed.push({ key, pending });
+    }
+  });
+  if (expiredKeys.length) await chrome.storage.session.remove(expiredKeys);
+  if (!confirmed.length) {
+    return { ok: false, reason: sameStation.length ? 'post-content-not-confirmed' : 'no-pending-promo' };
   }
+  const matchingPromoKeys = Array.from(new Set(confirmed.map((item) => item.pending.promoKey)));
+  if (matchingPromoKeys.length > 1) {
+    return { ok: false, reason: 'multiple-pending-promos' };
+  }
+  confirmed.sort((a, b) => b.pending.createdAt - a.pending.createdAt);
+  const { pending } = confirmed[0];
+  const matchingPendingKeys = confirmed.map((item) => item.key);
+  const pendingKey = confirmed[0].key;
   if (pending.completionRequested || now - (pending.lastAttemptAt || 0) < COMPLETION_RETRY_MS) {
     return { ok: false, reason: 'completion-in-progress' };
   }
@@ -176,7 +194,7 @@ async function confirmPromoPost(message, sender) {
       await chrome.storage.session.set({ [pendingKey]: pending });
       return { ok: false, reason: 'admin-save-failed' };
     }
-    await chrome.storage.session.remove(pendingKey);
+    await chrome.storage.session.remove(matchingPendingKeys);
     return { ok: true, completed: true, articleId: match[2] };
   } catch (error) {
     pending.completionRequested = false;

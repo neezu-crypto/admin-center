@@ -218,6 +218,7 @@
     let checking = false;
     let lastCheckAt = 0;
     let failureShown = false;
+    let contentMismatchSince = 0;
     let timer = null;
     let observer = null;
     function stop() {
@@ -238,6 +239,15 @@
           } else if (result && ['admin-save-failed', 'admin-tab-unavailable'].includes(result.reason) && !failureShown) {
             failureShown = true;
             showStatus('게시글은 확인했지만 관리 센터에 완료 상태를 저장하지 못했습니다. 관리 센터 탭과 로그인을 확인해주세요.', true);
+          } else if (result && result.reason === 'post-content-not-confirmed') {
+            if (!contentMismatchSince) contentMismatchSince = Date.now();
+            if (!failureShown && Date.now() - contentMismatchSince > 10000) {
+              failureShown = true;
+              showStatus('게시글 상세 화면은 감지했지만 홍보글 제목·본문이 작성 내용과 일치하지 않아 완료 처리하지 않았습니다.', true);
+            }
+          } else if (result && result.reason === 'multiple-pending-promos' && !failureShown) {
+            failureShown = true;
+            showStatus('같은 방송국에 확인 대기 중인 홍보글이 여러 건 있어 자동 완료 처리하지 않았습니다.', true);
           } else if (result && ['no-pending-promo', 'different-station', 'expired', 'not-post-detail'].includes(result.reason)) {
             stop();
           }
