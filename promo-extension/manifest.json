@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SOOP 홍보글 작성 보조",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "관리자 센터에서 만든 홍보글을 SOOP 글쓰기 화면에 옮기고 게시 전 검수할 수 있게 돕습니다.",
   "permissions": ["storage"],
   "host_permissions": [

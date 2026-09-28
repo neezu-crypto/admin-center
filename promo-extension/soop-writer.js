@@ -130,17 +130,70 @@
     return doc.body.innerHTML;
   }
 
+  function selectEditorContents(editor) {
+    const selection = window.getSelection();
+    if (!selection) return false;
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
   function setEditorHtml(editor, html) {
-    editor.focus();
     const safeHtml = sanitizeHtml(html);
-    const inserted = document.execCommand('insertHTML', false, safeHtml);
-    if (!inserted || !editor.querySelector('img')) {
-      editor.innerHTML = safeHtml;
-      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
-      editor.dispatchEvent(new Event('change', { bubbles: true }));
+    const textDoc = new DOMParser().parseFromString('<body>' + safeHtml + '</body>', 'text/html');
+    const plainText = textDoc.body.innerText || textDoc.body.textContent || '';
+    editor.focus();
+    selectEditorContents(editor);
+
+    // SOOP's editor maintains its own document model. Prefer its paste handler
+    // so the visible DOM and the data submitted with the post stay in sync.
+    let pasteHandled = false;
+    try {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/html', safeHtml);
+      clipboardData.setData('text/plain', plainText);
+      const pasteEvent = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: clipboardData,
+      });
+      editor.dispatchEvent(pasteEvent);
+      pasteHandled = pasteEvent.defaultPrevented;
+    } catch (error) {
+      console.warn('SOOP 붙여넣기 이벤트를 만들지 못했습니다. 기본 편집 입력을 시도합니다.', error);
     }
-    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
-    editor.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // execCommand emits the browser's native editing/input events. Never fall
+    // back to assigning innerHTML: that can paint content without updating the
+    // editor's internal state, causing SOOP to reject the post as empty.
+    if (!pasteHandled) {
+      editor.focus();
+      selectEditorContents(editor);
+      if (!document.execCommand('insertHTML', false, safeHtml)) return false;
+    }
+    return true;
+  }
+
+  function waitForEditorUpdate(editor, timeoutMs) {
+    return new Promise(function (resolve) {
+      let settled = false;
+      let timer = null;
+      const finish = function () {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        resolve();
+      };
+      const observer = new MutationObserver(function () {
+        clearTimeout(timer);
+        timer = setTimeout(finish, 350);
+      });
+      observer.observe(editor, { childList: true, subtree: true, characterData: true, attributes: true });
+      timer = setTimeout(finish, timeoutMs);
+    });
   }
 
   function showStatus(message, isError) {
@@ -175,19 +228,24 @@
     try {
       setTitleValue(titleField, draft.title);
       bodyEditor.focus();
-      document.execCommand('selectAll', false, null);
-      setEditorHtml(bodyEditor, draft.html);
+      const inserted = setEditorHtml(bodyEditor, draft.html);
+      if (!inserted) {
+        showStatus('SOOP 편집기가 내용을 입력받지 못했습니다. 편집 모드를 기본으로 바꾼 뒤 다시 시도해주세요. 게시하지 않았습니다.', true);
+        return;
+      }
+      await waitForEditorUpdate(bodyEditor, 1800);
       bodyEditor.blur();
 
       const titleMatches = getTitleValue(titleField).trim() === draft.title;
       const insertedText = bodyEditor.innerText || bodyEditor.textContent || '';
       const imageCount = bodyEditor.querySelectorAll('img').length;
-      const bodyMatches = insertedText.includes(draft.nickname) && imageCount >= 2;
+      const looksLikeHtmlSource = /<\/?(?:p|figure|img|div|span)\b/i.test(insertedText);
+      const bodyMatches = insertedText.includes(draft.nickname) && imageCount >= 2 && !looksLikeHtmlSource;
       if (!titleMatches || !bodyMatches) {
-        showStatus('일부 입력을 확인하지 못했습니다. 제목·본문·이미지 ' + imageCount + '장을 검수해주세요. 게시하지 않았습니다.', true);
+        showStatus('SOOP 편집기에 본문이 정상 반영되지 않았습니다. HTML 코드가 글자로 보이거나 게시 버튼에서 빈 내용 안내가 나오면 게시하지 말고 기본 편집 모드에서 다시 시도해주세요. 게시하지 않았습니다.', true);
         return;
       }
-      showStatus('제목과 본문, 이미지 2장을 입력했습니다. 내용 검수 후 직접 게시해주세요. 자동 게시·임시저장은 하지 않았습니다.');
+      showStatus('제목과 본문을 편집기에 입력했습니다. 게시 전에 본문이 유지되는지와 이미지 2장을 확인해주세요. 자동 게시·임시저장은 하지 않았습니다.');
     } catch (error) {
       console.error('SOOP 작성란 자동 입력 실패:', error);
       showStatus('입력 중 문제가 발생했습니다. 작성 내용을 확인해주세요. 게시하지 않았습니다.', true);
