@@ -970,10 +970,24 @@
     const data = event.data;
     if (event.source !== window || event.origin !== location.origin || !data ||
         data.__soopPromoCompletionRequest !== true || typeof data.requestId !== 'string') return;
+    const tracePromoCompletion = function (stage, details) {
+      console.info('[SOOP 홍보 진단]', JSON.stringify({
+        attemptId: String(data.attemptId || 'unassigned'),
+        stage: stage,
+        at: new Date().toISOString(),
+        details: details || {},
+      }));
+    };
+    tracePromoCompletion('firebase-callable-started', {
+      requestId: data.requestId,
+      promoKey: String(data.promoKey || ''),
+      soopId: String(data.soopId || ''),
+    });
     const reply = function (ok, error) {
       window.postMessage({
         __soopPromoCompletionResult: true,
         requestId: data.requestId,
+        attemptId: String(data.attemptId || ''),
         ok: ok,
         error: error || '',
       }, location.origin);
@@ -983,9 +997,14 @@
       soopId: String(data.soopId || ''),
       completed: true,
     }).then(function () {
+      tracePromoCompletion('firebase-callable-succeeded', {});
       refreshStreamerPromoLinks();
       reply(true);
     }).catch(function (error) {
+      tracePromoCompletion('firebase-callable-failed', {
+        code: String(error && error.code || ''),
+        message: String(error && error.message || error || ''),
+      });
       console.error('SOOP 게시 성공 후 홍보 완료 상태 저장 실패:', error);
       reply(false, error && error.message ? error.message : '완료 상태 저장에 실패했습니다.');
     });

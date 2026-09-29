@@ -2,7 +2,21 @@
   const WRITE_PATH = /^\/station\/[A-Za-z0-9]+\/post\/write\/\d+\/?$/;
   const POST_DETAIL_PATH = /^\/station\/[A-Za-z0-9]+\/post\/\d+\/?$/;
   const isWritePage = WRITE_PATH.test(location.pathname);
-  if (!isWritePage && !POST_DETAIL_PATH.test(location.pathname)) return;
+  let diagnosticAttemptId = '';
+
+  function trace(stage, details) {
+    console.info('[SOOP 홍보 진단]', JSON.stringify({
+      attemptId: diagnosticAttemptId || 'unassigned',
+      stage: stage,
+      at: new Date().toISOString(),
+      details: Object.assign({ path: location.pathname }, details || {}),
+    }));
+  }
+
+  if (!isWritePage && !POST_DETAIL_PATH.test(location.pathname)) {
+    trace('page-route-not-supported', { host: location.hostname });
+    return;
+  }
 
   function isVisible(element) {
     if (!element || !element.getBoundingClientRect) return false;
@@ -217,6 +231,7 @@
     let stopped = false;
     let checking = false;
     let lastCheckAt = 0;
+    let lastReportedResult = '';
     let failureShown = false;
     let mismatchLogged = false;
     let contentMismatchSince = 0;
@@ -232,14 +247,26 @@
       checking = true;
       lastCheckAt = Date.now();
       const visibleText = document.body ? document.body.innerText || document.body.textContent || '' : '';
-      chrome.runtime.sendMessage({ type: 'confirmPromoPost', visibleText: visibleText.slice(0, 30000) })
+      Promise.resolve().then(function () {
+        return chrome.runtime.sendMessage({
+          type: 'confirmPromoPost',
+          attemptId: diagnosticAttemptId,
+          visibleText: visibleText.slice(0, 30000),
+        });
+      })
         .then(function (result) {
+          if (result && result.attemptId) diagnosticAttemptId = result.attemptId;
+          const reason = result && result.reason || (result && result.completed ? 'completed' : 'empty-response');
+          if (reason !== lastReportedResult) {
+            lastReportedResult = reason;
+            trace('post-confirmation-result', { reason: reason, completed: !!(result && result.completed) });
+          }
           if (result && result.completed) {
             stop();
-            showStatus('게시글이 등록된 것을 확인해 홍보 완료로 표시했습니다.', false);
+            showStatus('게시글 등록을 확인해 홍보 완료로 표시했습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), false);
           } else if (result && ['admin-save-failed', 'admin-tab-unavailable'].includes(result.reason) && !failureShown) {
             failureShown = true;
-            showStatus('게시글은 확인했지만 관리 센터에 완료 상태를 저장하지 못했습니다. 관리 센터 탭과 로그인을 확인해주세요.', true);
+            showStatus('게시글은 확인했지만 관리 센터에 완료 상태를 저장하지 못했습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
           } else if (result && result.reason === 'post-content-not-confirmed') {
             if (!contentMismatchSince) contentMismatchSince = Date.now();
             if (!mismatchLogged) {
@@ -248,16 +275,37 @@
             }
             if (!failureShown && Date.now() - contentMismatchSince > 10000) {
               failureShown = true;
-              showStatus('게시글은 열렸지만 홍보글 제목 또는 게임 링크를 확인하지 못해 완료 처리하지 않았습니다. 확장 프로그램 버전과 게시글 내용을 확인해주세요.', true);
+              showStatus('게시글 제목 또는 게임 링크가 대기 중인 내용과 달라 완료 처리하지 않았습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
             }
           } else if (result && result.reason === 'multiple-pending-promos' && !failureShown) {
             failureShown = true;
-            showStatus('같은 방송국에 확인 대기 중인 홍보글이 여러 건 있어 자동 완료 처리하지 않았습니다.', true);
-          } else if (result && ['no-pending-promo', 'different-station', 'expired', 'not-post-detail'].includes(result.reason)) {
+            showStatus('같은 방송국에 일치하는 대기 홍보글이 여러 건입니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
+          } else if (result && result.reason === 'no-pending-promo' && !failureShown) {
+            failureShown = true;
             stop();
+            showStatus('홍보 완료 추적 정보가 없어 자동 체크하지 못했습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
+          } else if (result && ['different-station', 'expired', 'not-post-detail'].includes(result.reason)) {
+            if (!failureShown) {
+              failureShown = true;
+              showStatus('게시글 확인 정보가 일치하지 않습니다 (' + result.reason + '). 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
+            }
+            stop();
+          } else if (result && result.reason && result.reason !== 'completion-in-progress' &&
+              result.reason !== 'post-content-not-confirmed' && !failureShown) {
+            failureShown = true;
+            showStatus('홍보 완료 확인 단계에서 오류가 발생했습니다 (' + result.reason + '). 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
+          } else if (!result && !failureShown) {
+            failureShown = true;
+            showStatus('홍보 완료 확인 응답이 비어 있습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
           }
         })
-        .catch(function () {})
+        .catch(function (error) {
+          trace('post-confirmation-message-error', { error: String(error && error.message || error) });
+          if (!failureShown) {
+            failureShown = true;
+            showStatus('홍보 완료 확인 연결이 실패했습니다. 확장 프로그램 로그를 확인해주세요. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
+          }
+        })
         .finally(function () { checking = false; });
     }
     timer = setInterval(check, 1500);
@@ -269,6 +317,8 @@
   }
 
   if (!isWritePage) {
+    try { diagnosticAttemptId = sessionStorage.getItem('soopPromoDiagnosticAttemptId') || ''; } catch (error) { /* Storage may be blocked. */ }
+    trace('post-detail-watcher-started', { attemptIdAvailable: !!diagnosticAttemptId });
     startPublishedPostWatch();
     return;
   }
@@ -277,9 +327,23 @@
   // The completion token is persisted separately from the one-shot draft.
   startPublishedPostWatch();
 
-  chrome.runtime.sendMessage({ type: 'takePromoDraft' }).then(async function (result) {
+  trace('write-page-watcher-started', {});
+  Promise.resolve().then(function () {
+    return chrome.runtime.sendMessage({ type: 'takePromoDraft' });
+  }).then(async function (result) {
     const draft = result && result.draft;
-    if (!draft) return;
+    if (!draft) {
+      trace('draft-not-found', { reason: result && result.error || 'no-draft-response' });
+      return;
+    }
+    diagnosticAttemptId = draft.attemptId || '';
+    try { sessionStorage.setItem('soopPromoDiagnosticAttemptId', diagnosticAttemptId); } catch (error) { /* Storage may be blocked. */ }
+    trace('draft-received', {
+      titleLength: (draft.title || '').length,
+      bodyLength: (draft.body || '').length,
+      htmlLength: (draft.html || '').length,
+      stationId: (location.pathname.match(/^\/station\/([^/]+)/i) || [])[1] || '',
+    });
 
     // SOOP renders the editor asynchronously after the page shell; wait for
     // both fields instead of consuming the one-shot draft before they exist.
@@ -287,6 +351,7 @@
     const bodyEditor = fields.bodyEditor;
     const titleField = fields.titleField;
     if (!titleField || !bodyEditor) {
+      trace('editor-fields-not-found', { titleFieldFound: !!titleField, bodyEditorFound: !!bodyEditor });
       showStatus('확장 프로그램이 제목 또는 본문 편집 영역을 찾지 못했습니다. 게시하지 않았습니다.', true);
       return;
     }
@@ -296,6 +361,7 @@
       bodyEditor.focus();
       const inserted = setEditorHtml(bodyEditor, draft.html);
       if (!inserted) {
+        trace('editor-insert-failed', {});
         showStatus('SOOP 편집기가 내용을 입력받지 못했습니다. 편집 모드를 기본으로 바꾼 뒤 다시 시도해주세요. 게시하지 않았습니다.', true);
         return;
       }
@@ -307,16 +373,25 @@
       const imageCount = bodyEditor.querySelectorAll('img').length;
       const looksLikeHtmlSource = /<\/?(?:p|figure|img|div|span)\b/i.test(insertedText);
       const bodyMatches = insertedText.includes(draft.nickname) && imageCount >= 2 && !looksLikeHtmlSource;
+      trace('editor-fill-verified', {
+        titleMatches: titleMatches,
+        nicknamePresent: insertedText.includes(draft.nickname),
+        imageCount: imageCount,
+        looksLikeHtmlSource: looksLikeHtmlSource,
+        bodyTextLength: insertedText.length,
+      });
       if (!titleMatches || !bodyMatches) {
         showStatus('SOOP 편집기에 본문이 정상 반영되지 않았습니다. HTML 코드가 글자로 보이거나 게시 버튼에서 빈 내용 안내가 나오면 게시하지 말고 기본 편집 모드에서 다시 시도해주세요. 게시하지 않았습니다.', true);
         return;
       }
       showStatus('제목과 본문을 편집기에 입력했습니다. 게시 전에 본문이 유지되는지와 이미지 2장을 확인해주세요. 자동 게시·임시저장은 하지 않았습니다.');
     } catch (error) {
+      trace('editor-fill-threw', { error: String(error && error.message || error) });
       console.error('SOOP 작성란 자동 입력 실패:', error);
       showStatus('입력 중 문제가 발생했습니다. 작성 내용을 확인해주세요. 게시하지 않았습니다.', true);
     }
   }).catch(function (error) {
+    trace('draft-request-failed', { error: String(error && error.message || error) });
     console.error('SOOP 홍보글 데이터 수신 실패:', error);
   });
 })();

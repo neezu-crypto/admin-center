@@ -3,6 +3,20 @@
   const completionReplies = new Map();
   let extensionContextUnavailable = false;
 
+  function trace(attemptId, stage, details) {
+    console.info('[SOOP 홍보 진단]', JSON.stringify({
+      attemptId: attemptId || 'unassigned',
+      stage: stage,
+      at: new Date().toISOString(),
+      details: details || {},
+    }));
+  }
+
+  function createAttemptId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+    return 'promo-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
   function showMessage(message, isError) {
     let status = document.getElementById('soop-promo-extension-status');
     if (!status) {
@@ -29,20 +43,23 @@
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
     if (!message || message.type !== 'markPromoCompleted' ||
         typeof message.requestId !== 'string' || typeof message.promoKey !== 'string') return false;
+    trace(message.attemptId, 'admin-bridge-received-completion', { requestId: message.requestId });
     const timeout = setTimeout(function () {
       completionReplies.delete(message.requestId);
-      sendResponse({ ok: false, error: '관리 센터 응답 시간이 초과되었습니다.' });
+      trace(message.attemptId, 'admin-bridge-timeout', { requestId: message.requestId });
+      sendResponse({ ok: false, error: '관리 센터 응답 시간이 초과되었습니다.', attemptId: message.attemptId || '' });
     }, 15000);
     completionReplies.set(message.requestId, function (result) {
       clearTimeout(timeout);
       completionReplies.delete(message.requestId);
-      sendResponse(result);
+      sendResponse(Object.assign({ attemptId: message.attemptId || '' }, result || {}));
     });
     window.postMessage({
       __soopPromoCompletionRequest: true,
       requestId: message.requestId,
       promoKey: message.promoKey,
       soopId: message.soopId || '',
+      attemptId: message.attemptId || '',
     }, location.origin);
     return true;
   });
@@ -52,7 +69,12 @@
     if (event.source !== window || event.origin !== location.origin || !data ||
         data.__soopPromoCompletionResult !== true || typeof data.requestId !== 'string') return;
     const reply = completionReplies.get(data.requestId);
-    if (reply) reply({ ok: data.ok === true, error: String(data.error || '') });
+    if (reply) {
+      trace(data.attemptId, data.ok === true ? 'admin-page-save-succeeded' : 'admin-page-save-failed', {
+        error: String(data.error || ''),
+      });
+      reply({ ok: data.ok === true, error: String(data.error || '') });
+    }
   });
 
   document.addEventListener('click', function (event) {
@@ -63,7 +85,10 @@
       : null;
     if (!button && !listLink) return;
 
+    const attemptId = createAttemptId();
+
     if (extensionContextUnavailable || !hasValidExtensionContext()) {
+      trace(attemptId, 'admin-bridge-context-unavailable', { page: location.href });
       extensionContextUnavailable = true;
       event.preventDefault();
       if (button) event.stopImmediatePropagation();
@@ -88,6 +113,10 @@
     const soopId = listLink ? listLink.dataset.soopId || '' : button.dataset.soopId || '';
 
     if (!nickname.trim() || !title || !body || !html || !writeUrl || !promoKey || (button && button.disabled)) {
+      trace(attemptId, 'admin-bridge-validation-failed', {
+        nickname: !!nickname.trim(), title: !!title, body: !!body, html: !!html,
+        writeUrl: !!writeUrl, promoKey: !!promoKey, buttonDisabled: !!(button && button.disabled),
+      });
       event.preventDefault();
       if (button) event.stopImmediatePropagation();
       showMessage('스트리머를 선택하고 생성된 내용을 확인해주세요.', true);
@@ -101,8 +130,16 @@
     }
     let sendRequest;
     try {
+      trace(attemptId, 'open-request-sent', {
+        stationId: (writeUrl.match(/\/station\/([^/]+)/i) || [])[1] || '',
+        promoKey: promoKey,
+        titleLength: title.length,
+        bodyLength: body.length,
+        htmlLength: html.length,
+      });
       sendRequest = chrome.runtime.sendMessage({
         type: 'openPromoDraft',
+        attemptId: attemptId,
         draft: {
           nickname: nickname.trim(),
           title: title,
@@ -115,17 +152,21 @@
       });
     } catch (error) {
       extensionContextUnavailable = true;
+      trace(attemptId, 'open-request-threw', { error: String(error && error.message || error) });
       if (button) button.disabled = false;
       showMessage('확장 프로그램이 갱신되었습니다. 관리자 센터 탭을 새로고침한 뒤 다시 눌러주세요.', true);
       return;
     }
     sendRequest.then(function (result) {
       if (!result || !result.ok) {
+        trace(attemptId, 'open-request-rejected', { error: result && result.error || 'empty-response' });
         showMessage((result && result.error) || '확장 프로그램 요청을 처리하지 못했습니다.', true);
         return;
       }
+      trace(attemptId, 'open-request-accepted', {});
       showMessage('SOOP 글쓰기 탭을 열었습니다. 입력 결과를 검수한 뒤 직접 게시해주세요.');
     }).catch(function (error) {
+      trace(attemptId, 'open-request-failed', { error: String(error && error.message || error) });
       const contextInvalidated = !hasValidExtensionContext() || /Extension context invalidated/i.test(String(error && error.message || error));
       if (contextInvalidated) {
         extensionContextUnavailable = true;

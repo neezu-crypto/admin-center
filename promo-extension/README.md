@@ -20,3 +20,15 @@
 첫 시험은 본인 방송국의 지정된 글쓰기 화면에서 제목, 본문, 이미지 표시만 확인하고 게시/임시저장은 직접 누르지 않는 절차로 진행합니다.
 
 코드가 갱신되면 `whale://extensions`에서 개발자 모드의 새로고침 버튼을 눌러 확장 프로그램을 다시 불러온 뒤 시험합니다. 제목·본문이 편집기에 들어간 것을 확인한 다음 게시 버튼은 직접 누르세요. 게시가 완료되면 상세 페이지로 이동하고, 관리 센터 목록의 완료 표시를 확인합니다.
+
+## 자동 완료 진단
+
+버전 0.6.0부터 홍보 완료 흐름의 진단 로그를 단계별로 출력합니다. 본문 원문은 기록하지 않고, 진단 ID, 탭/게시글 식별 정보, 제목·게임 링크 일치 여부, 저장 성공/실패 사유만 기록합니다. 브라우저 콘솔에서 `[SOOP 홍보 진단]`을 검색하면 됩니다.
+
+실패를 재현할 때는 확장 프로그램 업데이트 후 `whale://extensions`에서 확장 프로그램을 새로고침하고, 통합 관리 센터도 새로고침한 다음 `글쓰기 열기`부터 한 건만 진행하세요. 게시 후 체크되지 않으면 아래 세 곳에서 같은 진단 ID의 로그를 확인합니다.
+
+1. SOOP 게시글 상세 탭의 개발자 도구 Console — `draft-received`, `editor-fill-verified`, `post-detail-watcher-started`, `post-confirmation-result` 단계
+2. `whale://extensions`의 확장 프로그램 상세 화면에서 `서비스 워커` 검사(Inspect) — `pending-created`, `published-post-content-checked`, `admin-completion-request-sent`, `completion-flow-succeeded` 단계
+3. 통합 관리 센터 탭의 개발자 도구 Console — `admin-bridge-received-completion`, `firebase-callable-started`, `firebase-callable-succeeded` 또는 `firebase-callable-failed` 단계
+
+진단 ID가 연결되지 않거나 단계 중간이 비어 있으면 해당 직전 단계에서 끊긴 것입니다. 로그를 공유할 때는 `[SOOP 홍보 진단]` 행만 복사하면 되며, 브라우저의 다른 로그나 쿠키·토큰은 공유하지 마세요.

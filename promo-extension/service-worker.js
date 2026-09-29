@@ -5,6 +5,24 @@ const SOOP_WRITE_PATH = /^\/station\/[A-Za-z0-9]+\/post\/write\/\d+\/?$/;
 const SOOP_POST_PATH = /^\/station\/([A-Za-z0-9]+)\/post\/(\d+)\/?$/;
 const PROMO_PENDING_TTL_MS = 2 * 60 * 60 * 1000;
 const COMPLETION_RETRY_MS = 5000;
+const diagnosticCheckLogKeys = new Set();
+
+function trace(attemptId, stage, details) {
+  console.info('[SOOP 홍보 진단]', JSON.stringify({
+    attemptId: attemptId || 'unassigned',
+    stage: stage,
+    at: new Date().toISOString(),
+    details: details || {},
+  }));
+}
+
+function traceContentCheckOnce(attemptId, state, details) {
+  const key = String(attemptId || 'unassigned') + ':' + state;
+  if (diagnosticCheckLogKeys.has(key)) return;
+  if (diagnosticCheckLogKeys.size > 500) diagnosticCheckLogKeys.clear();
+  diagnosticCheckLogKeys.add(key);
+  trace(attemptId, 'published-post-content-checked', details);
+}
 
 function isAllowedWriteUrl(value) {
   try {
@@ -27,11 +45,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'openPromoDraft') {
     if (!isAllowedAdminSender(sender)) {
+      trace(message.attemptId, 'open-request-sender-rejected', {
+        senderUrl: sender.url || '',
+        hasTab: Number.isInteger(sender.tab && sender.tab.id),
+      });
       sendResponse({ ok: false, error: '관리자 센터에서 시작한 요청만 처리할 수 있습니다.' });
       return false;
     }
 
     const draft = message.draft || {};
+    const attemptId = typeof message.attemptId === 'string' ? message.attemptId : '';
     if (!isAllowedWriteUrl(draft.writeUrl) ||
         typeof draft.nickname !== 'string' || draft.nickname.length > 100 ||
         typeof draft.title !== 'string' || draft.title.length > 200 ||
@@ -39,6 +62,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         typeof draft.html !== 'string' || draft.html.length > 40000 ||
         typeof draft.promoKey !== 'string' || !draft.promoKey || draft.promoKey.length > 160 ||
         typeof draft.soopId !== 'string' || draft.soopId.length > 20) {
+      trace(attemptId, 'open-request-data-rejected', {
+        writeUrlValid: isAllowedWriteUrl(draft.writeUrl),
+        nicknameValid: typeof draft.nickname === 'string' && draft.nickname.length <= 100,
+        titleValid: typeof draft.title === 'string' && draft.title.length <= 200,
+        bodyValid: typeof draft.body === 'string' && draft.body.length <= 10000,
+        htmlValid: typeof draft.html === 'string' && draft.html.length <= 40000,
+        promoKeyValid: typeof draft.promoKey === 'string' && !!draft.promoKey && draft.promoKey.length <= 160,
+        soopIdValid: typeof draft.soopId === 'string' && draft.soopId.length <= 20,
+      });
       sendResponse({ ok: false, error: '글쓰기 링크 또는 생성된 내용이 올바르지 않습니다.' });
       return false;
     }
@@ -48,12 +80,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const pendingKey = PENDING_POST_PREFIX + tab.id;
       const createdAt = Date.now();
       await chrome.storage.local.set({ [key]: {
+        attemptId: attemptId,
         nickname: draft.nickname,
         title: draft.title,
         body: draft.body,
         html: draft.html,
         createdAt: createdAt,
       }, [pendingKey]: {
+        attemptId: attemptId,
         adminTabId: sender.tab.id,
         promoKey: draft.promoKey,
         soopId: draft.soopId,
@@ -64,9 +98,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         lastAttemptAt: 0,
         completionRequested: false,
       } });
+      trace(attemptId, 'pending-created', {
+        managerTabId: sender.tab.id,
+        soopTabId: tab.id,
+        stationId: new URL(draft.writeUrl).pathname.match(/^\/station\/([A-Za-z0-9]+)\//)[1].toLowerCase(),
+        promoKey: draft.promoKey,
+      });
       await chrome.tabs.update(tab.id, { url: draft.writeUrl, active: true });
+      trace(attemptId, 'soop-write-tab-opened', { soopTabId: tab.id });
       sendResponse({ ok: true });
     }).catch((error) => {
+      trace(attemptId, 'soop-write-tab-open-failed', { error: String(error && error.message || error) });
       console.error('SOOP 홍보글 탭 열기 실패:', error);
       sendResponse({ ok: false, error: 'SOOP 글쓰기 탭을 열지 못했습니다.' });
     });
@@ -83,6 +125,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.get(key).then(async (result) => {
       const draft = result[key] || null;
       if (draft) await chrome.storage.local.remove(key);
+      trace(draft && draft.attemptId, draft ? 'draft-delivered-to-soop' : 'draft-missing-on-soop', {
+        soopTabId: tabId,
+        stationId: (new URL(sender.url)).pathname.match(/^\/station\/([A-Za-z0-9]+)\//)?.[1]?.toLowerCase() || '',
+        titleLength: draft && draft.title ? draft.title.length : 0,
+        bodyLength: draft && draft.body ? draft.body.length : 0,
+        htmlLength: draft && draft.html ? draft.html.length : 0,
+      });
       sendResponse({ ok: true, draft: draft });
     }).catch((error) => {
       console.error('홍보글 임시 데이터 조회 실패:', error);
@@ -93,8 +142,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'confirmPromoPost') {
     confirmPromoPost(message, sender).then(sendResponse).catch((error) => {
+      trace(message.attemptId, 'post-confirmation-threw', { error: String(error && error.message || error) });
       console.error('홍보 게시 성공 확인 실패:', error);
-      sendResponse({ ok: false, reason: 'confirmation-error' });
+      sendResponse({ ok: false, reason: 'confirmation-error', attemptId: message.attemptId || '' });
     });
     return true;
   }
@@ -114,7 +164,16 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.storage.local.get(null).then((allData) => {
     const sessionKeys = Object.keys(allData).filter((key) =>
       key.startsWith(PENDING_KEY_PREFIX) || key.startsWith(PENDING_POST_PREFIX));
-    if (sessionKeys.length) return chrome.storage.local.remove(sessionKeys);
+    if (sessionKeys.length) {
+      const pendingPostKeys = sessionKeys.filter((key) => key.startsWith(PENDING_POST_PREFIX));
+      trace('', 'unclosed-promo-state-cleared-on-browser-startup', {
+        draftCount: sessionKeys.length - pendingPostKeys.length,
+        pendingPostCount: pendingPostKeys.length,
+        attemptIds: pendingPostKeys.map((key) => allData[key] && allData[key].attemptId || '').filter(Boolean),
+      });
+      return chrome.storage.local.remove(sessionKeys);
+    }
+    trace('', 'browser-startup-no-pending-promo-state', {});
     return undefined;
   }).catch((error) => console.warn('이전 브라우저 세션의 홍보 데이터 정리 실패:', error));
 });
@@ -138,11 +197,19 @@ async function confirmPromoPost(message, sender) {
   const tabId = sender.tab && sender.tab.id;
   let url;
   try { url = new URL(sender.url || (sender.tab && sender.tab.url) || ''); }
-  catch (error) { return { ok: false, reason: 'invalid-url' }; }
+  catch (error) {
+    trace(message.attemptId, 'post-confirmation-invalid-url', { error: String(error && error.message || error) });
+    return { ok: false, reason: 'invalid-url', attemptId: message.attemptId || '' };
+  }
   const match = SOOP_POST_PATH.exec(url.pathname);
   if (!Number.isInteger(tabId) || !match ||
       (url.hostname !== 'sooplive.com' && url.hostname !== 'www.sooplive.com')) {
-    return { ok: false, reason: 'not-post-detail' };
+    trace(message.attemptId, 'post-confirmation-wrong-route', {
+      tabId: Number.isInteger(tabId) ? tabId : null,
+      host: url.hostname,
+      path: url.pathname,
+    });
+    return { ok: false, reason: 'not-post-detail', attemptId: message.attemptId || '' };
   }
 
   const now = Date.now();
@@ -151,6 +218,12 @@ async function confirmPromoPost(message, sender) {
   const sameStation = [];
   const confirmed = [];
   const expiredKeys = [];
+  const stationPendingCount = Object.entries(allSessionData).filter(([key, pending]) =>
+    key.startsWith(PENDING_POST_PREFIX) && pending && pending.stationId === match[1].toLowerCase()
+  ).length;
+  const allPendingPostEntries = Object.entries(allSessionData).filter(([key, pending]) =>
+    key.startsWith(PENDING_POST_PREFIX) && pending && pending.createdAt
+  );
   Object.entries(allSessionData).forEach(([key, pending]) => {
     if (!key.startsWith(PENDING_POST_PREFIX) || !pending || !pending.createdAt) return;
     if (now - pending.createdAt > PROMO_PENDING_TTL_MS) {
@@ -167,51 +240,103 @@ async function confirmPromoPost(message, sender) {
     const bodyMarker = expectedBody.includes(gameUrlMarker)
       ? gameUrlMarker
       : expectedBody.slice(0, Math.min(24, expectedBody.length));
-    if (expectedTitle && bodyMarker && visibleText.includes(expectedTitle) && visibleText.includes(bodyMarker)) {
+    const titleMatched = !!expectedTitle && visibleText.includes(expectedTitle);
+    const bodyMarkerMatched = !!bodyMarker && visibleText.includes(bodyMarker);
+    traceContentCheckOnce(pending.attemptId, [titleMatched, bodyMarkerMatched].join('-'), {
+      soopTabId: tabId,
+      stationId: match[1].toLowerCase(),
+      articleId: match[2],
+      titleMatched: titleMatched,
+      gameLinkMatched: bodyMarkerMatched,
+      expectedTitleLength: expectedTitle.length,
+      visibleTextLength: visibleText.length,
+    });
+    if (titleMatched && bodyMarkerMatched) {
       confirmed.push({ key, pending });
     }
   });
   if (expiredKeys.length) await chrome.storage.local.remove(expiredKeys);
+  if (expiredKeys.length) {
+    trace('', 'expired-promo-state-cleared', { expiredCount: expiredKeys.length });
+  }
   if (!confirmed.length) {
-    return { ok: false, reason: sameStation.length ? 'post-content-not-confirmed' : 'no-pending-promo' };
+    const reason = sameStation.length ? 'post-content-not-confirmed' : 'no-pending-promo';
+    const attemptId = sameStation[0] && sameStation[0].pending.attemptId || message.attemptId || '';
+    trace(attemptId, 'published-post-not-matched', {
+      reason: reason,
+      stationId: match[1].toLowerCase(),
+      articleId: match[2],
+      stationPendingCount: stationPendingCount,
+      totalPendingPostCount: allPendingPostEntries.length,
+      pendingStations: Array.from(new Set(allPendingPostEntries.map((item) => item[1].stationId).filter(Boolean))),
+      expiredPendingCount: expiredKeys.length,
+      visibleTextLength: visibleText.length,
+    });
+    return { ok: false, reason: reason, attemptId: attemptId };
   }
   const matchingPromoKeys = Array.from(new Set(confirmed.map((item) => item.pending.promoKey)));
   if (matchingPromoKeys.length > 1) {
-    return { ok: false, reason: 'multiple-pending-promos' };
+    trace(confirmed[0].pending.attemptId, 'multiple-pending-promos-match', {
+      candidateCount: confirmed.length,
+      distinctPromoCount: matchingPromoKeys.length,
+      stationId: match[1].toLowerCase(),
+      articleId: match[2],
+    });
+    return { ok: false, reason: 'multiple-pending-promos', attemptId: confirmed[0].pending.attemptId || '' };
   }
   confirmed.sort((a, b) => b.pending.createdAt - a.pending.createdAt);
   const { pending } = confirmed[0];
   const matchingPendingKeys = confirmed.map((item) => item.key);
   const pendingKey = confirmed[0].key;
   if (pending.completionRequested || now - (pending.lastAttemptAt || 0) < COMPLETION_RETRY_MS) {
-    return { ok: false, reason: 'completion-in-progress' };
+    trace(pending.attemptId, 'completion-attempt-skipped', {
+      completionRequested: !!pending.completionRequested,
+      withinRetryWindow: now - (pending.lastAttemptAt || 0) < COMPLETION_RETRY_MS,
+    });
+    return { ok: false, reason: 'completion-in-progress', attemptId: pending.attemptId || '' };
   }
 
   const adminTab = await findAdminTab(pending.adminTabId);
-  if (!adminTab) return { ok: false, reason: 'admin-tab-unavailable' };
+  if (!adminTab) {
+    trace(pending.attemptId, 'admin-tab-not-found', { preferredAdminTabId: pending.adminTabId });
+    return { ok: false, reason: 'admin-tab-unavailable', attemptId: pending.attemptId || '' };
+  }
 
   const requestId = 'promo-' + tabId + '-' + now;
   pending.completionRequested = true;
   pending.lastAttemptAt = now;
   await chrome.storage.local.set({ [pendingKey]: pending });
+  trace(pending.attemptId, 'admin-completion-request-sent', {
+    managerTabId: adminTab.id,
+    soopTabId: tabId,
+    articleId: match[2],
+    promoKey: pending.promoKey,
+  });
   try {
     const response = await chrome.tabs.sendMessage(adminTab.id, {
       type: 'markPromoCompleted',
       requestId: requestId,
       promoKey: pending.promoKey,
       soopId: pending.soopId,
+      attemptId: pending.attemptId || '',
     });
     if (!response || response.ok !== true) {
       pending.completionRequested = false;
       await chrome.storage.local.set({ [pendingKey]: pending });
-      return { ok: false, reason: 'admin-save-failed' };
+      trace(pending.attemptId, 'admin-completion-request-rejected', {
+        hasResponse: !!response,
+        error: response && response.error || '',
+      });
+      return { ok: false, reason: 'admin-save-failed', attemptId: pending.attemptId || '' };
     }
     await chrome.storage.local.remove(matchingPendingKeys);
-    return { ok: true, completed: true, articleId: match[2] };
+    trace(pending.attemptId, 'completion-flow-succeeded', { articleId: match[2] });
+    return { ok: true, completed: true, articleId: match[2], attemptId: pending.attemptId || '' };
   } catch (error) {
     pending.completionRequested = false;
     await chrome.storage.local.set({ [pendingKey]: pending });
+    trace(pending.attemptId, 'admin-completion-message-error', { error: String(error && error.message || error) });
     console.error('관리 센터 홍보 완료 저장 실패:', error);
-    return { ok: false, reason: 'admin-save-failed' };
+    return { ok: false, reason: 'admin-save-failed', attemptId: pending.attemptId || '' };
   }
 }
