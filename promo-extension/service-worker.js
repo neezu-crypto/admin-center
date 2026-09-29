@@ -195,17 +195,28 @@ function normalizeText(value) {
 
 async function confirmPromoPost(message, sender) {
   const tabId = sender.tab && sender.tab.id;
+  const senderUrl = sender.url || (sender.tab && sender.tab.url) || '';
+  let senderOrigin;
+  try { senderOrigin = new URL(senderUrl); }
+  catch (error) { senderOrigin = null; }
+  let tabUrlPath = '';
+  try { tabUrlPath = (sender.tab && sender.tab.url) ? new URL(sender.tab.url).pathname : ''; }
+  catch (error) { /* Diagnostic only; the explicit page URL is validated below. */ }
   let url;
-  try { url = new URL(sender.url || (sender.tab && sender.tab.url) || ''); }
+  try { url = new URL(message.pageUrl || senderUrl); }
   catch (error) {
     trace(message.attemptId, 'post-confirmation-invalid-url', { error: String(error && error.message || error) });
     return { ok: false, reason: 'invalid-url', attemptId: message.attemptId || '' };
   }
   const match = SOOP_POST_PATH.exec(url.pathname);
-  if (!Number.isInteger(tabId) || !match ||
-      (url.hostname !== 'sooplive.com' && url.hostname !== 'www.sooplive.com')) {
+  const isSoopHost = (hostname) => hostname === 'sooplive.com' || hostname === 'www.sooplive.com';
+  if (!Number.isInteger(tabId) || !match || url.protocol !== 'https:' || !isSoopHost(url.hostname) ||
+      !senderOrigin || senderOrigin.protocol !== 'https:' || !isSoopHost(senderOrigin.hostname)) {
     trace(message.attemptId, 'post-confirmation-wrong-route', {
       tabId: Number.isInteger(tabId) ? tabId : null,
+      senderPath: senderOrigin && senderOrigin.pathname || '',
+      tabPath: tabUrlPath,
+      reportedPagePath: url.pathname,
       host: url.hostname,
       path: url.pathname,
     });

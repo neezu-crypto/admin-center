@@ -270,6 +270,7 @@
         return chrome.runtime.sendMessage({
           type: 'confirmPromoPost',
           attemptId: diagnosticAttemptId,
+          pageUrl: location.href,
           visibleText: visibleText.slice(0, 30000),
         });
       })
