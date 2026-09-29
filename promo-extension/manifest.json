@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SOOP 홍보글 작성 보조",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "관리자 센터 홍보글을 SOOP에 채우고, 게시 성공이 확인되면 홍보 완료를 표시합니다.",
   "permissions": ["storage"],
   "host_permissions": [

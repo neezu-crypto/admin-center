@@ -1,6 +1,7 @@
 (function () {
   const WRITE_PATH = /^\/station\/[A-Za-z0-9]+\/post\/write\/\d+\/?$/;
   const POST_DETAIL_PATH = /^\/station\/[A-Za-z0-9]+\/post\/\d+\/?$/;
+  const PUBLISH_CLICK_SESSION_KEY = 'soopPromoPublishClickedAt';
   const isWritePage = WRITE_PATH.test(location.pathname);
   let diagnosticAttemptId = '';
 
@@ -231,19 +232,37 @@
     let stopped = false;
     let checking = false;
     let lastCheckAt = 0;
+    let minimumCheckIntervalMs = 1200;
     let lastReportedResult = '';
     let failureShown = false;
     let mismatchLogged = false;
     let contentMismatchSince = 0;
     let timer = null;
+    let fastWatchTimer = null;
     let observer = null;
     function stop() {
       stopped = true;
       clearInterval(timer);
+      clearTimeout(fastWatchTimer);
       if (observer) observer.disconnect();
     }
+    function activateFastWatch(reason) {
+      if (stopped) return;
+      minimumCheckIntervalMs = 400;
+      clearInterval(timer);
+      timer = setInterval(check, minimumCheckIntervalMs);
+      clearTimeout(fastWatchTimer);
+      fastWatchTimer = setTimeout(function () {
+        minimumCheckIntervalMs = 1200;
+        clearInterval(timer);
+        timer = setInterval(check, minimumCheckIntervalMs);
+        trace('post-fast-watch-ended', { reason: reason || 'timeout' });
+      }, 20000);
+      trace('post-fast-watch-started', { reason: reason || 'publish-click', intervalMs: minimumCheckIntervalMs });
+      check();
+    }
     function check() {
-      if (stopped || checking || !POST_DETAIL_PATH.test(location.pathname) || Date.now() - lastCheckAt < 1200) return;
+      if (stopped || checking || !POST_DETAIL_PATH.test(location.pathname) || Date.now() - lastCheckAt < minimumCheckIntervalMs) return;
       checking = true;
       lastCheckAt = Date.now();
       const visibleText = document.body ? document.body.innerText || document.body.textContent || '' : '';
@@ -263,6 +282,7 @@
           }
           if (result && result.completed) {
             stop();
+            try { sessionStorage.removeItem(PUBLISH_CLICK_SESSION_KEY); } catch (error) { /* Storage may be blocked. */ }
             showStatus('게시글 등록을 확인해 홍보 완료로 표시했습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), false);
           } else if (result && ['admin-save-failed', 'admin-tab-unavailable'].includes(result.reason) && !failureShown) {
             failureShown = true;
@@ -308,12 +328,27 @@
         })
         .finally(function () { checking = false; });
     }
-    timer = setInterval(check, 1500);
+    timer = setInterval(check, minimumCheckIntervalMs);
     if (document.body) {
       observer = new MutationObserver(check);
       observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     }
     check();
+    let publishClickAt = 0;
+    try { publishClickAt = Number(sessionStorage.getItem(PUBLISH_CLICK_SESSION_KEY) || 0); } catch (error) { /* Storage may be blocked. */ }
+    if (publishClickAt && Date.now() - publishClickAt < 120000) {
+      activateFastWatch('after-publish-navigation');
+    }
+    if (isWritePage) {
+      document.addEventListener('click', function (event) {
+        const target = event.target instanceof Element ? event.target.closest('button') : null;
+        if (!target || (target.innerText || target.textContent || '').replace(/\s+/g, ' ').trim() !== '게시') return;
+        const clickedAt = Date.now();
+        try { sessionStorage.setItem(PUBLISH_CLICK_SESSION_KEY, String(clickedAt)); } catch (error) { /* Storage may be blocked. */ }
+        trace('publish-button-click-detected', {});
+        activateFastWatch('publish-button-click');
+      }, true);
+    }
   }
 
   if (!isWritePage) {
