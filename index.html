@@ -1685,7 +1685,11 @@
     onyuGiftRequests.forEach(function (request) {
       const row = document.createElement('div');
       row.className = 'verif-row';
-      const statusLabel = request.status === 'approved' ? '이용권 지급 완료' : request.status === 'rejected' ? '거절됨' : '후원 확인 대기';
+      const statusLabel = request.status === 'approved'
+        ? request.activationStatus === 'awaiting-streamer-verification' ? '스트리머 인증 후 자동 지급 대기'
+          : request.activationStatus === 'identity-mismatch' ? '인증 정보 불일치 확인 필요'
+            : request.activationStatus === 'blocked-existing-entitlement' ? '기존 이용권 보유 확인 필요' : '이용권 지급 완료'
+        : request.status === 'rejected' ? '거절됨' : '후원 확인 대기';
       const isSelfPurchase = request.purchaseType === 'self';
       const isViewerPurchase = request.purchaseType === 'self-viewer';
       const requestTypeLabel = isViewerPurchase ? '일반 로그인 계정 본인 구매' : isSelfPurchase ? '인증 스트리머 본인 구매' : '스트리머 선물';
@@ -1698,6 +1702,7 @@
         ' <span class="source-tag stockMarket">' + statusLabel + '</span></b>' +
         '<span>신청 유형: ' + requestTypeLabel + '</span>' +
         '<span>' + recipientLabel + ' · 대상 UID: ' + escapeHtml(request.targetUid || '') + '</span>' +
+        (request.activationStatus === 'awaiting-streamer-verification' ? '<span>후원 확인 완료. 해당 SOOP 아이디로 스트리머 인증이 승인되면 자동으로 이용권을 연결합니다.</span>' : '') +
         '<span>신청자 SOOP 닉네임: ' + escapeHtml(request.donorNickname || '(미입력)') + ' · 별풍선 ' + Number(request.balloons || 50) + '개</span>' +
         '<span>신청자 UID: ' + escapeHtml(request.requesterUid || '') + (requestedAt ? ' · ' + requestedAt : '') + '</span></div>' +
         '<div class="verif-actions"></div>';

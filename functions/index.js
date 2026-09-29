@@ -1,5 +1,5 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
-const { onValueCreated, onValueUpdated } = require('firebase-functions/v2/database');
+const { onValueCreated, onValueUpdated, onValueWritten } = require('firebase-functions/v2/database');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
@@ -583,6 +583,44 @@ const SOOP_ID_RE = /^[A-Za-z0-9]{2,20}$/;
 function normalizeSoopId(value) {
   const id = String(value || '').trim();
   return SOOP_ID_RE.test(id) ? id.toLowerCase() : '';
+}
+
+async function activateApprovedOnyuGiftsForStreamer(db, streamer) {
+  const uid = String(streamer && streamer.uid || '').trim();
+  const soopId = normalizeSoopId(streamer && streamer.soopId);
+  if (!uid || !soopId) return 0;
+  const giftsSnap = await db.ref('onyuVn/streamerGameGiftRequests').get();
+  const gifts = giftsSnap.val() || {};
+  const now = Date.now();
+  let activatedCount = 0;
+  for (const [requestId, gift] of Object.entries(gifts)) {
+    if (!gift || gift.purchaseType !== 'gift' || gift.status !== 'approved' ||
+        gift.activationStatus === 'activated' || normalizeSoopId(gift.targetSoopId) !== soopId) continue;
+    const entitlementRef = db.ref('onyuVn/streamerGameEntitlements/' + uid);
+    const grant = {
+      status: 'active', grantedAt: now, grantedBy: 'streamer-verification', requestId,
+      giftRequestId: requestId, purchaseType: 'gift', requesterUid: gift.requesterUid || '',
+      donorNickname: gift.donorNickname || '', targetNickname: streamer.nickname || gift.targetNickname || '',
+    };
+    const current = (await entitlementRef.get()).val();
+    if (current && current.status === 'active') {
+      const sameGift = current.requestId === requestId || current.giftRequestId === requestId;
+      await db.ref('onyuVn/streamerGameGiftRequests/' + requestId).update({
+        targetUid: uid, activationStatus: sameGift ? 'activated' : 'blocked-existing-entitlement', updatedAt: now,
+      });
+      if (sameGift) activatedCount += 1;
+      continue;
+    }
+    const result = await entitlementRef.transaction((value) => value === null ? grant : undefined);
+    const stored = result.snapshot && result.snapshot.val();
+    const activated = result.committed || !!(stored && (stored.requestId === requestId || stored.giftRequestId === requestId));
+    await db.ref('onyuVn/streamerGameGiftRequests/' + requestId).update({
+      targetUid: uid, targetNickname: streamer.nickname || gift.targetNickname || '',
+      activationStatus: activated ? 'activated' : 'blocked-existing-entitlement', updatedAt: now,
+    });
+    if (activated) activatedCount += 1;
+  }
+  return activatedCount;
 }
 
 function normalizePromoUrl(value) {
@@ -1759,7 +1797,8 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
   }
   const purchaseType = String(request.data && request.data.purchaseType || 'gift');
   if (!['self', 'self-viewer', 'gift'].includes(purchaseType)) throw new HttpsError('invalid-argument', '이용권 구매 유형이 올바르지 않습니다.');
-  const verificationId = String(request.data && request.data.verificationId || '').trim();
+  const targetNicknameInput = String(request.data && request.data.targetNickname || '').trim();
+  const targetSoopIdInput = normalizeSoopId(request.data && request.data.targetSoopId);
   const donorNickname = String(request.data && request.data.donorNickname || '').trim();
   if (!donorNickname || donorNickname.length > 30) throw new HttpsError('invalid-argument', '후원자 SOOP 닉네임을 1~30자로 입력해 주세요.');
   let targetUid;
@@ -1783,31 +1822,35 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
     targetNickname = String(user.nickname || user.displayName || '일반 로그인 유저').trim();
     targetSoopId = '';
   } else {
-    if (!verificationId || verificationId.length > 200) throw new HttpsError('invalid-argument', '선물 받을 인증 스트리머를 선택해 주세요.');
-    const streamerSnap = await db.ref('streamerVerifications/' + verificationId).get();
-    const streamer = streamerSnap.val() || {};
-    targetUid = String(streamer.uid || '').trim();
-    targetNickname = String(streamer.nickname || '').trim();
-    targetSoopId = normalizeSoopId(streamer.soopId);
-    if (!targetUid || !targetNickname || !targetSoopId || !(await isVerifiedStreamerUid(targetUid))) {
-      throw new HttpsError('failed-precondition', '인증 상태를 확인할 수 없는 스트리머입니다. 목록을 새로고침해 주세요.');
+    if (!targetNicknameInput || targetNicknameInput.length > 20) throw new HttpsError('invalid-argument', '선물 받을 SOOP 닉네임을 1~20자로 입력해 주세요.');
+    if (!targetSoopIdInput) throw new HttpsError('invalid-argument', 'SOOP 아이디는 영문 소문자/숫자 2~20자로 입력해 주세요.');
+    targetSoopId = targetSoopIdInput;
+    targetNickname = targetNicknameInput;
+    // 아직 온이유 로그인/스트리머 인증 전인 수신자도 선물 신청할 수 있다.
+    // 인증 기록이 이미 있으면 UID를 연결해 중복 이용권 여부도 즉시 검사한다.
+    const verifiedSnap = await db.ref('streamerVerifications').orderByChild('soopId').equalTo(targetSoopId).limitToFirst(1).get();
+    const verified = Object.values(verifiedSnap.val() || {})[0] || null;
+    targetUid = verified ? String(verified.uid || '').trim() : '';
+    if (verified && String(verified.nickname || '').trim() !== targetNickname) {
+      throw new HttpsError('failed-precondition', '입력한 SOOP 닉네임과 아이디가 인증 정보와 일치하지 않습니다.');
     }
-    if (targetUid === uid) throw new HttpsError('failed-precondition', '본인 구매를 선택해 주세요.');
+    if (targetUid && targetUid === uid) throw new HttpsError('failed-precondition', '본인 구매를 선택해 주세요.');
   }
   const entitlementPath = purchaseType === 'self-viewer' ? 'onyuVn/gameEntitlements/' : 'onyuVn/streamerGameEntitlements/';
-  const entitlementSnap = await db.ref(entitlementPath + targetUid).get();
-  const otherEntitlementSnap = purchaseType === 'self-viewer'
+  const entitlementSnap = targetUid ? await db.ref(entitlementPath + targetUid).get() : null;
+  const otherEntitlementSnap = purchaseType === 'self-viewer' || !targetUid
     ? null
     : await db.ref((entitlementPath === 'onyuVn/gameEntitlements/' ? 'onyuVn/streamerGameEntitlements/' : 'onyuVn/gameEntitlements/') + targetUid).get();
-  if ((entitlementSnap.exists() && entitlementSnap.val().status === 'active') ||
+  if ((entitlementSnap && entitlementSnap.exists() && entitlementSnap.val().status === 'active') ||
       (otherEntitlementSnap && otherEntitlementSnap.exists() && otherEntitlementSnap.val().status === 'active')) {
     throw new HttpsError('already-exists', '해당 계정은 이미 온이유 게임 이용권을 보유하고 있습니다.');
   }
   const pendingRequestsSnap = await db.ref('onyuVn/streamerGameGiftRequests').get();
-  const pendingDuplicate = Object.values(pendingRequestsSnap.val() || {}).some((pending) =>
-    pending && pending.status === 'pending' && pending.targetUid === targetUid &&
-    (purchaseType === 'self' || purchaseType === 'self-viewer' || pending.requesterUid === uid)
-  );
+  const pendingDuplicate = Object.values(pendingRequestsSnap.val() || {}).some((pending) => {
+    if (!pending) return false;
+    if (purchaseType === 'gift') return pending.purchaseType === 'gift' && pending.targetSoopId === targetSoopId && ['pending', 'approved'].includes(pending.status);
+    return pending.status === 'pending' && pending.targetUid === targetUid;
+  });
   if (pendingDuplicate) throw new HttpsError('already-exists', '같은 계정의 구매·선물 신청이 이미 후원 확인 대기 중입니다.');
   const now = Date.now();
   const requestRef = db.ref('onyuVn/streamerGameGiftRequests').push();
@@ -1817,7 +1860,7 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
     purchaseType,
     provider: provider === 'google.com' || user.googleLinked === true ? 'google' : 'kakao',
     donorNickname,
-    targetUid,
+    targetUid: targetUid || null,
     targetNickname,
     targetSoopId,
     balloons: ONYU_STREAMER_GIFT_BALLOONS,
@@ -1858,9 +1901,46 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
     if (isViewerPurchase) {
       if (gift.requesterUid !== gift.targetUid) throw new HttpsError('failed-precondition', '본인 구매 신청 계정 정보가 일치하지 않습니다.');
     } else {
-      const streamerFlagSnap = await db.ref('users/' + gift.targetUid + '/streamerVerified').get();
-      if (streamerFlagSnap.val() !== true && !(await isVerifiedStreamerUid(gift.targetUid))) {
-        throw new HttpsError('failed-precondition', '선물 받을 계정이 더 이상 인증 스트리머가 아닙니다.');
+      if (purchaseType === 'gift') {
+        const soopId = normalizeSoopId(gift.targetSoopId);
+        if (!soopId) throw new HttpsError('failed-precondition', '선물 받을 SOOP 아이디가 없습니다.');
+        const verifiedSnap = await db.ref('streamerVerifications').orderByChild('soopId').equalTo(soopId).limitToFirst(1).get();
+        const verified = Object.values(verifiedSnap.val() || {})[0] || null;
+        if (verified && gift.targetNickname && String(verified.nickname || '').trim() !== String(gift.targetNickname).trim()) {
+          throw new HttpsError('failed-precondition', '선물 대상 SOOP 닉네임과 아이디가 인증 정보와 일치하지 않습니다.');
+        }
+        if (verified && verified.uid) {
+          gift.targetUid = String(verified.uid);
+          gift.targetNickname = String(verified.nickname || gift.targetNickname || '');
+        } else {
+          // 후원 확인은 완료됐지만 아직 인증 전이면 승인 상태로 보관하고,
+          // streamerVerifications 기록이 생기는 즉시 entitlement를 연결한다.
+          await giftRef.update({
+            status: 'approved', activationStatus: 'awaiting-streamer-verification',
+            reviewedAt: now, reviewedBy: adminUid, updatedAt: now,
+          });
+          // 인증 승인이 거의 동시에 진행됐더라도 놓치지 않도록, 대기 상태 기록
+          // 직후 원장을 다시 읽어 인증 완료분을 즉시 연결한다.
+          const latestVerifiedSnap = await db.ref('streamerVerifications').orderByChild('soopId').equalTo(soopId).limitToFirst(1).get();
+          const latestVerified = Object.values(latestVerifiedSnap.val() || {})[0];
+          if (latestVerified && latestVerified.uid) {
+            await activateApprovedOnyuGiftsForStreamer(db, latestVerified);
+            const latestGift = (await giftRef.get()).val() || {};
+            if (latestGift.activationStatus === 'activated') {
+              await logToAdminAuditLog(db, request, '온 이유 스트리머 게임 선물 승인', gift.targetNickname + ' · ' + requestId);
+              await recordOnyuServerEvent(request, 'streamer_game_gift_approved', { targetUid: latestVerified.uid });
+              return { ok: true, status: 'approved', activationStatus: 'activated', targetUid: latestVerified.uid };
+            }
+          }
+          await logToAdminAuditLog(db, request, '온 이유 스트리머 게임 선물 승인 (인증 대기)', gift.targetNickname + ' · ' + requestId);
+          await recordOnyuServerEvent(request, 'streamer_game_gift_approved', { targetUid: null });
+          return { ok: true, status: 'approved', activationStatus: 'awaiting-streamer-verification', targetUid: null };
+        }
+      } else {
+        const streamerFlagSnap = await db.ref('users/' + gift.targetUid + '/streamerVerified').get();
+        if (streamerFlagSnap.val() !== true && !(await isVerifiedStreamerUid(gift.targetUid))) {
+          throw new HttpsError('failed-precondition', '선물 받을 계정이 더 이상 인증 스트리머가 아닙니다.');
+        }
       }
     }
     const entitlementRef = db.ref((isViewerPurchase ? 'onyuVn/gameEntitlements/' : 'onyuVn/streamerGameEntitlements/') + gift.targetUid);
@@ -1887,6 +1967,7 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
   }
   await giftRef.update({
     status: decision === 'approve' ? 'approved' : 'rejected',
+    ...(decision === 'approve' && purchaseType === 'gift' ? { activationStatus: 'activated', targetUid: gift.targetUid } : {}),
     reviewedAt: now,
     reviewedBy: adminUid,
     updatedAt: now,
@@ -2556,6 +2637,16 @@ const trackOnyuStreamerVerificationStatus = onValueUpdated('/streamerVerificatio
   return null;
 });
 
+// 인증 원장은 SOOP 아이디를 canonical key로 쓰는 공유 노드다. 관리자가 인증을
+// 승인해 새 레코드를 만들거나 기존 레코드의 UID를 바꿨을 때, 후원 확인까지 끝난
+// 온이유 선물을 해당 스트리머 UID에 연결한다. 함수는 재시도되어도 같은 요청권만
+// 멱등 지급하고, 이미 다른 이용권이 있으면 덮어쓰지 않는다.
+const activateOnyuGiftsAfterStreamerVerification = onValueWritten('/streamerVerifications/{id}', async (event) => {
+  const streamer = event.data.after.val() || {};
+  await activateApprovedOnyuGiftsForStreamer(getDatabase(), streamer);
+  return null;
+});
+
 module.exports = {
   getGalleryStats,
   getLifeGameStats,
@@ -2641,4 +2732,5 @@ module.exports = {
   getOnyuStats,
   trimOnyuAnalytics,
   trackOnyuStreamerVerificationStatus,
+  activateOnyuGiftsAfterStreamerVerification,
 };
