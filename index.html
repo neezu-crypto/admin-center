@@ -650,9 +650,9 @@
     <div class="card" id="section-streamer-promo-links">
       <h2>스트리머별 홍보글 바로가기</h2>
       <p class="hint">
-        인증된 스트리머의 SOOP 게시판 글쓰기 링크를 저장해 두고, 닉네임별로 새 탭에서 바로 엽니다.
-        게시판 종류와 로그인 상태에 따라 글쓰기 주소가 달라질 수 있어 링크는 관리자가 실제 주소를 한 번 등록해야 합니다.
-        목록은 인증 스트리머 기준으로 닉네임순 정렬되며, 링크가 없는 스트리머도 계속 표시됩니다.
+        인증된 스트리머와 별도로 추가한 홍보 후보의 SOOP 게시판 글쓰기 링크를 관리하고, 닉네임별로 새 탭에서 바로 엽니다.
+        게시판 종류와 로그인 상태에 따라 글쓰기 주소가 달라질 수 있으니, 열기 전에 주소를 확인해주세요.
+        목록은 인증 스트리머와 수동 등록 후보를 합쳐 닉네임순으로 표시하며, 홍보 완료 항목은 아래쪽에 정렬됩니다.
       </p>
       <button id="streamerPromoLinksRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <button id="streamerPromoClearCompletedBtn" class="perm-refresh-btn" type="button" style="margin-left:6px;">전체 체크 해제</button>
@@ -2500,7 +2500,7 @@
   function renderStreamerPromoLinksList(streamers, recentOpened) {
     if (!streamers.length) {
       streamerPromoRecentListEl.innerHTML = '<div class="empty-state">아직 글쓰기 링크를 연 기록이 없습니다.</div>';
-      streamerPromoLinksListEl.innerHTML = '<div class="empty-state">인증된 스트리머가 없습니다.</div>';
+      streamerPromoLinksListEl.innerHTML = '<div class="empty-state">등록된 스트리머 또는 홍보 후보가 없습니다.</div>';
       streamerPromoLinksStatusEl.textContent = '';
       return;
     }
