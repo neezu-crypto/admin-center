@@ -1619,6 +1619,71 @@ const lifeGameRejectSponsorRequest = onCall(async (request) => {
   return { ok: true };
 });
 
+// 인생게임 '오늘의 후원 스트리머' 승인 이후 운영 도구. 공개 노드 하나만
+// 조작하고 모든 쓰기는 관리자 인증 및 통합 감사 로그를 거친다.
+const getLifeGameCurrentSponsor = onCall(async (request) => {
+  await requireAdmin(request);
+  const snap = await getDatabase().ref('lifeGame/currentSponsor').get();
+  return { sponsor: snap.val() || null, fetchedAt: Date.now() };
+});
+
+const updateLifeGameCurrentSponsor = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data || {};
+  const nickname = String(data.nickname || '').trim();
+  const soopId = String(data.soopId || '').trim().toLowerCase();
+  const extendDays = Math.round(Number(data.extendDays) || 0);
+  if (!nickname || nickname.length > 20 || /[<>\x00-\x1F\x7F]/.test(nickname)) {
+    throw new HttpsError('invalid-argument', '닉네임은 금지 문자를 제외하고 1~20자로 입력해주세요.');
+  }
+  if (!/^[a-z0-9]{2,20}$/.test(soopId)) {
+    throw new HttpsError('invalid-argument', 'SOOP 아이디는 영문 소문자/숫자 2~20자로 입력해주세요.');
+  }
+  if (!Number.isInteger(extendDays) || extendDays < 0 || extendDays > 365) {
+    throw new HttpsError('invalid-argument', '연장 일수는 0~365일로 입력해주세요.');
+  }
+  const db = getDatabase();
+  const now = Date.now();
+  const ref = db.ref('lifeGame/currentSponsor');
+  let before = null;
+  let after = null;
+  const result = await ref.transaction((current) => {
+    if (!current || typeof current !== 'object') return;
+    before = current;
+    const prefix = soopId.slice(0, 2);
+    const baseTime = Math.max(now, Number(current.endAt) || 0);
+    after = Object.assign({}, current, {
+      nickname,
+      soopId,
+      previewImg: 'https://stimg.sooplive.com/LOGO/' + prefix + '/' + soopId + '/' + soopId + '.jpg',
+      stationLink: 'https://www.sooplive.com/station/' + soopId,
+      endAt: extendDays ? baseTime + extendDays * 86400000 : current.endAt,
+      updatedAt: now,
+    });
+    return after;
+  }, undefined, false);
+  if (!result.committed || !after) throw new HttpsError('not-found', '관리할 후원 스트리머 광고가 없습니다.');
+  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 광고 수정',
+    before.nickname + ' → ' + nickname + ' · ' + soopId + (extendDays ? ' · ' + extendDays + '일 연장' : ''));
+  return { ok: true, sponsor: after };
+});
+
+const endLifeGameCurrentSponsor = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const now = Date.now();
+  const ref = db.ref('lifeGame/currentSponsor');
+  let previous = null;
+  const result = await ref.transaction((current) => {
+    if (!current || typeof current !== 'object') return;
+    previous = current;
+    return Object.assign({}, current, { endAt: now, endedAt: now });
+  }, undefined, false);
+  if (!result.committed || !previous) throw new HttpsError('not-found', '관리할 후원 스트리머 광고가 없습니다.');
+  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 광고 즉시 종료', previous.nickname + ' · ' + (previous.soopId || ''));
+  return { ok: true, endedAt: now };
+});
+
 // 20번 2단계 — 정지계정 관리. 게임별 정지(각 게임의 기존 banAccount/unbanAccount)가
 // 기본이고, 여기 두 함수는 신원 단위로 명백히 심각한 사안(다중계정 어뷰징, 결제
 // 사기 등)만 관리자가 명시적으로 "전체 게임 정지"로 격상시키는 전용 통로다(07번
@@ -2726,6 +2791,9 @@ module.exports = {
   setLifeGameBotConfig,
   lifeGameApproveSponsorRequest,
   lifeGameRejectSponsorRequest,
+  getLifeGameCurrentSponsor,
+  updateLifeGameCurrentSponsor,
+  endLifeGameCurrentSponsor,
   banAccountAllGames,
   unbanAccountAllGames,
   migrateBannedAccounts,
