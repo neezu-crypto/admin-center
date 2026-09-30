@@ -1663,6 +1663,13 @@ const updateLifeGameCurrentSponsor = onCall(async (request) => {
   const db = getDatabase();
   const now = Date.now();
   const ref = db.ref('lifeGame/currentSponsor');
+  // 트랜잭션 전에 서버 값을 먼저 읽는다. 이 경로를 구독하지 않은 상태에서
+  // 트랜잭션 콜백이 null로 시작하는 경우를 피하고, 실제 광고가 없을 때만
+  // not-found를 반환한다.
+  const currentSnap = await ref.get();
+  if (!currentSnap.exists() || !currentSnap.val() || typeof currentSnap.val() !== 'object') {
+    throw new HttpsError('not-found', '관리할 후원 스트리머 광고가 없습니다. 새로고침 후 현재 광고를 다시 확인해주세요.');
+  }
   let before = null;
   let after = null;
   const result = await ref.transaction((current) => {
@@ -1680,7 +1687,9 @@ const updateLifeGameCurrentSponsor = onCall(async (request) => {
     });
     return after;
   }, undefined, false);
-  if (!result.committed || !after) throw new HttpsError('not-found', '관리할 후원 스트리머 광고가 없습니다.');
+  if (!result.committed || !after) {
+    throw new HttpsError('aborted', '광고 정보가 저장되는 중 변경되어 수정하지 못했습니다. 새로고침 후 다시 시도해주세요.');
+  }
   await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 광고 수정',
     before.nickname + ' → ' + nickname + ' · ' + soopId + (extendDays ? ' · ' + extendDays + '일 연장' : ''));
   return { ok: true, sponsor: after };
@@ -1691,13 +1700,19 @@ const endLifeGameCurrentSponsor = onCall(async (request) => {
   const db = getDatabase();
   const now = Date.now();
   const ref = db.ref('lifeGame/currentSponsor');
+  const currentSnap = await ref.get();
+  if (!currentSnap.exists() || !currentSnap.val() || typeof currentSnap.val() !== 'object') {
+    throw new HttpsError('not-found', '관리할 후원 스트리머 광고가 없습니다. 새로고침 후 현재 광고를 다시 확인해주세요.');
+  }
   let previous = null;
   const result = await ref.transaction((current) => {
     if (!current || typeof current !== 'object') return;
     previous = current;
     return Object.assign({}, current, { endAt: now, endedAt: now });
   }, undefined, false);
-  if (!result.committed || !previous) throw new HttpsError('not-found', '관리할 후원 스트리머 광고가 없습니다.');
+  if (!result.committed || !previous) {
+    throw new HttpsError('aborted', '광고 정보가 저장되는 중 변경되어 종료하지 못했습니다. 새로고침 후 다시 시도해주세요.');
+  }
   await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 광고 즉시 종료', previous.nickname + ' · ' + (previous.soopId || ''));
   return { ok: true, endedAt: now };
 });
