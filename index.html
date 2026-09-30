@@ -141,6 +141,46 @@
   }
   .played-streamer-submit:hover { background: linear-gradient(180deg, #fa6b4e 0%, #e94a31 100%); }
   .played-streamer-submit:focus-visible { outline: 3px solid rgba(232,70,44,.24); outline-offset: 2px; }
+  #section-lifegame-current-sponsor .sponsor-current-status {
+    display: block; margin: 18px 0 14px; padding: 14px 16px; border: 1px solid rgba(20,20,22,.1);
+    border-radius: 13px; background: rgba(255,255,255,.58); color: var(--ink-soft);
+    text-align: center; font-size: 12.5px; line-height: 1.65;
+  }
+  #section-lifegame-current-sponsor .sponsor-current-status strong {
+    display: inline-block; margin-right: 5px; padding: 3px 9px; border-radius: 99px;
+    background: rgba(63,182,137,.14); color: #18794e; font-size: 11px; white-space: nowrap;
+  }
+  #section-lifegame-current-sponsor .sponsor-current-status a {
+    display: inline-block; margin-left: 5px; color: #ad442f; font-weight: 700; text-underline-offset: 3px;
+  }
+  .lifegame-sponsor-form {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 156px;
+    gap: 12px; align-items: end; margin-top: 12px; padding: 16px;
+    border: 1px solid var(--sub-border); border-radius: 15px; background: var(--sub); box-shadow: var(--sub-hi);
+  }
+  .lifegame-sponsor-field {
+    display: flex; min-width: 0; flex-direction: column; gap: 6px;
+    color: var(--ink-soft); font-size: 11.5px; font-weight: 700;
+  }
+  .lifegame-sponsor-field input {
+    width: 100%; min-width: 0; height: 39px; padding: 8px 10px;
+    border: 1px solid rgba(20,20,22,.16); border-radius: 9px; background: rgba(255,255,255,.88);
+    color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 400; line-height: 1.4;
+    box-shadow: inset 0 1px 2px rgba(20,20,22,.035);
+    transition: border-color .16s, box-shadow .16s, background .16s;
+  }
+  .lifegame-sponsor-field input:focus { outline: none; border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(232,70,44,.12); }
+  .lifegame-sponsor-field input[type="number"] { font-variant-numeric: tabular-nums; }
+  .lifegame-sponsor-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .lifegame-sponsor-actions .perm-refresh-btn { min-height: 36px; padding: 7px 13px; }
+  .lifegame-sponsor-actions .sponsor-save-btn {
+    border-color: #d9422b; background: linear-gradient(180deg, #f35b3d 0%, #df4029 100%);
+    color: #fffaf7; font-weight: 700; box-shadow: 0 5px 12px rgba(191,58,37,.16), inset 0 1px 0 rgba(255,255,255,.22);
+  }
+  .lifegame-sponsor-actions .sponsor-save-btn:hover { background: linear-gradient(180deg, #fa6b4e 0%, #e94a31 100%); }
+  .lifegame-sponsor-actions .sponsor-end-btn { border-color: rgba(226,85,79,.45); color: #bd3d36; }
+  .lifegame-sponsor-actions .sponsor-end-btn:hover { border-color: #e2554f; background: #fff5f3; }
+  .lifegame-sponsor-actions button:focus-visible { outline: 3px solid rgba(232,70,44,.2); outline-offset: 2px; }
   @media (max-width: 760px) {
     .played-streamer-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .played-streamer-field.uid, .played-streamer-field.evidence, .played-streamer-field.note, .played-streamer-submit { grid-column: 1 / -1; }
@@ -150,6 +190,16 @@
     .played-streamer-form { grid-template-columns: minmax(0, 1fr); padding: 11px; }
     .played-streamer-field.uid, .played-streamer-field.soop, .played-streamer-field.nickname,
     .played-streamer-field.evidence, .played-streamer-field.note, .played-streamer-submit { grid-column: 1; }
+  }
+  @media (max-width: 600px) {
+    .lifegame-sponsor-form { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px; }
+    .lifegame-sponsor-field:last-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 380px) {
+    .lifegame-sponsor-form { grid-template-columns: minmax(0, 1fr); }
+    .lifegame-sponsor-field:last-child { grid-column: auto; }
+    .lifegame-sponsor-actions { display: grid; grid-template-columns: 1fr 1fr; }
+    .lifegame-sponsor-actions .sponsor-save-btn { grid-column: 1 / -1; }
   }
   /* 1줄당 3명씩 보이는 그리드(StreamBet-Market 관리 탭의 "인증된 스트리머" 그리드와
      동일한 패턴). 대기 신청·인증된 스트리머 목록 둘 다 같은 카드형 레이아웃을 쓴다. */
@@ -720,16 +770,24 @@
     <div class="card" id="section-lifegame-current-sponsor">
       <h2>인생게임 오늘의 후원 스트리머 광고 관리</h2>
       <p class="hint">승인된 광고의 닉네임·SOOP 아이디를 수정하고, 노출 기간을 연장하거나 즉시 종료합니다. 종료·수정은 현재 노출 정보에 반영되며 신청 이력은 보존됩니다.</p>
-      <div id="lifeGameCurrentSponsorStatus" class="empty-state">불러오기를 눌러 현재 광고를 확인하세요.</div>
-      <div id="lifeGameCurrentSponsorForm" hidden style="margin-top:12px;">
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
-          <label style="flex:1; min-width:160px;">닉네임<br><input id="lifeGameSponsorNicknameInput" maxlength="20" autocomplete="off" style="width:100%;"></label>
-          <label style="flex:1; min-width:160px;">SOOP 아이디<br><input id="lifeGameSponsorSoopIdInput" maxlength="20" autocomplete="off" style="width:100%;"></label>
-          <label style="width:140px;">연장 일수 (0~365)<br><input id="lifeGameSponsorExtendDaysInput" type="number" min="0" max="365" step="1" value="0" style="width:100%;"></label>
+      <div id="lifeGameCurrentSponsorStatus" class="sponsor-current-status empty-state">불러오기를 눌러 현재 광고를 확인하세요.</div>
+      <div id="lifeGameCurrentSponsorForm" hidden>
+        <div class="lifegame-sponsor-form">
+          <label class="lifegame-sponsor-field">닉네임
+            <input id="lifeGameSponsorNicknameInput" maxlength="20" autocomplete="off" placeholder="표시할 닉네임">
+          </label>
+          <label class="lifegame-sponsor-field">SOOP 아이디
+            <input id="lifeGameSponsorSoopIdInput" maxlength="20" autocomplete="off" placeholder="SOOP 아이디">
+          </label>
+          <label class="lifegame-sponsor-field">연장 일수 <span style="font-weight:400;color:var(--ink-mute);">0~365일</span>
+            <input id="lifeGameSponsorExtendDaysInput" type="number" min="0" max="365" step="1" value="0" inputmode="numeric">
+          </label>
         </div>
-        <button id="lifeGameSponsorSaveBtn" class="perm-refresh-btn" type="button">수정 / 기간 연장</button>
-        <button id="lifeGameSponsorEndBtn" class="perm-refresh-btn" type="button" style="margin-left:6px; border-color:#e2554f; color:#e2554f;">즉시 종료</button>
-        <button id="lifeGameSponsorRefreshBtn" class="perm-refresh-btn" type="button" style="margin-left:6px;">새로고침</button>
+        <div class="lifegame-sponsor-actions">
+          <button id="lifeGameSponsorSaveBtn" class="perm-refresh-btn sponsor-save-btn" type="button">수정 / 기간 연장</button>
+          <button id="lifeGameSponsorEndBtn" class="perm-refresh-btn sponsor-end-btn" type="button">즉시 종료</button>
+          <button id="lifeGameSponsorRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+        </div>
       </div>
     </div>
 
