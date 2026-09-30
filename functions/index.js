@@ -1435,6 +1435,24 @@ const getLifeGameStats = onCall(async (request) => {
   };
 });
 
+// 인생게임 이름 확정 후 0세 판이 시작된 UID 집계. UID별 첫 시작/최근 시작과
+// 시작 횟수는 streamer-life-game의 서버 함수가 lifeGame/playerStartRecords에 기록한다.
+const listLifeGamePlayerStartRecords = onCall(async (request) => {
+  await requireAdmin(request);
+  const snap = await getDatabase().ref('lifeGame/playerStartRecords').get();
+  const raw = snap.val() || {};
+  const players = Object.keys(raw).map(function (uid) {
+    const entry = raw[uid] || {};
+    return {
+      uid: uid,
+      firstStartedAt: Number(entry.firstStartedAt) || null,
+      lastStartedAt: Number(entry.lastStartedAt) || null,
+      startCount: Math.max(1, Number(entry.startCount) || 1),
+    };
+  }).sort(function (a, b) { return (b.lastStartedAt || 0) - (a.lastStartedAt || 0); });
+  return { players: players, totalUsers: players.length, fetchedAt: Date.now() };
+});
+
 // 인생게임 플레이 스트리머 검수 목록. 후보와 검수 완료 allowlist 모두
 // Admin SDK 전용 lifeGame 경로이며, 검수 등록만 이후 인증 자동 승인 근거가 된다.
 const listLifeGamePlayedStreamers = onCall(async (request) => {
@@ -2784,6 +2802,7 @@ const activateOnyuGiftsAfterStreamerVerification = onValueWritten('/streamerVeri
 module.exports = {
   getGalleryStats,
   getLifeGameStats,
+  listLifeGamePlayerStartRecords,
   listLifeGamePlayedStreamers,
   addLifeGamePlayedStreamer,
   removeLifeGamePlayedStreamer,
