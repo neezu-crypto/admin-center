@@ -1435,6 +1435,75 @@ const getLifeGameStats = onCall(async (request) => {
   };
 });
 
+// 인생게임 플레이 스트리머 검수 목록. 후보와 검수 완료 allowlist 모두
+// Admin SDK 전용 lifeGame 경로이며, 검수 등록만 이후 인증 자동 승인 근거가 된다.
+const listLifeGamePlayedStreamers = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const [candidateSnap, allowlistSnap] = await Promise.all([
+    db.ref('lifeGame/playedStreamerCandidates').get(),
+    db.ref('lifeGame/playedStreamerAllowlist').get()
+  ]);
+  const allowlist = allowlistSnap.val() || {};
+  const approved = [];
+  Object.keys(allowlist).forEach(function (uid) {
+    Object.keys(allowlist[uid] || {}).forEach(function (soopId) {
+      approved.push(Object.assign({ uid: uid, soopId: soopId }, allowlist[uid][soopId] || {}));
+    });
+  });
+  const candidates = [];
+  const rawCandidates = candidateSnap.val() || {};
+  Object.keys(rawCandidates).forEach(function (uid) {
+    Object.keys(rawCandidates[uid] || {}).forEach(function (soopId) {
+      if (allowlist[uid] && allowlist[uid][soopId]) return;
+      candidates.push(Object.assign({ uid: uid, soopId: soopId }, rawCandidates[uid][soopId] || {}));
+    });
+  });
+  candidates.sort(function (a, b) { return (b.lastSeenAt || 0) - (a.lastSeenAt || 0); });
+  approved.sort(function (a, b) { return (b.reviewedAt || 0) - (a.reviewedAt || 0); });
+  return { candidates: candidates.slice(0, 500), approved: approved.slice(0, 1000) };
+});
+
+const addLifeGamePlayedStreamer = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const data = request.data || {};
+  const uid = String(data.uid || '').trim();
+  const soopId = String(data.soopId || '').trim().toLowerCase();
+  const nickname = String(data.nickname || '').trim();
+  const note = String(data.note || '').trim().slice(0, 500);
+  const evidenceUrl = String(data.evidenceUrl || '').trim().slice(0, 500);
+  if (!/^[A-Za-z0-9_-]{10,128}$/.test(uid)) throw new HttpsError('invalid-argument', 'Firebase UID 형식을 확인해주세요.');
+  if (!/^[a-z0-9]{2,20}$/.test(soopId)) throw new HttpsError('invalid-argument', 'SOOP 아이디는 영문 소문자/숫자 2~20자로 입력해주세요.');
+  if (!nickname || nickname.length > 50) throw new HttpsError('invalid-argument', '닉네임을 1~50자로 입력해주세요.');
+  if (evidenceUrl && !/^https:\/\//i.test(evidenceUrl)) throw new HttpsError('invalid-argument', '검수 링크는 https URL이어야 합니다.');
+  const db = getDatabase();
+  const reviewedAt = Date.now();
+  const entry = { uid: uid, soopId: soopId, nickname: nickname, reviewedAt: reviewedAt, reviewerUid: adminUid, source: 'manual-review' };
+  if (note) entry.note = note;
+  if (evidenceUrl) entry.evidenceUrl = evidenceUrl;
+  await db.ref('lifeGame/playedStreamerAllowlist/' + uid + '/' + soopId).set(entry);
+  await logToAdminAuditLog(db, request, '인생게임 플레이 스트리머 검수 등록', nickname + ' · ' + soopId + ' · ' + uid);
+  return { ok: true };
+});
+
+const removeLifeGamePlayedStreamer = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data || {};
+  const uid = String(data.uid || '').trim();
+  const soopId = String(data.soopId || '').trim().toLowerCase();
+  if (!/^[A-Za-z0-9_-]{10,128}$/.test(uid) || !/^[a-z0-9]{2,20}$/.test(soopId)) {
+    throw new HttpsError('invalid-argument', 'UID 또는 SOOP 아이디 형식을 확인해주세요.');
+  }
+  const db = getDatabase();
+  const ref = db.ref('lifeGame/playedStreamerAllowlist/' + uid + '/' + soopId);
+  const snap = await ref.get();
+  if (!snap.exists()) throw new HttpsError('not-found', '검수 등록 항목을 찾을 수 없습니다.');
+  const entry = snap.val() || {};
+  await ref.remove();
+  await logToAdminAuditLog(db, request, '인생게임 플레이 스트리머 검수 해제', (entry.nickname || '') + ' · ' + soopId + ' · ' + uid);
+  return { ok: true };
+});
+
 // 인생게임 관리형 봇(2026-08-30, streamer-life-game 62장) — 봇 수·1턴당 초·성향
 // 분포를 관리자가 조절하는 설정 화면. 실제 실행(턴 진행)은 streamer-life-game
 // 저장소의 예약 함수(runBotTurns)가 서버에서 알아서 도는 방식이라, 여기 설정
@@ -2650,6 +2719,9 @@ const activateOnyuGiftsAfterStreamerVerification = onValueWritten('/streamerVeri
 module.exports = {
   getGalleryStats,
   getLifeGameStats,
+  listLifeGamePlayedStreamers,
+  addLifeGamePlayedStreamer,
+  removeLifeGamePlayedStreamer,
   getLifeGameBotConfig,
   setLifeGameBotConfig,
   lifeGameApproveSponsorRequest,

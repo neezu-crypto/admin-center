@@ -647,6 +647,26 @@
       <div id="lifeGameBotDetailList" style="margin-top:10px;"></div>
     </div>
 
+    <div class="card" id="section-played-streamers">
+      <h2>플레이한 스트리머 리스트</h2>
+      <p class="hint">아래 후보는 인생게임에서 검색된 스트리머를 주인공으로 시작한 기록입니다. 다시보기로 실제 플레이를 직접 확인한 뒤 검수 완료 항목으로 등록하세요. 등록한 Firebase UID와 SOOP 아이디가 인증 신청과 모두 일치할 때만 자동 승인됩니다.</p>
+      <h3 class="subhead">검수 완료 직접 등록</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;">
+        <input id="playedStreamerUidInput" placeholder="Firebase UID" autocomplete="off" style="min-width:220px; flex:1;">
+        <input id="playedStreamerSoopIdInput" placeholder="SOOP 아이디" autocomplete="off" style="min-width:150px;">
+        <input id="playedStreamerNicknameInput" placeholder="닉네임" autocomplete="off" style="min-width:150px;">
+        <input id="playedStreamerEvidenceInput" placeholder="검수 VOD URL (선택)" autocomplete="off" style="min-width:220px; flex:1;">
+        <input id="playedStreamerNoteInput" placeholder="검수 메모 (선택)" autocomplete="off" style="min-width:180px; flex:1;">
+        <button id="playedStreamerAddBtn" class="perm-refresh-btn" type="button">검수 완료로 등록</button>
+      </div>
+      <span id="playedStreamerStatus" class="hint"></span>
+      <h3 class="subhead" style="margin-top:16px;">미검수 후보</h3>
+      <div id="playedStreamerCandidateList"></div>
+      <h3 class="subhead" style="margin-top:16px;">검수 완료 목록</h3>
+      <div id="playedStreamerApprovedList"></div>
+      <button id="playedStreamerRefreshBtn" class="perm-refresh-btn" type="button" style="margin-top:12px;">새로고침</button>
+    </div>
+
     <div class="card" id="section-streamer-promo-links">
       <h2>스트리머별 홍보글 바로가기</h2>
       <p class="hint">
@@ -1061,6 +1081,9 @@
   const getVisitorAnalyticsFn = httpsCallable(functions, 'getVisitorAnalytics');
   const getGalleryStatsFn = httpsCallable(functions, 'getGalleryStats');
   const getLifeGameStatsFn = httpsCallable(functions, 'getLifeGameStats');
+  const listLifeGamePlayedStreamersFn = httpsCallable(functions, 'listLifeGamePlayedStreamers');
+  const addLifeGamePlayedStreamerFn = httpsCallable(functions, 'addLifeGamePlayedStreamer');
+  const removeLifeGamePlayedStreamerFn = httpsCallable(functions, 'removeLifeGamePlayedStreamer');
   const getOnyuStatsFn = httpsCallable(functions, 'getOnyuStats');
   const getLifeGameBotConfigFn = httpsCallable(functions, 'getLifeGameBotConfig');
   const setLifeGameBotConfigFn = httpsCallable(functions, 'setLifeGameBotConfig');
@@ -1232,6 +1255,10 @@
     {
       id: 'content', label: '콘텐츠·현황', icon: '📦', role: 'admin',
       sections: ['section-content-freeze', 'section-lifegame-bots', 'section-promoted-content'],
+    },
+    {
+      id: 'played-streamers', label: '플레이한 스트리머 리스트', icon: '🎮', role: 'admin',
+      sections: ['section-played-streamers'],
     },
     {
       id: 'promotions', label: '스트리머 홍보 링크', icon: '📣', role: 'admin',
@@ -1554,6 +1581,8 @@
         jobs.push(refreshOnyuPlayerReviews(true));
       } else if (sessionId === 'content') {
         jobs.push(refreshSeriesConfig(), refreshLifeGameBotConfig(), refreshPromotedContent());
+      } else if (sessionId === 'played-streamers') {
+        jobs.push(refreshLifeGamePlayedStreamers());
       } else if (sessionId === 'promotions') {
         jobs.push(refreshStreamerPromoLinks());
       } else if (sessionId === 'settings') {
@@ -3421,6 +3450,75 @@
   }
   lifeGameBotRefreshBtn.addEventListener('click', refreshLifeGameBotConfig);
 
+  const playedStreamerStatusEl = document.getElementById('playedStreamerStatus');
+  const playedStreamerCandidateListEl = document.getElementById('playedStreamerCandidateList');
+  const playedStreamerApprovedListEl = document.getElementById('playedStreamerApprovedList');
+  function renderPlayedStreamerRows(items, approved) {
+    if (!items || !items.length) return '<div class="empty-state">' + (approved ? '검수 완료 항목이 없습니다.' : '미검수 후보가 없습니다.') + '</div>';
+    return items.map(function (item) {
+      const uid = escapeHtml(item.uid || '');
+      const soopId = escapeHtml(item.soopId || '');
+      const nickname = escapeHtml(item.nickname || '이름 없음');
+      const when = item.lastSeenAt || item.reviewedAt || item.firstSeenAt;
+      const time = when ? escapeHtml(new Date(when).toLocaleString('ko-KR')) : '-';
+      const evidence = item.evidenceUrl ? ' · <a href="' + escapeHtml(item.evidenceUrl) + '" target="_blank" rel="noopener">검수 VOD</a>' : '';
+      const note = item.note ? ' · ' + escapeHtml(item.note) : '';
+      const action = approved
+        ? '<button type="button" class="perm-refresh-btn played-streamer-remove" data-uid="' + uid + '" data-soop-id="' + soopId + '">검수 해제</button>'
+        : '<button type="button" class="perm-refresh-btn played-streamer-prefill" data-uid="' + uid + '" data-soop-id="' + soopId + '" data-nickname="' + nickname + '">등록란 채우기</button>';
+      return '<div class="promo-recent-item" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid rgba(20,20,22,.1);">' +
+        '<div><strong>' + nickname + '</strong> · SOOP ' + soopId + '<br><span class="hint">UID ' + uid + ' · ' + time + (item.playCount ? ' · 시작 ' + item.playCount + '회' : '') + evidence + note + '</span></div>' + action + '</div>';
+    }).join('');
+  }
+  async function refreshLifeGamePlayedStreamers() {
+    playedStreamerStatusEl.textContent = '불러오는 중...';
+    try {
+      const result = (await listLifeGamePlayedStreamersFn()).data || {};
+      playedStreamerCandidateListEl.innerHTML = renderPlayedStreamerRows(result.candidates, false);
+      playedStreamerApprovedListEl.innerHTML = renderPlayedStreamerRows(result.approved, true);
+      playedStreamerStatusEl.textContent = '후보 ' + (result.candidates || []).length + '명 · 검수 완료 ' + (result.approved || []).length + '명';
+    } catch (e) {
+      console.error('인생게임 플레이 스트리머 조회 실패:', e);
+      playedStreamerStatusEl.textContent = '조회 실패: ' + (e.message || e);
+    }
+  }
+  document.getElementById('playedStreamerRefreshBtn').addEventListener('click', refreshLifeGamePlayedStreamers);
+  document.getElementById('playedStreamerAddBtn').addEventListener('click', async function () {
+    playedStreamerStatusEl.textContent = '등록 중...';
+    try {
+      await addLifeGamePlayedStreamerFn({
+        uid: document.getElementById('playedStreamerUidInput').value,
+        soopId: document.getElementById('playedStreamerSoopIdInput').value,
+        nickname: document.getElementById('playedStreamerNicknameInput').value,
+        evidenceUrl: document.getElementById('playedStreamerEvidenceInput').value,
+        note: document.getElementById('playedStreamerNoteInput').value,
+      });
+      playedStreamerStatusEl.textContent = '검수 완료 리스트에 등록했습니다.';
+      await refreshLifeGamePlayedStreamers();
+    } catch (e) {
+      playedStreamerStatusEl.textContent = '등록 실패: ' + (e.message || e);
+    }
+  });
+  [playedStreamerCandidateListEl, playedStreamerApprovedListEl].forEach(function (listEl) {
+    listEl.addEventListener('click', async function (event) {
+      const prefill = event.target.closest('.played-streamer-prefill');
+      if (prefill) {
+        document.getElementById('playedStreamerUidInput').value = prefill.dataset.uid || '';
+        document.getElementById('playedStreamerSoopIdInput').value = prefill.dataset.soopId || '';
+        document.getElementById('playedStreamerNicknameInput').value = prefill.dataset.nickname || '';
+        document.getElementById('playedStreamerUidInput').focus();
+        return;
+      }
+      const remove = event.target.closest('.played-streamer-remove');
+      if (!remove || !confirm('이 UID·SOOP 아이디 쌍의 검수 등록을 해제할까요? 이후 신규 인증은 자동 승인되지 않습니다.')) return;
+      playedStreamerStatusEl.textContent = '해제 중...';
+      try {
+        await removeLifeGamePlayedStreamerFn({ uid: remove.dataset.uid, soopId: remove.dataset.soopId });
+        await refreshLifeGamePlayedStreamers();
+      } catch (e) { playedStreamerStatusEl.textContent = '해제 실패: ' + (e.message || e); }
+    });
+  });
+
   lifeGameBotSaveBtn.addEventListener('click', async function () {
     lifeGameBotStatusEl.textContent = '저장 중...';
     const personalityWeights = {};
@@ -4206,6 +4304,7 @@
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
     { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-bots', label: '🤖 인생게임 봇 관리', role: 'admin' },
+    { id: 'section-played-streamers', label: '🎮 플레이한 스트리머 리스트', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
