@@ -43,43 +43,45 @@ function isAllowedAdminSender(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
 
-  if (message.type === 'addPromoCandidateFromWritePage') {
+  if (message.type === 'addPromoCandidateFromConfirmedPage') {
     let senderUrl;
     let pageUrl;
     let writeUrl;
     try { senderUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { senderUrl = null; }
     try { pageUrl = new URL(String(message.pageUrl || '')); } catch (_) { pageUrl = null; }
     try { writeUrl = new URL(String(message.writeUrl || '')); } catch (_) { writeUrl = null; }
-    // SOOP SPA navigation can leave sender.url on the prior board route; validate
-    // the content script's current location as well as the extension sender origin.
-    const pageMatch = pageUrl && /^\/station\/([A-Za-z0-9]{2,20})\/post\/write\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(pageUrl.pathname);
+    // SOOP SPA navigation can leave sender.url on the prior route. Validate the
+    // content script's current board/write page against the same write URL.
+    const pageWriteMatch = pageUrl && /^\/station\/([A-Za-z0-9]{2,20})\/post\/write\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(pageUrl.pathname);
+    const pageBoardMatch = pageUrl && /^\/station\/([A-Za-z0-9]{2,20})\/board\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(pageUrl.pathname);
     const writeMatch = writeUrl && /^\/station\/([A-Za-z0-9]{2,20})\/post\/write\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(writeUrl.pathname);
+    const pageMatchesWriteUrl = !!(writeMatch && ((pageWriteMatch &&
+      pageWriteMatch[1].toLowerCase() === writeMatch[1].toLowerCase() && pageWriteMatch[2] === writeMatch[2]) ||
+      (pageBoardMatch && pageBoardMatch[1].toLowerCase() === writeMatch[1].toLowerCase() && pageBoardMatch[2] === writeMatch[2])));
     const nickname = typeof message.nickname === 'string' ? message.nickname.trim() : '';
     const sameSoopHost = (url) => url && url.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(url.hostname);
     if (!Number.isInteger(sender.tab && sender.tab.id) || !sameSoopHost(senderUrl) || !sameSoopHost(writeUrl) ||
-        !sameSoopHost(pageUrl) || !pageMatch || !writeMatch || pageMatch[1].toLowerCase() !== writeMatch[1].toLowerCase() ||
-        pageMatch[2] !== writeMatch[2] || writeUrl.search || writeUrl.hash || !nickname || nickname.length > 100) {
+        !sameSoopHost(pageUrl) || !pageMatchesWriteUrl || !writeMatch || writeUrl.search || writeUrl.hash || !nickname || nickname.length > 100) {
       trace('', 'promo-candidate-add-rejected', {
         reason: 'invalid-write-page-request', nicknameLength: nickname.length,
-        senderHostValid: !!sameSoopHost(senderUrl), pageRouteValid: !!pageMatch,
-        writeUrlValid: !!writeMatch, pageMatchesWriteUrl: !!(pageMatch && writeMatch &&
-          pageMatch[1].toLowerCase() === writeMatch[1].toLowerCase() && pageMatch[2] === writeMatch[2]),
+        senderHostValid: !!sameSoopHost(senderUrl), pageRouteValid: !!(pageWriteMatch || pageBoardMatch),
+        writeUrlValid: !!writeMatch, pageMatchesWriteUrl: pageMatchesWriteUrl,
       });
-      sendResponse({ ok: false, reason: 'invalid-request', message: '현재 SOOP 글쓰기 화면의 정보가 올바르지 않습니다.' });
+      sendResponse({ ok: false, reason: 'invalid-request', message: '현재 게시판과 글쓰기 주소가 일치하는지 확인할 수 없습니다.' });
       return false;
     }
     findAdminTab().then((adminTab) => {
       if (!adminTab) {
-        trace('', 'promo-candidate-add-unavailable', { reason: 'admin-center-not-open', stationId: pageMatch[1] });
+        trace('', 'promo-candidate-add-unavailable', { reason: 'admin-center-not-open', stationId: writeMatch[1] });
         sendResponse({ ok: false, reason: 'admin-center-not-open', message: '관리자 센터 탭을 열고 로그인한 뒤 다시 시도해주세요.' });
         return;
       }
-      trace('', 'promo-candidate-add-forwarded', { stationId: pageMatch[1], adminTabId: adminTab.id });
+      trace('', 'promo-candidate-add-forwarded', { stationId: writeMatch[1], adminTabId: adminTab.id });
       chrome.tabs.sendMessage(adminTab.id, {
         type: 'addStreamerPromoCandidate',
         nickname: nickname,
-        soopId: pageMatch[1],
-        writeUrl: 'https://www.sooplive.com' + pageUrl.pathname,
+        soopId: writeMatch[1],
+        writeUrl: 'https://www.sooplive.com' + writeUrl.pathname,
       }).then(sendResponse).catch((error) => {
         trace('', 'promo-candidate-add-unavailable', { reason: 'admin-bridge-unavailable', error: String(error && error.message || error) });
         sendResponse({ ok: false, reason: 'admin-bridge-unavailable', message: '관리자 센터 탭을 새로고침한 뒤 다시 시도해주세요.' });

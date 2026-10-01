@@ -25,11 +25,14 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   assert.match(adminSource, /listStreamerPromoLinksFn\(\)/);
   assert.match(adminSource, /__soopPromoDuplicateLookupResult/);
   assert.match(finderSource, /홍보 리스트에 추가/);
-  assert.match(finderSource, /type:\s*'addPromoCandidateFromWritePage'/);
+  assert.match(finderSource, /type:\s*'addPromoCandidateFromConfirmedPage'/);
   assert.match(workerSource, /type:\s*'addStreamerPromoCandidate'/);
   assert.match(workerSource, /message\.pageUrl/);
   assert.match(workerSource, /pageMatchesWriteUrl/);
+  assert.match(workerSource, /pageBoardMatch/);
   assert.match(finderSource, /pageUrl:\s*location\.href/);
+  assert.match(finderSource, /data-add-promo-candidate/);
+  assert.match(finderSource, /item\.currentRoute && hasWriteUrl && panelNickname/);
   assert.match(adminSource, /addStreamerPromoCandidateFn\(/);
   assert.match(functionSource, /adminCenter\/streamerPromoCandidates/);
   assert.match(functionSource, /addStreamerPromoCandidate,/);
@@ -122,5 +125,6 @@ test('공지·VOD·스트리머 전용으로 보이는 게시판은 제외한다
 
 test('이름이 모호한 콘텐츠 게시판은 글쓰기 후보 대신 수동 확인으로 남긴다', () => {
   assert.equal(finder.classifyBoardTitle('컨텐츠 게시판').kind, 'review');
+  assert.equal(finder.classifyBoardTitle('현재 게시판 (용도 확인 필요)').kind, 'review');
   assert.equal(finder.classifyBoardTitle('팬 게시판').kind, 'ignore');
 });

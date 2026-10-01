@@ -68,6 +68,7 @@
     const normalized = cleanText(title).normalize('NFKC');
     if (!normalized) return { kind: 'ignore', reason: '게시판 이름을 읽지 못함' };
     if (EXCLUDED_TITLE.test(normalized)) return { kind: 'exclude', reason: '공지·운영·VOD 또는 스트리머 전용으로 보이는 이름' };
+    if (/^현재 게시판/.test(normalized)) return { kind: 'review', confidence: '낮음', reason: '현재 게시판 주소는 확인했지만 용도는 수동 확인 필요' };
     const compactTitle = normalized.replace(/[^\p{L}\p{N}]/gu, '').toLocaleLowerCase();
     if (compactTitle.includes('노래추천')) return { kind: 'exclude', reason: '노래 추천 게시판은 홍보 후보에서 제외' };
     if (compactTitle.includes('게임추천')) return { kind: 'candidate', confidence: '높음', reason: '게임 추천 문구가 포함된 이름' };
@@ -219,6 +220,37 @@
       log('panel-toggled', { collapsed: !isClosed });
     });
     shadow.addEventListener('click', async (event) => {
+      const addPromoButton = event.target.closest('[data-add-promo-candidate]');
+      if (addPromoButton) {
+        const nickname = addPromoButton.getAttribute('data-nickname') || '';
+        const writeUrl = addPromoButton.getAttribute('data-write-url') || '';
+        addPromoButton.disabled = true;
+        addPromoButton.textContent = '추가 중…';
+        log('promo-candidate-add-from-panel-requested', { stationId: stationIdFromPath(location.pathname), boardId: addPromoButton.getAttribute('data-board-id') || '', nicknameLength: nickname.length });
+        try {
+          const result = await root.chrome.runtime.sendMessage({
+            type: 'addPromoCandidateFromConfirmedPage',
+            nickname: nickname,
+            pageUrl: location.href,
+            writeUrl: writeUrl,
+          });
+          if (result && result.ok) {
+            addPromoButton.textContent = '홍보 리스트에 추가됨';
+            log('promo-candidate-add-from-panel-succeeded', { stationId: stationIdFromPath(location.pathname), boardId: addPromoButton.getAttribute('data-board-id') || '' });
+          } else {
+            addPromoButton.disabled = false;
+            addPromoButton.textContent = '홍보 리스트에 추가';
+            log('promo-candidate-add-from-panel-failed', { stationId: stationIdFromPath(location.pathname), boardId: addPromoButton.getAttribute('data-board-id') || '', reason: String(result && result.reason || 'unknown') });
+            showWriteCopyNotice(String(result && result.message || '홍보 리스트에 추가하지 못했습니다.'), true);
+          }
+        } catch (error) {
+          addPromoButton.disabled = false;
+          addPromoButton.textContent = '홍보 리스트에 추가';
+          log('promo-candidate-add-from-panel-failed', { stationId: stationIdFromPath(location.pathname), reason: 'extension-message-failed', error: String(error && error.message || error) });
+          showWriteCopyNotice('관리자 센터 연결에 실패했습니다. 센터 탭과 확장 프로그램을 확인해주세요.', true);
+        }
+        return;
+      }
       const openButton = event.target.closest('[data-open-board-index]');
       if (openButton) {
         const index = Number(openButton.getAttribute('data-open-board-index'));
@@ -284,7 +316,7 @@
           return;
         }
         root.chrome.runtime.sendMessage({
-          type: 'addPromoCandidateFromWritePage',
+          type: 'addPromoCandidateFromConfirmedPage',
           nickname: addDetails.nickname,
           pageUrl: location.href,
           writeUrl: addDetails.writeUrl,
@@ -477,12 +509,20 @@
         '<div class="actions"><button type="button" data-open-board-index="' + item.buttonIndex + '">게시판 확인</button></div></article>';
       }
       const hasWriteUrl = Boolean(item.writeUrl);
+      const panelNickname = item.currentRoute ? stationNicknameFromTitles(
+        document.title,
+        document.querySelector('meta[property="og:title"]')?.content || ''
+      ) : '';
+      const addToPromoAction = item.currentRoute && hasWriteUrl && panelNickname
+        ? '<button type="button" data-add-promo-candidate="true" data-nickname="' + escapeHtml(panelNickname) + '" data-write-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">홍보 리스트에 추가</button>'
+        : '';
       return '<article class="row"><div class="title">' + escapeHtml(item.title || '(이름 없음)') +
         '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
         '<div class="meta">' + escapeHtml(item.reason) + (hasWriteUrl ? ' · 게시판 ID ' + escapeHtml(item.boardId) : '') + '</div>' +
         '<div class="actions">' + (hasWriteUrl ? '<a class="action" href="' + escapeHtml(item.boardUrl) + '">게시판 확인</a>' : '') +
         (low || !hasWriteUrl ? '' : '<a class="action" data-open-write-url="' + escapeHtml(item.writeUrl) + '" href="' + escapeHtml(item.writeUrl) + '">글쓰기 화면 열기</a>') +
-        (hasWriteUrl ? '<button type="button" data-copy-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">글쓰기 주소 복사</button>' : '') + '</div></article>';
+        (hasWriteUrl ? '<button type="button" data-copy-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">글쓰기 주소 복사</button>' : '') +
+        addToPromoAction + '</div></article>';
     }).join('');
     body.innerHTML = '<div class="duplicate-status" role="status"></div><p class="summary">방송국 ' + escapeHtml(stationId) + ' · 링크 게시판 ' + entries.links.length + '개 확인 · 후보 ' + candidates.length + '개 · 메뉴 후보 ' + safeButtons.length + '개 · 높은 후보 우선 정렬' +
       (review.length ? ' · 이름만으로 판별 불가 ' + review.length + '개' : '') + '</p>' +
