@@ -689,10 +689,11 @@ function collectVerifiedStreamerEntries(value) {
 const listStreamerPromoLinks = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const [verifiedSnap, linksSnap, recentSnap] = await Promise.all([
+  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoLinks').get(),
     db.ref('adminCenter/streamerPromoRecent').get(),
+    db.ref('adminCenter/streamerPromoExcluded').get(),
   ]);
   const links = linksSnap.val() || {};
   let recentOpened = recentSnap.val() || null;
@@ -721,7 +722,10 @@ const listStreamerPromoLinks = onCall(async (request) => {
   if (Object.keys(cleanupUpdates).length) {
     await db.ref().update(cleanupUpdates);
   }
-  const streamers = getKnownPromoEntries(verifiedSnap.val());
+  const excludedPromoIds = excludedPromoSnap.val() || {};
+  const streamers = getKnownPromoEntries(verifiedSnap.val()).filter(function (entry) {
+    return excludedPromoIds[entry.key] !== true && excludedPromoIds[entry.soopId] !== true;
+  });
   streamers.sort(function (a, b) {
     return (a.nickname || a.soopId).localeCompare((b.nickname || b.soopId), 'ko') || a.soopId.localeCompare(b.soopId);
   });
