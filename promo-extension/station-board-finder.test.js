@@ -41,6 +41,25 @@ test('SOOP 버튼 선택 후 도달한 현재 게시판 URL에서 글쓰기 주�
   assert.equal(finder.extractCurrentBoard('/station/other/board/122232421', 'dommiii'), null);
 });
 
+test('글쓰기 경로에서 방송국과 게시판 ID를 안전하게 추출한다', () => {
+  assert.deepEqual(finder.extractWriteRoute('/station/dommiii/post/write/122232421'), {
+    stationId: 'dommiii', boardId: '122232421',
+  });
+  assert.equal(finder.extractWriteRoute('/station/other/post/write/122232421/extra'), null);
+});
+
+test('방송국 닉네임을 추출하고 신뢰도 높은 후보부터 정렬한다', () => {
+  assert.equal(finder.stationNicknameFromTitles('도미-의 방송국 | SOOP', ''), '도미-');
+  assert.equal(finder.stationNicknameFromTitles('SOOP', '도미-의 방송국'), '도미-');
+  const sorted = finder.sortCandidatesByConfidence([
+    { title: '요청함', confidence: '보통' },
+    { title: '게임 추천', confidence: '높음' },
+    { title: '게임 게시판', confidence: '낮음' },
+    { title: '뻐꾸기', confidence: '높음' },
+  ]);
+  assert.deepEqual(sorted.map((item) => item.title), ['게임 추천', '뻐꾸기', '요청함', '게임 게시판']);
+});
+
 test('뻐꾸기·추천·게임 추천은 우선 후보로 분류한다', () => {
   assert.equal(finder.classifyBoardTitle('🦉 뻐꾸기동지').kind, 'candidate');
   assert.equal(finder.classifyBoardTitle('게임 추천').confidence, '높음');

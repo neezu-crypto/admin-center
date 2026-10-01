@@ -2,6 +2,7 @@
   'use strict';
 
   const BOARD_PATH = /^\/station\/([A-Za-z0-9_-]+)\/board\/([A-Za-z0-9_-]+)\/?$/i;
+  const WRITE_PATH = /^\/station\/([A-Za-z0-9_-]+)\/post\/write\/([A-Za-z0-9_-]+)\/?$/i;
   const EXCLUDED_TITLE = /공지|알림|방송\s*공지|운영\s*안내|규칙|스트리머\s*전용|스트리머만|방송인\s*전용|컨텐츠\s*제작|콘텐츠\s*제작|\bvod\b|다시보기/i;
   // 게임 추천 게시판은 이모지·장식 문자와 다른 문구 사이에 있어도 찾는다.
   // 아래 compactTitle은 문구 경계를 제거해 `게임🎮 추천`, `오늘의 게임 추천 게시판`도 매칭한다.
@@ -41,6 +42,28 @@
     return extractBoardLink('https://www.sooplive.com' + match[0], currentStationId);
   }
 
+  function extractWriteRoute(pathname) {
+    const match = WRITE_PATH.exec(String(pathname || ''));
+    return match ? { stationId: match[1], boardId: match[2] } : null;
+  }
+
+  function stationNicknameFromTitles(pageTitle, socialTitle) {
+    const candidates = [socialTitle, pageTitle].map(cleanText).filter(Boolean);
+    for (const candidate of candidates) {
+      const normalized = candidate.replace(/\s*[|·-]\s*SOOP.*$/i, '').trim();
+      const match = normalized.match(/^(.+?)\s*의\s*방송국$/);
+      if (match && cleanText(match[1])) return cleanText(match[1]);
+    }
+    return '';
+  }
+
+  function sortCandidatesByConfidence(items) {
+    const rank = { 높음: 3, 보통: 2, 낮음: 1 };
+    return items.map((item, index) => ({ item: item, index: index }))
+      .sort((a, b) => (rank[b.item.confidence] || 0) - (rank[a.item.confidence] || 0) || a.index - b.index)
+      .map((entry) => entry.item);
+  }
+
   function classifyBoardTitle(title) {
     const normalized = cleanText(title).normalize('NFKC');
     if (!normalized) return { kind: 'ignore', reason: '게시판 이름을 읽지 못함' };
@@ -53,7 +76,7 @@
     return { kind: 'ignore', reason: '홍보 후보 의미를 이름에서 확인하지 못함' };
   }
 
-  const api = { cleanText, stationIdFromPath, extractBoardLink, extractCurrentBoard, classifyBoardTitle };
+  const api = { cleanText, stationIdFromPath, extractBoardLink, extractCurrentBoard, extractWriteRoute, stationNicknameFromTitles, sortCandidatesByConfidence, classifyBoardTitle };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined' || !root || root.__soopPromoBoardFinder073) return;
   root.__soopPromoBoardFinder073 = true;
@@ -76,8 +99,11 @@
   let mutationObserver = null;
   let activeButtonEntries = [];
   let lastCurrentBoardLog = '';
+  let attemptedWriteCopyPath = '';
   const currentBoardTitles = new Map();
   const pendingBoardStorageKey = 'soopPromoBoardFinder.pendingBoard.' + location.hostname;
+  const pendingWriteClipboardKey = 'soopPromoBoardFinder.pendingWriteClipboard.' + location.hostname;
+  const PENDING_WRITE_MAX_AGE_MS = 15 * 60 * 1000;
 
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, (character) => ({
@@ -117,6 +143,21 @@
       if (lastCurrentBoardLog !== routeKey) {
         lastCurrentBoardLog = routeKey;
         log('current-board-route-detected', { stationId: stationId, boardId: currentBoard.boardId, title: selectedTitle });
+      }
+      const socialTitle = document.querySelector('meta[property="og:title"]')?.content || '';
+      const nickname = stationNicknameFromTitles(document.title, socialTitle);
+      const pendingWrite = {
+        stationId: stationId,
+        boardId: currentBoard.boardId,
+        nickname: nickname,
+        writeUrl: currentBoard.writeUrl,
+        at: Date.now(),
+      };
+      try {
+        sessionStorage.setItem(pendingWriteClipboardKey, JSON.stringify(pendingWrite));
+        log('write-page-clipboard-armed', { stationId: stationId, boardId: currentBoard.boardId, nicknameFound: Boolean(nickname) });
+      } catch (error) {
+        log('write-page-clipboard-arm-failed', { stationId: stationId, boardId: currentBoard.boardId, error: String(error && error.message || error) });
       }
     }
 
@@ -217,6 +258,69 @@
     return host;
   }
 
+  function showWriteCopyNotice(message, failed) {
+    let notice = document.getElementById('soop-promo-write-copy-notice');
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.id = 'soop-promo-write-copy-notice';
+      notice.style.cssText = 'position:fixed;z-index:2147483647;top:18px;left:50%;transform:translateX(-50%);padding:11px 16px;border-radius:10px;background:#172033;color:#fff;font:14px/1.4 system-ui,-apple-system,sans-serif;box-shadow:0 5px 24px #0004;';
+      document.documentElement.appendChild(notice);
+    }
+    notice.textContent = message;
+    notice.style.background = failed ? '#9b1c1c' : '#166534';
+    clearTimeout(notice.__removeTimer);
+    notice.__removeTimer = setTimeout(() => notice.remove(), 5500);
+  }
+
+  async function copyWritePageDetails(stationId, boardId, pathname) {
+    if (attemptedWriteCopyPath === pathname) return;
+    attemptedWriteCopyPath = pathname;
+    let pending = null;
+    try { pending = JSON.parse(sessionStorage.getItem(pendingWriteClipboardKey) || 'null'); }
+    catch (error) {
+      log('write-page-clipboard-read-failed', { error: String(error && error.message || error) });
+    }
+    if (!pending || pending.stationId !== stationId || pending.boardId !== boardId || Date.now() - pending.at > PENDING_WRITE_MAX_AGE_MS) {
+      log('write-page-clipboard-skipped', {
+        stationId: stationId,
+        boardId: boardId,
+        reason: !pending ? 'no-board-context' : 'board-context-mismatch-or-expired',
+      });
+      return;
+    }
+
+    const socialTitle = document.querySelector('meta[property="og:title"]')?.content || '';
+    const nickname = pending.nickname || stationNicknameFromTitles(document.title, socialTitle);
+    if (!nickname) {
+      log('write-page-clipboard-failed', { stationId: stationId, boardId: boardId, reason: 'station-nickname-not-found' });
+      showWriteCopyNotice('방송국 닉네임을 확인하지 못해 자동 복사하지 못했습니다.', true);
+      return;
+    }
+    const writeUrl = 'https://www.sooplive.com/station/' + encodeURIComponent(stationId) + '/post/write/' + encodeURIComponent(boardId);
+    const clipboardText = nickname + '\n' + writeUrl;
+    log('write-page-clipboard-started', { stationId: stationId, boardId: boardId, nicknameLength: nickname.length });
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(clipboardText);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = clipboardText;
+        textarea.style.cssText = 'position:fixed;left:-9999px;top:0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        textarea.remove();
+        if (!copied) throw new Error('clipboard-unavailable');
+      }
+      try { sessionStorage.removeItem(pendingWriteClipboardKey); } catch (_) { /* clipboard has already succeeded */ }
+      log('write-page-clipboard-succeeded', { stationId: stationId, boardId: boardId, nicknameLength: nickname.length, url: writeUrl });
+      showWriteCopyNotice('방송국 닉네임과 글쓰기 URL을 클립보드에 복사했습니다.', false);
+    } catch (error) {
+      log('write-page-clipboard-failed', { stationId: stationId, boardId: boardId, reason: 'clipboard-write-failed', error: String(error && error.message || error) });
+      showWriteCopyNotice('자동 복사에 실패했습니다. 진단 로그를 확인해주세요.', true);
+    }
+  }
+
   function render(entries, stationId, scan) {
     const host = ensurePanel();
     const body = host.shadowRoot.querySelector('.body');
@@ -258,28 +362,44 @@
         '<div class="warning">게시판 이름만 보고 확정하지 않습니다. 발견되지 않은 게시판은 수동으로 찾아보세요.</div>';
       return;
     }
-    const rows = safeItems.map((item) => {
+    const orderedItems = sortCandidatesByConfidence(
+      safeItems.map((item) => Object.assign({}, item, { entryType: 'link' }))
+        .concat(safeButtons.map((item) => Object.assign({}, item, { entryType: 'menu-button' })))
+    );
+    const rows = orderedItems.map((item) => {
       const low = item.kind === 'review';
+      if (item.entryType === 'menu-button') {
+      return '<article class="row"><div class="title">' + escapeHtml(item.title) + '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
+        '<div class="meta">' + escapeHtml(item.reason) + ' · 메뉴 버튼에서 게시판 주소 확인 전</div>' +
+        '<div class="actions"><button type="button" data-open-board-index="' + item.buttonIndex + '">게시판 확인</button></div></article>';
+      }
       const hasWriteUrl = Boolean(item.writeUrl);
       return '<article class="row"><div class="title">' + escapeHtml(item.title || '(이름 없음)') +
         '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
         '<div class="meta">' + escapeHtml(item.reason) + (hasWriteUrl ? ' · 게시판 ID ' + escapeHtml(item.boardId) : '') + '</div>' +
         '<div class="actions">' + (hasWriteUrl ? '<a class="action" href="' + escapeHtml(item.boardUrl) + '">게시판 확인</a>' : '') +
-        (low || !hasWriteUrl ? '' : '<a class="action" href="' + escapeHtml(item.writeUrl) + '">글쓰기 화면 열기</a>') +
+        (low || !hasWriteUrl ? '' : '<a class="action" data-open-write-url="' + escapeHtml(item.writeUrl) + '" href="' + escapeHtml(item.writeUrl) + '">글쓰기 화면 열기</a>') +
         (hasWriteUrl ? '<button type="button" data-copy-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">글쓰기 주소 복사</button>' : '') + '</div></article>';
     }).join('');
-    const buttonRows = safeButtons.map((item) => {
-      const low = item.kind === 'review';
-      return '<article class="row"><div class="title">' + escapeHtml(item.title) + '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
-        '<div class="meta">' + escapeHtml(item.reason) + ' · 메뉴 버튼에서 게시판 주소 확인 전</div>' +
-        '<div class="actions"><button type="button" data-open-board-index="' + item.buttonIndex + '">게시판 확인</button></div></article>';
-    }).join('');
-    body.innerHTML = '<p class="summary">방송국 ' + escapeHtml(stationId) + ' · 링크 게시판 ' + entries.links.length + '개 확인 · 후보 ' + candidates.length + '개 · 메뉴 후보 ' + safeButtons.length + '개' +
+    body.innerHTML = '<p class="summary">방송국 ' + escapeHtml(stationId) + ' · 링크 게시판 ' + entries.links.length + '개 확인 · 후보 ' + candidates.length + '개 · 메뉴 후보 ' + safeButtons.length + '개 · 높은 후보 우선 정렬' +
       (review.length ? ' · 이름만으로 판별 불가 ' + review.length + '개' : '') + '</p>' +
-      '<div class="warning">이름 기반 후보입니다. 메뉴형 후보는 게시판 확인을 눌러 이동한 후 ID를 읽습니다. 게시판 용도와 작성 가능 여부를 직접 확인하세요.</div>' + rows + buttonRows;
+      '<div class="warning">이름 기반 후보입니다. 메뉴형 후보는 게시판 확인을 눌러 이동한 후 ID를 읽습니다. 글쓰기 화면이 열리면 닉네임과 URL을 클립보드에 복사합니다.</div>' + rows;
   }
 
   function scan() {
+    const writeRoute = extractWriteRoute(location.pathname);
+    if (writeRoute) {
+      const route = location.pathname.toLowerCase();
+      if (route !== lastRoute) {
+        lastRoute = route;
+        lastSignature = '';
+        log('write-page-route-detected', { stationId: writeRoute.stationId, boardId: writeRoute.boardId, path: location.pathname });
+      }
+      void copyWritePageDetails(writeRoute.stationId, writeRoute.boardId, location.pathname);
+      const oldPanel = document.getElementById(ROOT_ID);
+      if (oldPanel) oldPanel.remove();
+      return;
+    }
     const stationId = stationIdFromPath(location.pathname);
     if (!stationId || /\/post\//i.test(location.pathname)) {
       const oldPanel = document.getElementById(ROOT_ID);
