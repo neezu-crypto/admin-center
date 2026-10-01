@@ -1118,6 +1118,7 @@
   const removePromotedContentFn = httpsCallable(functions, 'removePromotedContent');
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
   const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
+  const addStreamerPromoCandidateFn = httpsCallable(functions, 'addStreamerPromoCandidate');
   const saveStreamerPromoLinkFn = httpsCallable(functions, 'saveStreamerPromoLink');
   const markStreamerPromoLinkOpenedFn = httpsCallable(functions, 'markStreamerPromoLinkOpened');
   const setStreamerPromoCompletionFn = httpsCallable(functions, 'setStreamerPromoCompletion');
@@ -1213,6 +1214,31 @@
     }).catch(function (error) {
       traceDuplicateLookup('promo-duplicate-list-fetch-failed', { code: String(error && error.code || ''), message: String(error && error.message || error || '') });
       reply({ ok: false, reason: 'promo-list-unavailable' });
+    });
+  });
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__soopPromoCandidateAddRequest !== true || typeof data.requestId !== 'string') return;
+    const requestId = data.requestId;
+    const reply = function (payload) {
+      window.postMessage(Object.assign({ __soopPromoCandidateAddResult: true, requestId: requestId }, payload), location.origin);
+    };
+    console.info('[SOOP 홍보 진단]', JSON.stringify({ requestId: requestId, stage: 'promo-candidate-add-call-started', at: new Date().toISOString(), details: { soopId: String(data.soopId || '') } }));
+    addStreamerPromoCandidateFn({
+      nickname: String(data.nickname || ''),
+      soopId: String(data.soopId || ''),
+      writeUrl: String(data.writeUrl || ''),
+    }).then(function (result) {
+      const entry = result && result.data || {};
+      promoDuplicateListCache = null;
+      promoDuplicateListExpiresAt = 0;
+      console.info('[SOOP 홍보 진단]', JSON.stringify({ requestId: requestId, stage: 'promo-candidate-add-call-succeeded', at: new Date().toISOString(), details: { soopId: String(entry.soopId || '') } }));
+      refreshStreamerPromoLinks();
+      reply({ ok: true, nickname: String(entry.nickname || ''), soopId: String(entry.soopId || ''), writeUrl: String(entry.writeUrl || '') });
+    }).catch(function (error) {
+      console.warn('[SOOP 홍보 진단]', JSON.stringify({ requestId: requestId, stage: 'promo-candidate-add-call-failed', at: new Date().toISOString(), details: { code: String(error && error.code || ''), message: String(error && error.message || error || '') } }));
+      reply({ ok: false, reason: String(error && error.code || 'call-failed'), message: String(error && error.message || '홍보 리스트 추가에 실패했습니다.') });
     });
   });
   const clearAllStreamerPromoCompletionFn = httpsCallable(functions, 'clearAllStreamerPromoCompletion');

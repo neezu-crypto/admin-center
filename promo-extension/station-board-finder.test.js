@@ -15,6 +15,7 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   const bridgeSource = fs.readFileSync(path.join(__dirname, 'admin-bridge.js'), 'utf8');
   const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
   const adminSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const functionSource = fs.readFileSync(path.join(__dirname, '..', 'functions', 'index.js'), 'utf8');
   assert.match(finderSource, /이미 홍보 리스트에 등록된 닉네임입니다/);
   assert.match(finderSource, /child\.hidden = item\.state === 'found'/);
   assert.match(finderSource, /홍보 리스트 중복 확인을 할 수 없습니다/);
@@ -23,6 +24,12 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   assert.match(bridgeSource, /__soopPromoDuplicateLookupRequest/);
   assert.match(adminSource, /listStreamerPromoLinksFn\(\)/);
   assert.match(adminSource, /__soopPromoDuplicateLookupResult/);
+  assert.match(finderSource, /홍보 리스트에 추가/);
+  assert.match(finderSource, /type:\s*'addPromoCandidateFromWritePage'/);
+  assert.match(workerSource, /type:\s*'addStreamerPromoCandidate'/);
+  assert.match(adminSource, /addStreamerPromoCandidateFn\(/);
+  assert.match(functionSource, /adminCenter\/streamerPromoCandidates/);
+  assert.match(functionSource, /addStreamerPromoCandidate,/);
 });
 
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {

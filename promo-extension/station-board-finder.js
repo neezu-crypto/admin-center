@@ -261,16 +261,48 @@
     return host;
   }
 
-  function showWriteCopyNotice(message, failed) {
+  function showWriteCopyNotice(message, failed, addDetails) {
     let notice = document.getElementById('soop-promo-write-copy-notice');
     if (!notice) {
       notice = document.createElement('div');
       notice.id = 'soop-promo-write-copy-notice';
-      notice.style.cssText = 'position:fixed;z-index:2147483647;top:18px;left:50%;transform:translateX(-50%);padding:11px 16px;border-radius:10px;background:#172033;color:#fff;font:14px/1.4 system-ui,-apple-system,sans-serif;box-shadow:0 5px 24px #0004;';
+      notice.style.cssText = 'position:fixed;z-index:2147483647;top:18px;left:50%;transform:translateX(-50%);padding:11px 16px;border-radius:10px;background:#172033;color:#fff;font:14px/1.4 system-ui,-apple-system,sans-serif;box-shadow:0 5px 24px #0004;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 28px);';
       document.documentElement.appendChild(notice);
     }
-    notice.textContent = message;
+    notice.replaceChildren(document.createTextNode(message));
     notice.style.background = failed ? '#9b1c1c' : '#166534';
+    if (addDetails) {
+      const addButton = document.createElement('button');
+      addButton.type = 'button';
+      addButton.textContent = '홍보 리스트에 추가';
+      addButton.style.cssText = 'flex:none;border:1px solid #ffffffaa;border-radius:7px;padding:5px 8px;background:#fff;color:#14532d;font:600 12px system-ui;cursor:pointer;';
+      addButton.addEventListener('click', function () {
+        addButton.disabled = true;
+        addButton.textContent = '추가 중…';
+        if (!root.chrome || !root.chrome.runtime || !root.chrome.runtime.sendMessage) {
+          showWriteCopyNotice('확장 프로그램에 연결할 수 없습니다. 새로고침 후 다시 시도해주세요.', true);
+          return;
+        }
+        root.chrome.runtime.sendMessage({
+          type: 'addPromoCandidateFromWritePage',
+          nickname: addDetails.nickname,
+          writeUrl: addDetails.writeUrl,
+        }).then(function (result) {
+          if (result && result.ok) {
+            log('promo-candidate-add-succeeded', { stationId: addDetails.stationId, nicknameLength: addDetails.nickname.length });
+            showWriteCopyNotice('통합 관리 센터 홍보 리스트에 추가했습니다: ' + addDetails.nickname, false);
+          } else {
+            const reason = String(result && result.reason || 'unknown');
+            log('promo-candidate-add-failed', { stationId: addDetails.stationId, reason: reason });
+            showWriteCopyNotice(String(result && result.message || '홍보 리스트에 추가하지 못했습니다.'), true);
+          }
+        }).catch(function (error) {
+          log('promo-candidate-add-failed', { stationId: addDetails.stationId, reason: 'extension-message-failed', error: String(error && error.message || error) });
+          showWriteCopyNotice('관리자 센터 연결에 실패했습니다. 센터 탭을 새로고침해주세요.', true);
+        });
+      });
+      notice.appendChild(addButton);
+    }
     clearTimeout(notice.__removeTimer);
     notice.__removeTimer = setTimeout(() => notice.remove(), 5500);
   }
@@ -379,7 +411,11 @@
       }
       try { sessionStorage.removeItem(pendingWriteClipboardKey); } catch (_) { /* clipboard has already succeeded */ }
       log('write-page-clipboard-succeeded', { stationId: stationId, boardId: boardId, nicknameLength: nickname.length, url: writeUrl });
-      showWriteCopyNotice('방송국 닉네임과 글쓰기 URL을 클립보드에 복사했습니다.', false);
+      showWriteCopyNotice('방송국 닉네임과 글쓰기 URL을 클립보드에 복사했습니다.', false, {
+        nickname: nickname,
+        stationId: stationId,
+        writeUrl: writeUrl,
+      });
     } catch (error) {
       log('write-page-clipboard-failed', { stationId: stationId, boardId: boardId, reason: 'clipboard-write-failed', error: String(error && error.message || error) });
       showWriteCopyNotice('자동 복사에 실패했습니다. 진단 로그를 확인해주세요.', true);

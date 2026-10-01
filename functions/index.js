@@ -648,7 +648,7 @@ function promoStorageKey(verificationId, soopId) {
   return normalizedId || ('verification_' + String(verificationId || '').replace(/[^A-Za-z0-9_-]/g, '_'));
 }
 
-function getKnownPromoEntries(verifiedValue) {
+function getKnownPromoEntries(verifiedValue, candidateValue) {
   const entries = STREAMER_PROMO_SEED.map(function (entry) {
     return Object.assign({}, entry, { isSeed: true });
   });
@@ -662,6 +662,21 @@ function getKnownPromoEntries(verifiedValue) {
       return;
     }
     byKey[key] = Object.assign({}, entry, { key: key, isVerified: true });
+  });
+  const candidates = candidateValue || {};
+  Object.keys(candidates).forEach(function (soopId) {
+    const row = candidates[soopId] || {};
+    const normalizedId = normalizeSoopId(row.soopId || soopId);
+    if (!normalizedId || !String(row.nickname || '').trim()) return;
+    const key = promoStorageKey('', normalizedId);
+    if (byKey[key]) return;
+    byKey[key] = {
+      key: key,
+      nickname: String(row.nickname).trim(),
+      soopId: normalizedId,
+      writeUrl: String(row.writeUrl || ''),
+      isManualCandidate: true,
+    };
   });
   return Object.keys(byKey).map(function (key) { return byKey[key]; });
 }
@@ -689,11 +704,12 @@ function collectVerifiedStreamerEntries(value) {
 const listStreamerPromoLinks = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap] = await Promise.all([
+  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoLinks').get(),
     db.ref('adminCenter/streamerPromoRecent').get(),
     db.ref('adminCenter/streamerPromoExcluded').get(),
+    db.ref('adminCenter/streamerPromoCandidates').get(),
   ]);
   const links = linksSnap.val() || {};
   let recentOpened = recentSnap.val() || null;
@@ -723,7 +739,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
     await db.ref().update(cleanupUpdates);
   }
   const excludedPromoIds = excludedPromoSnap.val() || {};
-  const streamers = getKnownPromoEntries(verifiedSnap.val()).filter(function (entry) {
+  const streamers = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val()).filter(function (entry) {
     return excludedPromoIds[entry.key] !== true && excludedPromoIds[entry.soopId] !== true;
   });
   streamers.sort(function (a, b) {
@@ -747,6 +763,52 @@ const listStreamerPromoLinks = onCall(async (request) => {
   };
 });
 
+const addStreamerPromoCandidate = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const data = request.data || {};
+  const nickname = String(data.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim();
+  const soopId = normalizeSoopId(data.soopId);
+  const writeUrl = normalizePromoUrl(data.writeUrl);
+  if (!nickname || nickname.length > 100 || !soopId || !writeUrl) {
+    throw new HttpsError('invalid-argument', '닉네임, SOOP 아이디, 글쓰기 URL을 확인해주세요.');
+  }
+  let parsedUrl;
+  try { parsedUrl = new URL(writeUrl); } catch (_) { parsedUrl = null; }
+  const pathMatch = parsedUrl && /^\/station\/([A-Za-z0-9]{2,20})\/post\/write\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(parsedUrl.pathname);
+  if (!parsedUrl || !['sooplive.com', 'www.sooplive.com'].includes(parsedUrl.hostname.toLowerCase()) ||
+      !pathMatch || pathMatch[1].toLowerCase() !== soopId || parsedUrl.search || parsedUrl.hash) {
+    throw new HttpsError('invalid-argument', '방송국 아이디와 일치하는 SOOP 글쓰기 주소만 등록할 수 있습니다.');
+  }
+
+  const db = getDatabase();
+  const [verifiedSnap, candidatesSnap] = await Promise.all([
+    db.ref('streamerVerifications').get(),
+    db.ref('adminCenter/streamerPromoCandidates').get(),
+  ]);
+  const entries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+  const normalizedNickname = nickname.toLocaleLowerCase();
+  const duplicate = entries.find(function (entry) {
+    return String(entry.soopId || '').toLowerCase() === soopId ||
+      String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === normalizedNickname;
+  });
+  if (duplicate) {
+    throw new HttpsError('already-exists', '이미 홍보 리스트에 등록된 닉네임 또는 SOOP 아이디입니다: ' + (duplicate.nickname || duplicate.soopId));
+  }
+
+  const now = Date.now();
+  await db.ref('adminCenter/streamerPromoCandidates/' + soopId).set({
+    nickname: nickname,
+    soopId: soopId,
+    writeUrl: writeUrl,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: adminUid,
+    updatedBy: adminUid,
+  });
+  await logToAdminAuditLog(db, request, '스트리머 홍보 후보 추가', nickname + ' (@' + soopId + ')');
+  return { ok: true, nickname: nickname, soopId: soopId, writeUrl: writeUrl };
+});
+
 const saveStreamerPromoLink = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const data = request.data || {};
@@ -759,8 +821,11 @@ const saveStreamerPromoLink = onCall(async (request) => {
   }
 
   const db = getDatabase();
-  const verifiedSnap = await db.ref('streamerVerifications').get();
-  const entries = getKnownPromoEntries(verifiedSnap.val());
+  const [verifiedSnap, candidatesSnap] = await Promise.all([
+    db.ref('streamerVerifications').get(),
+    db.ref('adminCenter/streamerPromoCandidates').get(),
+  ]);
+  const entries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
   const entry = entries.find(function (item) {
     return (requestedPromoKey && item.key === requestedPromoKey) ||
       (!requestedPromoKey && requestedSoopId && item.soopId === requestedSoopId) ||
@@ -795,8 +860,11 @@ async function requireKnownPromoEntry(db, data) {
   if (!requestedKey && !requestedSoopId && !requestedVerificationId) {
     throw new HttpsError('invalid-argument', '스트리머 식별자가 필요합니다.');
   }
-  const verifiedSnap = await db.ref('streamerVerifications').get();
-  const entries = getKnownPromoEntries(verifiedSnap.val());
+  const [verifiedSnap, candidatesSnap] = await Promise.all([
+    db.ref('streamerVerifications').get(),
+    db.ref('adminCenter/streamerPromoCandidates').get(),
+  ]);
+  const entries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
   const entry = entries.find(function (item) {
     return (requestedKey && item.key === requestedKey) ||
       (!requestedKey && requestedSoopId && item.soopId === requestedSoopId) ||
@@ -2839,6 +2907,7 @@ module.exports = {
   removePromotedContent,
   migratePromotedStreamers,
   listStreamerPromoLinks,
+  addStreamerPromoCandidate,
   saveStreamerPromoLink,
   markStreamerPromoLinkOpened,
   setStreamerPromoCompletion,

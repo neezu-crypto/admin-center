@@ -2,6 +2,7 @@
   const OPEN_BUTTON_ID = 'streamerPromoGeneratorOpenBtn';
   const completionReplies = new Map();
   const duplicateLookupReplies = new Map();
+  const candidateAddReplies = new Map();
   let extensionContextUnavailable = false;
 
   function trace(attemptId, stage, details) {
@@ -42,6 +43,29 @@
   }
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message && message.type === 'addStreamerPromoCandidate' &&
+        typeof message.nickname === 'string' && typeof message.soopId === 'string' && typeof message.writeUrl === 'string') {
+      const requestId = createAttemptId();
+      const timeout = setTimeout(function () {
+        candidateAddReplies.delete(requestId);
+        trace(requestId, 'admin-bridge-candidate-add-timeout', {});
+        sendResponse({ ok: false, reason: 'admin-center-timeout', message: '관리자 센터 응답 시간이 초과되었습니다.' });
+      }, 20000);
+      candidateAddReplies.set(requestId, function (result) {
+        clearTimeout(timeout);
+        candidateAddReplies.delete(requestId);
+        sendResponse(result || { ok: false, reason: 'empty-response' });
+      });
+      trace(requestId, 'admin-bridge-candidate-add-received', { soopId: message.soopId });
+      window.postMessage({
+        __soopPromoCandidateAddRequest: true,
+        requestId: requestId,
+        nickname: message.nickname,
+        soopId: message.soopId,
+        writeUrl: message.writeUrl,
+      }, location.origin);
+      return true;
+    }
     if (message && message.type === 'lookupStreamerPromoDuplicate' &&
         typeof message.requestId === 'string' && typeof message.nickname === 'string' &&
         typeof message.stationId === 'string') {
@@ -89,6 +113,17 @@
 
   window.addEventListener('message', function (event) {
     const data = event.data;
+    if (event.source === window && event.origin === location.origin && data &&
+        data.__soopPromoCandidateAddResult === true && typeof data.requestId === 'string') {
+      const candidateReply = candidateAddReplies.get(data.requestId);
+      if (candidateReply) {
+        trace(data.requestId, data.ok === true ? 'admin-bridge-candidate-add-succeeded' : 'admin-bridge-candidate-add-failed', {
+          reason: String(data.reason || ''),
+        });
+        candidateReply({ ok: data.ok === true, reason: String(data.reason || ''), message: String(data.message || '') });
+      }
+      return;
+    }
     if (event.source === window && event.origin === location.origin && data &&
         data.__soopPromoDuplicateLookupResult === true && typeof data.requestId === 'string') {
       const duplicateReply = duplicateLookupReplies.get(data.requestId);
