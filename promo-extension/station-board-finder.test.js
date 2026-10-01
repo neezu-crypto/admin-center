@@ -1,6 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const finder = require('./station-board-finder.js');
+
+test('렌더러에는 링크·버튼 배열을 포함한 스캔 결과 객체를 전달한다', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'station-board-finder.js'), 'utf8');
+  assert.match(source, /render\(result,\s*stationId,\s*result\)/);
+  assert.doesNotMatch(source, /render\(result\.links,\s*stationId,\s*result\)/);
+});
 
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {
   assert.deepEqual(

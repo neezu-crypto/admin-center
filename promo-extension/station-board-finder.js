@@ -305,7 +305,7 @@
       }
       return;
     }
-    render(result.links, stationId, result);
+    render(result, stationId, result);
   }
 
   function scheduleScan(reason) {
