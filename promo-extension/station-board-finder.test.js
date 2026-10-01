@@ -125,6 +125,8 @@ test('프로필 호버는 SOOP 방송국 링크에서 ID와 닉네임을 판별�
   assert.match(hoverSource, /후보에서 제외/);
   assert.match(hoverSource, /제외된 리스트/);
   assert.match(hoverSource, /제외 취소/);
+  assert.match(hoverSource, /activeAnchor\.getBoundingClientRect\(\)/);
+  assert.doesNotMatch(hoverSource, /addEventListener\('pointermove'/);
   assert.match(worker, /isProfileHoverLookup = message\.lookupContext === 'profile-hover'/);
   assert.match(worker, /isProfileHoverLookup \|\|/);
   assert.match(worker, /type: 'setStreamerPromoExclusion'/);

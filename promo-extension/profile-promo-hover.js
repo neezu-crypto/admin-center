@@ -62,7 +62,6 @@
   let activeAnchor = null;
   let activeToken = 0;
   let activeProfile = null;
-  let pointer = { x: 0, y: 0 };
   let hideTimer = 0;
   let host = null;
   let tooltip = null;
@@ -91,13 +90,14 @@
   }
 
   function placeTooltip() {
-    if (!tooltip || tooltip.style.display === 'none') return;
+    if (!tooltip || tooltip.style.display === 'none' || !activeAnchor || !activeAnchor.isConnected) return;
     const rect = tooltip.getBoundingClientRect();
+    const anchorRect = activeAnchor.getBoundingClientRect();
     const margin = 8;
-    let x = pointer.x + 14;
-    let y = pointer.y + 16;
-    if (x + rect.width > window.innerWidth - margin) x = pointer.x - rect.width - 14;
-    if (y + rect.height > window.innerHeight - margin) y = pointer.y - rect.height - 16;
+    let x = anchorRect.right + 10;
+    let y = anchorRect.top;
+    if (x + rect.width > window.innerWidth - margin) x = anchorRect.left - rect.width - 10;
+    if (y + rect.height > window.innerHeight - margin) y = anchorRect.bottom - rect.height;
     host.style.left = Math.max(margin, Math.min(x, window.innerWidth - rect.width - margin)) + 'px';
     host.style.top = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin)) + 'px';
   }
@@ -217,7 +217,6 @@
   }
 
   document.addEventListener('pointerover', (event) => {
-    pointer = { x: event.clientX, y: event.clientY };
     const profile = findProfileAnchor(event.target);
     if (!profile || profile.anchor === activeAnchor) return;
     clearTimeout(hideTimer);
@@ -232,10 +231,10 @@
     lookupProfile(profile.stationId, nickname, token);
   }, true);
 
-  document.addEventListener('pointermove', (event) => {
-    pointer = { x: event.clientX, y: event.clientY };
+  window.addEventListener('resize', () => {
     placeTooltip();
-  }, { passive: true, capture: true });
+  }, { passive: true });
+  document.addEventListener('scroll', () => placeTooltip(), { passive: true, capture: true });
 
   document.addEventListener('pointerout', (event) => {
     if (!activeAnchor) return;
