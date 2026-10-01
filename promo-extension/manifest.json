@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "SOOP 홍보글 작성 보조",
-  "version": "0.6.2",
-  "description": "관리자 센터 홍보글을 SOOP에 채우고, 게시 성공이 확인되면 홍보 완료를 표시합니다.",
+  "name": "SOOP 홍보글·게시판 찾기",
+  "version": "0.7.0",
+  "description": "SOOP 방송국에서 홍보 후보 게시판과 글쓰기 링크를 찾고 관리자 센터의 홍보글 작성을 보조합니다.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://neezu-crypto.github.io/admin-center/*",
-    "https://sooplive.com/station/*/post/*",
-    "https://www.sooplive.com/station/*/post/*"
+    "https://sooplive.com/station/*",
+    "https://www.sooplive.com/station/*"
   ],
   "background": {
     "service_worker": "service-worker.js"
@@ -16,6 +16,14 @@
     {
       "matches": ["https://neezu-crypto.github.io/admin-center/*"],
       "js": ["admin-bridge.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://sooplive.com/station/*",
+        "https://www.sooplive.com/station/*"
+      ],
+      "js": ["station-board-finder.js"],
       "run_at": "document_idle"
     },
     {

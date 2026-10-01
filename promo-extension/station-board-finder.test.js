@@ -1,0 +1,42 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const finder = require('./station-board-finder.js');
+
+test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {
+  assert.deepEqual(
+    finder.extractBoardLink('/station/demo123/board/98765', 'demo123', 'https://www.sooplive.com/station/demo123'),
+    {
+      stationId: 'demo123',
+      boardId: '98765',
+      boardUrl: 'https://www.sooplive.com/station/demo123/board/98765',
+      writeUrl: 'https://www.sooplive.com/station/demo123/post/write/98765',
+    }
+  );
+});
+
+test('다른 방송국·다른 도메인·글 상세 경로를 게시판으로 오인하지 않는다', () => {
+  assert.equal(finder.extractBoardLink('/station/other/board/98765', 'demo123'), null);
+  assert.equal(finder.extractBoardLink('https://example.com/station/demo123/board/98765', 'demo123'), null);
+  assert.equal(finder.extractBoardLink('/station/demo123/post/98765', 'demo123'), null);
+});
+
+test('뻐꾸기·추천은 우선 후보로 분류한다', () => {
+  assert.equal(finder.classifyBoardTitle('🦉 뻐꾸기동지').kind, 'candidate');
+  assert.equal(finder.classifyBoardTitle('게임 추천').confidence, '높음');
+});
+
+test('제안·요청은 후보로 표시하되 확인이 필요하다고 분류한다', () => {
+  assert.equal(finder.classifyBoardTitle('콘텐츠 제안').confidence, '보통');
+  assert.equal(finder.classifyBoardTitle('시청자 요청함').kind, 'candidate');
+});
+
+test('공지·VOD·스트리머 전용으로 보이는 게시판은 제외한다', () => {
+  assert.equal(finder.classifyBoardTitle('콘텐츠 추천 공지').kind, 'exclude');
+  assert.equal(finder.classifyBoardTitle('스트리머 전용 뻐꾸기').kind, 'exclude');
+  assert.equal(finder.classifyBoardTitle('VOD').kind, 'exclude');
+});
+
+test('이름이 모호한 콘텐츠 게시판은 글쓰기 후보 대신 수동 확인으로 남긴다', () => {
+  assert.equal(finder.classifyBoardTitle('컨텐츠 게시판').kind, 'review');
+  assert.equal(finder.classifyBoardTitle('팬 게시판').kind, 'ignore');
+});
