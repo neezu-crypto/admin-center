@@ -76,6 +76,13 @@ test('글쓰기 경로에서 방송국과 게시판 ID를 안전하게 추출한
   assert.equal(finder.extractWriteRoute('/station/other/post/write/122232421/extra'), null);
 });
 
+test('패널은 포인터 근처에 배치하되 화면 가장자리에서 뷰포트 안으로 뒤집고 고정한다', () => {
+  assert.deepEqual(finder.positionNearPointer(100, 100, 300, 200, 1000, 800, 16), { left: 116, top: 116 });
+  assert.deepEqual(finder.positionNearPointer(900, 700, 300, 200, 1000, 800, 16), { left: 584, top: 484 });
+  const clamped = finder.positionNearPointer(2, 2, 300, 200, 1000, 800, 16);
+  assert.ok(clamped.left >= 8 && clamped.top >= 8);
+});
+
 test('방송국 닉네임을 추출하고 신뢰도 높은 후보부터 정렬한다', () => {
   assert.equal(finder.stationNicknameFromTitles('도미-의 방송국 | SOOP', ''), '도미-');
   assert.equal(finder.stationNicknameFromTitles('SOOP', '도미-의 방송국'), '도미-');
