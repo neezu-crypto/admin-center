@@ -20,6 +20,19 @@ test('다른 방송국·다른 도메인·글 상세 경로를 게시판으로 �
   assert.equal(finder.extractBoardLink('/station/demo123/post/98765', 'demo123'), null);
 });
 
+test('SOOP 버튼 선택 후 도달한 현재 게시판 URL에서 글쓰기 주소를 구성한다', () => {
+  assert.deepEqual(
+    finder.extractCurrentBoard('/station/dommiii/board/122232421', 'dommiii'),
+    {
+      stationId: 'dommiii',
+      boardId: '122232421',
+      boardUrl: 'https://www.sooplive.com/station/dommiii/board/122232421',
+      writeUrl: 'https://www.sooplive.com/station/dommiii/post/write/122232421',
+    }
+  );
+  assert.equal(finder.extractCurrentBoard('/station/other/board/122232421', 'dommiii'), null);
+});
+
 test('뻐꾸기·추천·게임 추천은 우선 후보로 분류한다', () => {
   assert.equal(finder.classifyBoardTitle('🦉 뻐꾸기동지').kind, 'candidate');
   assert.equal(finder.classifyBoardTitle('게임 추천').confidence, '높음');

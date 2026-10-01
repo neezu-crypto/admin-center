@@ -35,6 +35,12 @@
     };
   }
 
+  function extractCurrentBoard(pathname, currentStationId) {
+    const match = BOARD_PATH.exec(String(pathname || ''));
+    if (!match || match[1].toLowerCase() !== String(currentStationId || '').toLowerCase()) return null;
+    return extractBoardLink('https://www.sooplive.com' + match[0], currentStationId);
+  }
+
   function classifyBoardTitle(title) {
     const normalized = cleanText(title).normalize('NFKC');
     if (!normalized) return { kind: 'ignore', reason: '게시판 이름을 읽지 못함' };
@@ -47,10 +53,10 @@
     return { kind: 'ignore', reason: '홍보 후보 의미를 이름에서 확인하지 못함' };
   }
 
-  const api = { cleanText, stationIdFromPath, extractBoardLink, classifyBoardTitle };
+  const api = { cleanText, stationIdFromPath, extractBoardLink, extractCurrentBoard, classifyBoardTitle };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  if (typeof document === 'undefined' || !root || root.__soopPromoBoardFinder070) return;
-  root.__soopPromoBoardFinder070 = true;
+  if (typeof document === 'undefined' || !root || root.__soopPromoBoardFinder073) return;
+  root.__soopPromoBoardFinder073 = true;
 
   const scanId = 'finder-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const log = (stage, details) => {
@@ -68,6 +74,10 @@
   let lastSignature = '';
   let scanTimer = 0;
   let mutationObserver = null;
+  let activeButtonEntries = [];
+  let lastCurrentBoardLog = '';
+  const currentBoardTitles = new Map();
+  const pendingBoardStorageKey = 'soopPromoBoardFinder.pendingBoard.' + location.hostname;
 
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, (character) => ({
@@ -78,6 +88,7 @@
   function getBoardEntries(stationId) {
     const links = Array.from(document.querySelectorAll('a[href]'));
     const byPath = new Map();
+    const buttonEntries = [];
     let stationAnchors = 0;
     links.forEach((anchor) => {
       const parsed = extractBoardLink(anchor.getAttribute('href'), stationId, location.href);
@@ -88,7 +99,46 @@
       const prior = byPath.get(key);
       if (!prior || title.length > prior.title.length) byPath.set(key, Object.assign(parsed, { title: title, element: anchor }));
     });
-    return { links: Array.from(byPath.values()), stationAnchors: stationAnchors, scannedAnchors: links.length };
+
+    const currentBoard = extractCurrentBoard(location.pathname, stationId);
+    if (currentBoard) {
+      let pending = null;
+      try { pending = JSON.parse(sessionStorage.getItem(pendingBoardStorageKey) || 'null'); } catch (_) { /* ignore malformed temporary state */ }
+      const routeKey = stationId.toLowerCase() + '/' + currentBoard.boardId.toLowerCase();
+      const selectedTitle = pending && pending.stationId === stationId && Date.now() - pending.at < 120000
+        ? pending.title : (currentBoardTitles.get(routeKey) || '');
+      if (selectedTitle) currentBoardTitles.set(routeKey, selectedTitle);
+      byPath.set(stationId.toLowerCase() + '/' + currentBoard.boardId.toLowerCase(), Object.assign(currentBoard, {
+        title: selectedTitle || '현재 게시판 (용도 확인 필요)', currentRoute: true,
+      }));
+      if (selectedTitle) {
+        try { sessionStorage.removeItem(pendingBoardStorageKey); } catch (_) { /* session storage may be unavailable */ }
+      }
+      if (lastCurrentBoardLog !== routeKey) {
+        lastCurrentBoardLog = routeKey;
+        log('current-board-route-detected', { stationId: stationId, boardId: currentBoard.boardId, title: selectedTitle });
+      }
+    }
+
+    const buttons = Array.from(document.querySelectorAll('button,[role="button"]'));
+    const seenButtonTitles = new Set();
+    buttons.forEach((button) => {
+      const title = cleanText(button.innerText || button.textContent || button.getAttribute('aria-label') || button.title);
+      if (!title) return;
+      const classification = classifyBoardTitle(title);
+      if (classification.kind !== 'candidate' && classification.kind !== 'review') return;
+      const key = title.normalize('NFKC').toLocaleLowerCase();
+      if (seenButtonTitles.has(key)) return;
+      seenButtonTitles.add(key);
+      buttonEntries.push({ title: title, element: button });
+    });
+    return {
+      links: Array.from(byPath.values()),
+      buttons: buttonEntries,
+      stationAnchors: stationAnchors,
+      scannedAnchors: links.length,
+      scannedButtons: buttons.length,
+    };
   }
 
   function ensurePanel() {
@@ -125,6 +175,25 @@
       log('panel-toggled', { collapsed: !isClosed });
     });
     shadow.addEventListener('click', async (event) => {
+      const openButton = event.target.closest('[data-open-board-index]');
+      if (openButton) {
+        const index = Number(openButton.getAttribute('data-open-board-index'));
+        const item = activeButtonEntries[index];
+        if (!item || !item.element || !item.element.isConnected) {
+          log('board-button-open-failed', { index: index, reason: 'source-button-unavailable' });
+          openButton.textContent = '항목을 다시 확인해주세요';
+          return;
+        }
+        try {
+          sessionStorage.setItem(pendingBoardStorageKey, JSON.stringify({ stationId: stationIdFromPath(location.pathname), title: item.title, at: Date.now() }));
+          log('board-button-open-requested', { title: item.title, sourceTag: item.element.tagName });
+          item.element.click();
+        } catch (error) {
+          log('board-button-open-failed', { title: item.title, error: String(error && error.message || error) });
+          openButton.textContent = '열기 실패';
+        }
+        return;
+      }
       const copyButton = event.target.closest('[data-copy-url]');
       if (!copyButton) return;
       const value = copyButton.getAttribute('data-copy-url') || '';
@@ -151,21 +220,26 @@
   function render(entries, stationId, scan) {
     const host = ensurePanel();
     const body = host.shadowRoot.querySelector('.body');
-    const signature = stationId + '|' + entries.map((item) => item.boardId + ':' + item.title).join('|');
+    const signature = stationId + '|' + entries.links.map((item) => item.boardId + ':' + item.title).join('|') + '|buttons|' + entries.buttons.map((item) => item.title).join('|');
     if (signature === lastSignature && body.dataset.ready === 'true') return;
     lastSignature = signature;
     body.dataset.ready = 'true';
 
-    const classified = entries.map((item) => Object.assign(item, classifyBoardTitle(item.title)));
+    const classified = entries.links.map((item) => Object.assign(item, classifyBoardTitle(item.title)));
     const candidates = classified.filter((item) => item.kind === 'candidate');
     const review = classified.filter((item) => item.kind === 'review');
     const safeItems = candidates.concat(review);
+    activeButtonEntries = entries.buttons;
+    const buttonClassifications = entries.buttons.map((item, index) => Object.assign({}, item, classifyBoardTitle(item.title), { buttonIndex: index }));
+    const safeButtons = buttonClassifications.filter((item) => item.kind === 'candidate' || item.kind === 'review');
     log('board-scan-complete', {
       stationId: stationId,
       scannedAnchors: scan.scannedAnchors,
       stationBoardAnchors: scan.stationAnchors,
-      uniqueBoards: entries.length,
+      scannedButtons: scan.scannedButtons,
+      uniqueBoards: entries.links.length,
       candidateCount: candidates.length,
+      clickableBoardCandidateCount: safeButtons.length,
       manualReviewCount: review.length,
       excludedCount: classified.filter((item) => item.kind === 'exclude').length,
       ignoredCount: classified.filter((item) => item.kind === 'ignore').length,
@@ -174,24 +248,35 @@
       stationId: stationId, boardId: item.boardId, title: item.title,
       result: item.kind, confidence: item.confidence || '', reason: item.reason,
     }));
+    safeButtons.forEach((item) => log('board-button-classified', {
+      stationId: stationId, title: item.title, result: item.kind,
+      confidence: item.confidence || '', reason: item.reason,
+    }));
 
-    if (!safeItems.length) {
+    if (!safeItems.length && !safeButtons.length) {
       body.innerHTML = '<div class="empty">이름만으로 추천·요청 게시판 후보를 찾지 못했습니다.<br>왼쪽 게시판 목록이 펼쳐져 있는지 확인하거나 진단 로그를 확인해주세요.</div>' +
         '<div class="warning">게시판 이름만 보고 확정하지 않습니다. 발견되지 않은 게시판은 수동으로 찾아보세요.</div>';
       return;
     }
     const rows = safeItems.map((item) => {
       const low = item.kind === 'review';
+      const hasWriteUrl = Boolean(item.writeUrl);
       return '<article class="row"><div class="title">' + escapeHtml(item.title || '(이름 없음)') +
         '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
-        '<div class="meta">' + escapeHtml(item.reason) + ' · 게시판 ID ' + escapeHtml(item.boardId) + '</div>' +
-        '<div class="actions"><a class="action" href="' + escapeHtml(item.boardUrl) + '">게시판 확인</a>' +
-        (low ? '' : '<a class="action" href="' + escapeHtml(item.writeUrl) + '">글쓰기 화면 열기</a>') +
-        '<button type="button" data-copy-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">글쓰기 주소 복사</button></div></article>';
+        '<div class="meta">' + escapeHtml(item.reason) + (hasWriteUrl ? ' · 게시판 ID ' + escapeHtml(item.boardId) : '') + '</div>' +
+        '<div class="actions">' + (hasWriteUrl ? '<a class="action" href="' + escapeHtml(item.boardUrl) + '">게시판 확인</a>' : '') +
+        (low || !hasWriteUrl ? '' : '<a class="action" href="' + escapeHtml(item.writeUrl) + '">글쓰기 화면 열기</a>') +
+        (hasWriteUrl ? '<button type="button" data-copy-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">글쓰기 주소 복사</button>' : '') + '</div></article>';
     }).join('');
-    body.innerHTML = '<p class="summary">방송국 ' + escapeHtml(stationId) + ' · 게시판 ' + entries.length + '개 확인 · 후보 ' + candidates.length + '개' +
+    const buttonRows = safeButtons.map((item) => {
+      const low = item.kind === 'review';
+      return '<article class="row"><div class="title">' + escapeHtml(item.title) + '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
+        '<div class="meta">' + escapeHtml(item.reason) + ' · 메뉴 버튼에서 게시판 주소 확인 전</div>' +
+        '<div class="actions"><button type="button" data-open-board-index="' + item.buttonIndex + '">게시판 확인</button></div></article>';
+    }).join('');
+    body.innerHTML = '<p class="summary">방송국 ' + escapeHtml(stationId) + ' · 링크 게시판 ' + entries.links.length + '개 확인 · 후보 ' + candidates.length + '개 · 메뉴 후보 ' + safeButtons.length + '개' +
       (review.length ? ' · 이름만으로 판별 불가 ' + review.length + '개' : '') + '</p>' +
-      '<div class="warning">이름 기반 후보입니다. 열기 전에 게시판 용도와 작성 가능 여부를 확인하세요. 팬 전용/접근 제한 게시판은 자동으로 즐겨찾기하지 않습니다.</div>' + rows;
+      '<div class="warning">이름 기반 후보입니다. 메뉴형 후보는 게시판 확인을 눌러 이동한 후 ID를 읽습니다. 게시판 용도와 작성 가능 여부를 직접 확인하세요.</div>' + rows + buttonRows;
   }
 
   function scan() {
@@ -210,13 +295,13 @@
       log('station-route-detected', { stationId: stationId, path: location.pathname });
     }
     const result = getBoardEntries(stationId);
-    if (!result.links.length) {
+    if (!result.links.length && !result.buttons.length) {
       const host = ensurePanel();
       const body = host.shadowRoot.querySelector('.body');
       if (body.dataset.ready !== 'empty') {
         body.dataset.ready = 'empty';
         body.innerHTML = '<div class="empty">아직 게시판 링크를 찾지 못했습니다. 게시판 목록이 로드되거나 펼쳐지면 자동으로 다시 확인합니다.</div>';
-        log('no-board-links-found', { stationId: stationId, path: location.pathname, scannedAnchors: result.scannedAnchors });
+        log('no-board-navigation-items-found', { stationId: stationId, path: location.pathname, scannedAnchors: result.scannedAnchors, scannedButtons: result.scannedButtons });
       }
       return;
     }
