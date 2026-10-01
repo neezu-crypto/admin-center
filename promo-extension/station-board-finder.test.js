@@ -107,7 +107,7 @@ test('숫자키 이동 기록이 있는 현재 게시판에서만 스페이스 �
   assert.match(source, /activeShortcutEntries = orderedItems/);
 });
 
-test('프로필 호버는 SOOP 방송국 링크에서 ID와 닉네임을 판별하고 전체검색·탐색 페이지에도 설치한다', () => {
+test('프로필 이미지 로드 후 상태 아이콘을 표시하고 제외·해제하며 호버 UI를 만들지 않는다', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
   const worker = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
   const hoverSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
@@ -119,14 +119,17 @@ test('프로필 호버는 SOOP 방송국 링크에서 ID와 닉네임을 판별�
   assert.equal(profileHover.stationIdFromProfileHref('/station/dommiii', 'https://www.sooplive.com/search?keyword=virtual'), 'dommiii');
   assert.equal(profileHover.stationIdFromProfileHref('https://example.com/station/dommiii'), '');
   assert.equal(profileHover.plausibleNickname('  도미-의 방송국 바로가기  '), '도미-');
-  assert.match(hoverSource, /pointerover/);
+  assert.match(hoverSource, /img\.addEventListener\('load'/);
+  assert.match(hoverSource, /querySelectorAll\('a\[href\] img'\)/);
   assert.match(hoverSource, /홍보 리스트 등록됨/);
+  assert.match(hoverSource, /registered: \['✅'/);
+  assert.match(hoverSource, /excluded: \['🚫'/);
+  assert.match(hoverSource, /unregistered: \['？'/);
   assert.match(hoverSource, /lookupContext:\s*'profile-hover'/);
   assert.match(hoverSource, /후보에서 제외/);
   assert.match(hoverSource, /제외된 리스트/);
-  assert.match(hoverSource, /제외 취소/);
-  assert.match(hoverSource, /activeAnchor\.getBoundingClientRect\(\)/);
-  assert.doesNotMatch(hoverSource, /addEventListener\('pointermove'/);
+  assert.match(hoverSource, /클릭하면 제외를 해제합니다/);
+  assert.doesNotMatch(hoverSource, /pointerover|pointerout|pointermove|mouseenter|mouseleave|soop-promo-profile-hover/);
   assert.match(worker, /isProfileHoverLookup = message\.lookupContext === 'profile-hover'/);
   assert.match(worker, /isProfileHoverLookup \|\|/);
   assert.match(worker, /type: 'setStreamerPromoExclusion'/);
@@ -135,7 +138,8 @@ test('프로필 호버는 SOOP 방송국 링크에서 ID와 닉네임을 판별�
   assert.match(adminPage, /setStreamerPromoExclusionFn/);
   assert.match(adminPage, /excludedStreamers/);
   assert.match(functions, /adminCenter\/streamerPromoExcluded/);
-  assert.doesNotMatch(hoverSource, /preventDefault\(\)|stopPropagation\(\)/);
+  assert.match(hoverSource, /event\.preventDefault\(\)/);
+  assert.match(hoverSource, /event\.stopPropagation\(\)/);
 });
 
 test('방송국 닉네임을 추출하고 신뢰도 높은 후보부터 정렬한다', () => {
