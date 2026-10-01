@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const finder = require('./station-board-finder.js');
+const profileHover = require('./profile-promo-hover.js');
 
 test('렌더러에는 링크·버튼 배열을 포함한 스캔 결과 객체를 전달한다', () => {
   const source = fs.readFileSync(path.join(__dirname, 'station-board-finder.js'), 'utf8');
@@ -101,6 +102,23 @@ test('숫자키 이동 기록이 있는 현재 게시판에서만 스페이스 �
   assert.match(source, /isTypingTarget\(event\.target\)/);
   assert.match(source, /String\(marker\.boardId \|\| ''\)\.toLowerCase\(\) !== current\.boardId\.toLowerCase\(\)/);
   assert.match(source, /activeShortcutEntries = orderedItems/);
+});
+
+test('프로필 호버는 SOOP 방송국 링크에서 ID와 닉네임을 판별하고 전체검색·탐색 페이지에도 설치한다', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
+  const worker = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
+  const hoverSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
+  const hoverScript = manifest.content_scripts.find((entry) => entry.js.includes('profile-promo-hover.js'));
+  assert.ok(hoverScript.matches.includes('https://www.sooplive.com/*'));
+  assert.equal(profileHover.stationIdFromProfileHref('/station/dommiii', 'https://www.sooplive.com/search?keyword=virtual'), 'dommiii');
+  assert.equal(profileHover.stationIdFromProfileHref('https://example.com/station/dommiii'), '');
+  assert.equal(profileHover.plausibleNickname('  도미-의 방송국 바로가기  '), '도미-');
+  assert.match(hoverSource, /pointerover/);
+  assert.match(hoverSource, /홍보 리스트 등록됨/);
+  assert.match(hoverSource, /lookupContext:\s*'profile-hover'/);
+  assert.match(worker, /isProfileHoverLookup = message\.lookupContext === 'profile-hover'/);
+  assert.match(worker, /isProfileHoverLookup \|\|/);
+  assert.doesNotMatch(hoverSource, /preventDefault\(\)|stopPropagation\(\)/);
 });
 
 test('방송국 닉네임을 추출하고 신뢰도 높은 후보부터 정렬한다', () => {

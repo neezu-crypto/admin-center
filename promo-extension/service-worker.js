@@ -100,9 +100,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const stationId = typeof message.stationId === 'string' ? message.stationId : '';
     const nickname = typeof message.nickname === 'string' ? message.nickname.trim() : '';
     const requestId = typeof message.requestId === 'string' ? message.requestId : '';
-    const validSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
-      (sourceUrl.hostname === 'sooplive.com' || sourceUrl.hostname === 'www.sooplive.com') &&
-      sourceStation && sourceStation[1].toLowerCase() === stationId.toLowerCase();
+    const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
+      (sourceUrl.hostname === 'sooplive.com' || sourceUrl.hostname === 'www.sooplive.com');
+    const isProfileHoverLookup = message.lookupContext === 'profile-hover';
+    const validSender = isSoopSender && (isProfileHoverLookup ||
+      (sourceStation && sourceStation[1].toLowerCase() === stationId.toLowerCase()));
     if (!validSender || !/^[A-Za-z0-9_-]{1,80}$/.test(stationId) || !nickname || nickname.length > 100 || !requestId || requestId.length > 120) {
       trace(requestId, 'promo-duplicate-lookup-rejected', { validSender: !!validSender, nicknameLength: nickname.length });
       sendResponse({ ok: false, reason: 'invalid-request' });
