@@ -16,6 +16,7 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
   const adminSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   assert.match(finderSource, /이미 홍보 리스트에 등록된 닉네임입니다/);
+  assert.match(finderSource, /child\.hidden = item\.state === 'found'/);
   assert.match(finderSource, /홍보 리스트 중복 확인을 할 수 없습니다/);
   assert.match(finderSource, /type:\s*'checkPromoListDuplicate'/);
   assert.match(workerSource, /type:\s*'lookupStreamerPromoDuplicate'/);

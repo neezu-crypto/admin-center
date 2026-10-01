@@ -280,6 +280,9 @@
     const status = host && host.shadowRoot && host.shadowRoot.querySelector('.duplicate-status');
     if (!status) return;
     const item = duplicateLookupState;
+    Array.from(status.parentElement.children).forEach((child) => {
+      if (child !== status) child.hidden = item.state === 'found';
+    });
     status.className = 'duplicate-status' + (item.state === 'found' ? ' found' : item.state === 'clear' ? ' clear' : '');
     status.replaceChildren();
     if (item.state === 'checking') status.textContent = '홍보 리스트에서 닉네임 중복을 확인하는 중…';
