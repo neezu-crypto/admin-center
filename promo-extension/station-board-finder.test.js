@@ -83,6 +83,26 @@ test('패널은 포인터 근처에 배치하되 화면 가장자리에서 뷰�
   assert.ok(clamped.left >= 8 && clamped.top >= 8);
 });
 
+test('숫자키 1–9와 0을 패널의 1–10번째 후보 순서로 매핑한다', () => {
+  assert.equal(finder.shortcutIndexFromKey('Digit1'), 0);
+  assert.equal(finder.shortcutIndexFromKey('Digit9'), 8);
+  assert.equal(finder.shortcutIndexFromKey('Digit0'), 9);
+  assert.equal(finder.shortcutIndexFromKey('Numpad1'), 0);
+  assert.equal(finder.shortcutIndexFromKey('Numpad0'), 9);
+  assert.equal(finder.shortcutIndexFromKey('Key1'), -1);
+  assert.equal(finder.shortcutIndexFromKey('Enter'), -1);
+});
+
+test('숫자키 이동 기록이 있는 현재 게시판에서만 스페이스 추가를 허용한다', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'station-board-finder.js'), 'utf8');
+  assert.match(source, /keyboardBoardStorageKey/);
+  assert.match(source, /viaKeyboard:\s*true/);
+  assert.match(source, /event\.code === 'Space' \|\| event\.key === ' '/);
+  assert.match(source, /isTypingTarget\(event\.target\)/);
+  assert.match(source, /String\(marker\.boardId \|\| ''\)\.toLowerCase\(\) !== current\.boardId\.toLowerCase\(\)/);
+  assert.match(source, /activeShortcutEntries = orderedItems/);
+});
+
 test('방송국 닉네임을 추출하고 신뢰도 높은 후보부터 정렬한다', () => {
   assert.equal(finder.stationNicknameFromTitles('도미-의 방송국 | SOOP', ''), '도미-');
   assert.equal(finder.stationNicknameFromTitles('SOOP', '도미-의 방송국'), '도미-');

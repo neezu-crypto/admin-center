@@ -76,6 +76,12 @@
     return { left: Math.round(left), top: Math.round(top) };
   }
 
+  function shortcutIndexFromKey(key) {
+    const match = /^(?:Digit|Numpad)([0-9])$/.exec(String(key || ''));
+    if (!match) return -1;
+    return match[1] === '0' ? 9 : Number(match[1]) - 1;
+  }
+
   function classifyBoardTitle(title) {
     const normalized = cleanText(title).normalize('NFKC');
     if (!normalized) return { kind: 'ignore', reason: '게시판 이름을 읽지 못함' };
@@ -90,7 +96,7 @@
     return { kind: 'ignore', reason: '홍보 후보 의미를 이름에서 확인하지 못함' };
   }
 
-  const api = { cleanText, stationIdFromPath, extractBoardLink, extractCurrentBoard, extractWriteRoute, stationNicknameFromTitles, sortCandidatesByConfidence, classifyBoardTitle, positionNearPointer };
+  const api = { cleanText, stationIdFromPath, extractBoardLink, extractCurrentBoard, extractWriteRoute, stationNicknameFromTitles, sortCandidatesByConfidence, classifyBoardTitle, positionNearPointer, shortcutIndexFromKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined' || !root || root.__soopPromoBoardFinder073) return;
   root.__soopPromoBoardFinder073 = true;
@@ -112,6 +118,7 @@
   let scanTimer = 0;
   let mutationObserver = null;
   let activeButtonEntries = [];
+  let activeShortcutEntries = [];
   let lastCurrentBoardLog = '';
   let attemptedWriteCopyPath = '';
   let duplicateLookupKey = '';
@@ -120,6 +127,7 @@
   let lastPointerPosition = null;
   const currentBoardTitles = new Map();
   const pendingBoardStorageKey = 'soopPromoBoardFinder.pendingBoard.' + location.hostname;
+  const keyboardBoardStorageKey = 'soopPromoBoardFinder.keyboardBoard.' + location.hostname;
   const pendingWriteClipboardKey = 'soopPromoBoardFinder.pendingWriteClipboard.' + location.hostname;
   const pointerPositionStorageKey = 'soopPromoBoardFinder.pointerPosition.' + location.hostname;
   const PENDING_WRITE_MAX_AGE_MS = 15 * 60 * 1000;
@@ -173,6 +181,8 @@
     if (currentBoard) {
       let pending = null;
       try { pending = JSON.parse(sessionStorage.getItem(pendingBoardStorageKey) || 'null'); } catch (_) { /* ignore malformed temporary state */ }
+      let keyboardPending = null;
+      try { keyboardPending = JSON.parse(sessionStorage.getItem(keyboardBoardStorageKey) || 'null'); } catch (_) { /* ignore malformed temporary state */ }
       const routeKey = stationId.toLowerCase() + '/' + currentBoard.boardId.toLowerCase();
       const selectedTitle = pending && pending.stationId === stationId && Date.now() - pending.at < 120000
         ? pending.title : (currentBoardTitles.get(routeKey) || '');
@@ -189,6 +199,19 @@
       }
       const socialTitle = document.querySelector('meta[property="og:title"]')?.content || '';
       const nickname = stationNicknameFromTitles(document.title, socialTitle);
+      if (keyboardPending && keyboardPending.viaKeyboard === true &&
+          String(keyboardPending.stationId || '').toLowerCase() === stationId.toLowerCase() &&
+          Date.now() - Number(keyboardPending.at || 0) < 5 * 60 * 1000 &&
+          (!keyboardPending.boardId || String(keyboardPending.boardId).toLowerCase() === currentBoard.boardId.toLowerCase()) &&
+          (!keyboardPending.title || !selectedTitle || keyboardPending.title === selectedTitle)) {
+        keyboardPending.boardId = currentBoard.boardId;
+        keyboardPending.writeUrl = currentBoard.writeUrl;
+        keyboardPending.nickname = keyboardPending.nickname || nickname;
+        keyboardPending.at = Date.now();
+        try { sessionStorage.setItem(keyboardBoardStorageKey, JSON.stringify(keyboardPending)); }
+        catch (_) { /* Space shortcut simply remains unavailable without session storage. */ }
+        log('keyboard-board-route-confirmed', { stationId: stationId, boardId: currentBoard.boardId, nicknameFound: Boolean(keyboardPending.nickname) });
+      }
       const pendingWrite = {
         stationId: stationId,
         boardId: currentBoard.boardId,
@@ -244,7 +267,7 @@
         .summary{font-size:12px;color:#526078;margin:0 0 9px}.duplicate-status{background:#f1f5f9;border:1px solid #dbe3ec;padding:8px;border-radius:8px;color:#475569;font-size:12px;margin:0 0 9px}.duplicate-status.found{background:#fff1f0;border-color:#ffc9c3;color:#9b2419;font-weight:700}.duplicate-status.clear{background:#ecfdf3;border-color:#bbf7d0;color:#166534}.duplicate-status button{margin-left:6px;padding:2px 6px;font-size:11px}.warning{background:#fff8e7;border:1px solid #f3dda0;padding:8px;border-radius:8px;color:#674d00;font-size:12px;margin:8px 0}
         .row{border:1px solid #e1e7ef;border-radius:10px;padding:9px;margin:8px 0}.title{font-weight:700;overflow-wrap:anywhere}.meta{font-size:11px;color:#5b6679;margin:3px 0 8px}
         .actions{display:flex;gap:6px;flex-wrap:wrap}.action{display:inline-block;text-decoration:none;color:#0755b8;border:1px solid #cbd5e1;background:white;border-radius:8px;padding:6px 9px;font-size:12px}
-        .badge{display:inline-block;font-size:10px;padding:2px 6px;border-radius:999px;margin-left:5px;background:#e9f2ff;color:#0755b8}.badge.low{background:#fff2d6;color:#805400}
+        .badge{display:inline-block;font-size:10px;padding:2px 6px;border-radius:999px;margin-left:5px;background:#e9f2ff;color:#0755b8}.badge.low{background:#fff2d6;color:#805400}.hotkey{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;margin-right:6px;border:1px solid #b8c9e4;border-radius:5px;background:#f4f8ff;color:#0755b8;font-size:11px;font-weight:750;vertical-align:1px}
         .empty{padding:14px 8px;color:#596579;font-size:13px}.footer{font-size:10px;color:#718096;padding:7px 12px;border-top:1px solid #edf0f5}
       </style>
       <section class="panel" aria-label="SOOP 홍보 게시판 찾기">
@@ -544,10 +567,13 @@
       safeItems.map((item) => Object.assign({}, item, { entryType: 'link' }))
         .concat(safeButtons.map((item) => Object.assign({}, item, { entryType: 'menu-button' })))
     );
-    const rows = orderedItems.map((item) => {
+    activeShortcutEntries = orderedItems;
+    const rows = orderedItems.map((item, shortcutIndex) => {
+      const shortcutNumber = shortcutIndex === 9 ? '0' : String(shortcutIndex + 1);
+      const shortcutBadge = '<span class="hotkey">' + shortcutNumber + '</span>';
       const low = item.kind === 'review';
       if (item.entryType === 'menu-button') {
-      return '<article class="row"><div class="title">' + escapeHtml(item.title) + '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
+      return '<article class="row"><div class="title">' + shortcutBadge + escapeHtml(item.title) + '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
         '<div class="meta">' + escapeHtml(item.reason) + ' · 메뉴 버튼에서 게시판 주소 확인 전</div>' +
         '<div class="actions"><button type="button" data-open-board-index="' + item.buttonIndex + '">게시판 확인</button></div></article>';
       }
@@ -559,7 +585,7 @@
       const addToPromoAction = item.currentRoute && hasWriteUrl && panelNickname
         ? '<button type="button" data-add-promo-candidate="true" data-nickname="' + escapeHtml(panelNickname) + '" data-write-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">홍보 리스트에 추가</button>'
         : '';
-      return '<article class="row"><div class="title">' + escapeHtml(item.title || '(이름 없음)') +
+      return '<article class="row"><div class="title">' + shortcutBadge + escapeHtml(item.title || '(이름 없음)') +
         '<span class="badge ' + (low ? 'low' : '') + '">' + (low ? '확인 필요' : item.confidence + ' 후보') + '</span></div>' +
         '<div class="meta">' + escapeHtml(item.reason) + (hasWriteUrl ? ' · 게시판 ID ' + escapeHtml(item.boardId) : '') + '</div>' +
         '<div class="actions">' + (hasWriteUrl ? '<a class="action" href="' + escapeHtml(item.boardUrl) + '">게시판 확인</a>' : '') +
@@ -629,6 +655,98 @@
     }, 450);
   }
 
+  function isTypingTarget(target) {
+    if (!target || !target.closest) return false;
+    return Boolean(target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]'));
+  }
+
+  function openShortcutCandidate(index) {
+    const item = activeShortcutEntries[index];
+    if (!item) return false;
+    const stationId = stationIdFromPath(location.pathname);
+    const nickname = stationNicknameFromTitles(document.title, document.querySelector('meta[property="og:title"]')?.content || '');
+    const marker = {
+      stationId: stationId,
+      boardId: item.entryType === 'link' ? item.boardId : '',
+      title: item.title || '',
+      nickname: nickname,
+      writeUrl: item.entryType === 'link' ? item.writeUrl : '',
+      at: Date.now(),
+      viaKeyboard: true,
+    };
+    try {
+      sessionStorage.setItem(keyboardBoardStorageKey, JSON.stringify(marker));
+      sessionStorage.setItem(pendingBoardStorageKey, JSON.stringify({ stationId: stationId, title: item.title, at: Date.now() }));
+    } catch (error) {
+      log('keyboard-board-open-failed', { reason: 'session-storage-unavailable', error: String(error && error.message || error) });
+      return false;
+    }
+    log('keyboard-board-open-requested', { index: index, key: index === 9 ? '0' : String(index + 1), stationId: stationId, boardId: marker.boardId, title: marker.title });
+    if (item.entryType === 'link') {
+      location.href = item.boardUrl;
+      return true;
+    }
+    if (!item.element || !item.element.isConnected) {
+      log('keyboard-board-open-failed', { index: index, reason: 'source-button-unavailable' });
+      return false;
+    }
+    item.element.click();
+    return true;
+  }
+
+  async function addKeyboardConfirmedBoard() {
+    const current = extractCurrentBoard(location.pathname, stationIdFromPath(location.pathname));
+    if (!current) return false;
+    let marker = null;
+    try { marker = JSON.parse(sessionStorage.getItem(keyboardBoardStorageKey) || 'null'); } catch (_) { /* ignore malformed temporary state */ }
+    if (!marker || marker.viaKeyboard !== true ||
+        String(marker.stationId || '').toLowerCase() !== current.stationId.toLowerCase() ||
+        String(marker.boardId || '').toLowerCase() !== current.boardId.toLowerCase() ||
+        Date.now() - Number(marker.at || 0) > 5 * 60 * 1000 || !marker.nickname || !marker.writeUrl) return false;
+    log('keyboard-promo-add-requested', { stationId: current.stationId, boardId: current.boardId });
+    try {
+      const result = await root.chrome.runtime.sendMessage({
+        type: 'addPromoCandidateFromConfirmedPage',
+        nickname: marker.nickname,
+        pageUrl: location.href,
+        writeUrl: marker.writeUrl,
+      });
+      if (result && result.ok) {
+        sessionStorage.removeItem(keyboardBoardStorageKey);
+        showWriteCopyNotice('홍보 리스트에 추가했습니다.', false);
+        log('keyboard-promo-add-succeeded', { stationId: current.stationId, boardId: current.boardId });
+      } else {
+        showWriteCopyNotice(String(result && result.message || '홍보 리스트에 추가하지 못했습니다.'), true);
+        log('keyboard-promo-add-failed', { stationId: current.stationId, boardId: current.boardId, reason: String(result && result.reason || 'unknown') });
+      }
+    } catch (error) {
+      showWriteCopyNotice('관리자 센터 연결에 실패했습니다. 센터 탭과 확장 프로그램을 확인해주세요.', true);
+      log('keyboard-promo-add-failed', { stationId: current.stationId, boardId: current.boardId, reason: 'extension-message-failed', error: String(error && error.message || error) });
+    }
+    return true;
+  }
+
+  window.addEventListener('keydown', (event) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || isTypingTarget(event.target)) return;
+    const shortcutIndex = shortcutIndexFromKey(event.code || event.key);
+    if (shortcutIndex >= 0 && stationIdFromPath(location.pathname)) {
+      const host = document.getElementById(ROOT_ID);
+      if (!host || host.dataset.closed === 'true' || duplicateLookupState.state === 'found' || !activeShortcutEntries[shortcutIndex]) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openShortcutCandidate(shortcutIndex);
+      return;
+    }
+    if ((event.code === 'Space' || event.key === ' ') && extractCurrentBoard(location.pathname, stationIdFromPath(location.pathname))) {
+      let marker = null;
+      try { marker = JSON.parse(sessionStorage.getItem(keyboardBoardStorageKey) || 'null'); } catch (_) { /* ignore malformed temporary state */ }
+      if (!marker || marker.viaKeyboard !== true || Date.now() - Number(marker.at || 0) > 5 * 60 * 1000) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void addKeyboardConfirmedBoard();
+    }
+  }, true);
+
   log('scanner-initialized', { href: location.origin + location.pathname });
   window.addEventListener('pointermove', (event) => {
     lastPointerPosition = { x: event.clientX, y: event.clientY };
@@ -637,6 +755,15 @@
     const host = document.getElementById(ROOT_ID);
     if (host) positionPanelNearPointer(host);
   }, { passive: true });
+  window.addEventListener('pointerdown', () => {
+    try {
+      const marker = JSON.parse(sessionStorage.getItem(keyboardBoardStorageKey) || 'null');
+      if (marker && marker.viaKeyboard === true) {
+        sessionStorage.removeItem(keyboardBoardStorageKey);
+        log('keyboard-board-shortcut-expired-by-pointer', { stationId: marker.stationId, boardId: marker.boardId || '' });
+      }
+    } catch (_) { /* keyboard-only add remains disabled if session storage is unavailable */ }
+  }, true);
   scheduleScan('initial');
   mutationObserver = new MutationObserver(() => scheduleScan('dom-mutation'));
   if (document.documentElement) mutationObserver.observe(document.documentElement, { childList: true, subtree: true });
