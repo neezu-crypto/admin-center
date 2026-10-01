@@ -20,9 +20,11 @@ test('다른 방송국·다른 도메인·글 상세 경로를 게시판으로 �
   assert.equal(finder.extractBoardLink('/station/demo123/post/98765', 'demo123'), null);
 });
 
-test('뻐꾸기·추천은 우선 후보로 분류한다', () => {
+test('뻐꾸기·추천·게임 추천은 우선 후보로 분류한다', () => {
   assert.equal(finder.classifyBoardTitle('🦉 뻐꾸기동지').kind, 'candidate');
   assert.equal(finder.classifyBoardTitle('게임 추천').confidence, '높음');
+  assert.equal(finder.classifyBoardTitle('게임추천').confidence, '높음');
+  assert.match(finder.classifyBoardTitle('게임 추천 게시판').reason, /게임 추천/);
 });
 
 test('제안·요청은 후보로 표시하되 확인이 필요하다고 분류한다', () => {
