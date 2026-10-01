@@ -45,32 +45,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'addPromoCandidateFromWritePage') {
     let senderUrl;
+    let pageUrl;
     let writeUrl;
-    try { senderUrl = new URL(sender.url || ''); } catch (_) { senderUrl = null; }
+    try { senderUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { senderUrl = null; }
+    try { pageUrl = new URL(String(message.pageUrl || '')); } catch (_) { pageUrl = null; }
     try { writeUrl = new URL(String(message.writeUrl || '')); } catch (_) { writeUrl = null; }
-    const senderMatch = senderUrl && /^\/station\/([A-Za-z0-9]{2,20})\/post\/write\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(senderUrl.pathname);
+    // SOOP SPA navigation can leave sender.url on the prior board route; validate
+    // the content script's current location as well as the extension sender origin.
+    const pageMatch = pageUrl && /^\/station\/([A-Za-z0-9]{2,20})\/post\/write\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(pageUrl.pathname);
     const writeMatch = writeUrl && /^\/station\/([A-Za-z0-9]{2,20})\/post\/write\/([A-Za-z0-9_-]{1,80})\/?$/i.exec(writeUrl.pathname);
     const nickname = typeof message.nickname === 'string' ? message.nickname.trim() : '';
     const sameSoopHost = (url) => url && url.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(url.hostname);
     if (!Number.isInteger(sender.tab && sender.tab.id) || !sameSoopHost(senderUrl) || !sameSoopHost(writeUrl) ||
-        !senderMatch || !writeMatch || senderMatch[1].toLowerCase() !== writeMatch[1].toLowerCase() ||
-        senderMatch[2] !== writeMatch[2] || writeUrl.search || writeUrl.hash || !nickname || nickname.length > 100) {
-      trace('', 'promo-candidate-add-rejected', { reason: 'invalid-write-page-request', nicknameLength: nickname.length });
+        !sameSoopHost(pageUrl) || !pageMatch || !writeMatch || pageMatch[1].toLowerCase() !== writeMatch[1].toLowerCase() ||
+        pageMatch[2] !== writeMatch[2] || writeUrl.search || writeUrl.hash || !nickname || nickname.length > 100) {
+      trace('', 'promo-candidate-add-rejected', {
+        reason: 'invalid-write-page-request', nicknameLength: nickname.length,
+        senderHostValid: !!sameSoopHost(senderUrl), pageRouteValid: !!pageMatch,
+        writeUrlValid: !!writeMatch, pageMatchesWriteUrl: !!(pageMatch && writeMatch &&
+          pageMatch[1].toLowerCase() === writeMatch[1].toLowerCase() && pageMatch[2] === writeMatch[2]),
+      });
       sendResponse({ ok: false, reason: 'invalid-request', message: '현재 SOOP 글쓰기 화면의 정보가 올바르지 않습니다.' });
       return false;
     }
     findAdminTab().then((adminTab) => {
       if (!adminTab) {
-        trace('', 'promo-candidate-add-unavailable', { reason: 'admin-center-not-open', stationId: senderMatch[1] });
+        trace('', 'promo-candidate-add-unavailable', { reason: 'admin-center-not-open', stationId: pageMatch[1] });
         sendResponse({ ok: false, reason: 'admin-center-not-open', message: '관리자 센터 탭을 열고 로그인한 뒤 다시 시도해주세요.' });
         return;
       }
-      trace('', 'promo-candidate-add-forwarded', { stationId: senderMatch[1], adminTabId: adminTab.id });
+      trace('', 'promo-candidate-add-forwarded', { stationId: pageMatch[1], adminTabId: adminTab.id });
       chrome.tabs.sendMessage(adminTab.id, {
         type: 'addStreamerPromoCandidate',
         nickname: nickname,
-        soopId: senderMatch[1],
-        writeUrl: 'https://www.sooplive.com' + senderUrl.pathname,
+        soopId: pageMatch[1],
+        writeUrl: 'https://www.sooplive.com' + pageUrl.pathname,
       }).then(sendResponse).catch((error) => {
         trace('', 'promo-candidate-add-unavailable', { reason: 'admin-bridge-unavailable', error: String(error && error.message || error) });
         sendResponse({ ok: false, reason: 'admin-bridge-unavailable', message: '관리자 센터 탭을 새로고침한 뒤 다시 시도해주세요.' });

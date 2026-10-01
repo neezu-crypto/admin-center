@@ -286,6 +286,7 @@
         root.chrome.runtime.sendMessage({
           type: 'addPromoCandidateFromWritePage',
           nickname: addDetails.nickname,
+          pageUrl: location.href,
           writeUrl: addDetails.writeUrl,
         }).then(function (result) {
           if (result && result.ok) {

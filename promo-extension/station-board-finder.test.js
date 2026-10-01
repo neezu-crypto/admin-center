@@ -27,6 +27,9 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   assert.match(finderSource, /홍보 리스트에 추가/);
   assert.match(finderSource, /type:\s*'addPromoCandidateFromWritePage'/);
   assert.match(workerSource, /type:\s*'addStreamerPromoCandidate'/);
+  assert.match(workerSource, /message\.pageUrl/);
+  assert.match(workerSource, /pageMatchesWriteUrl/);
+  assert.match(finderSource, /pageUrl:\s*location\.href/);
   assert.match(adminSource, /addStreamerPromoCandidateFn\(/);
   assert.match(functionSource, /adminCenter\/streamerPromoCandidates/);
   assert.match(functionSource, /addStreamerPromoCandidate,/);
