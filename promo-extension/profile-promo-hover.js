@@ -61,20 +61,32 @@
   const cache = new Map();
   let activeAnchor = null;
   let activeToken = 0;
+  let activeProfile = null;
   let pointer = { x: 0, y: 0 };
   let hideTimer = 0;
   let host = null;
   let tooltip = null;
+  let statusLabel = null;
+  let actionButton = null;
+  let currentStatus = null;
   const CACHE_TTL_MS = 30000;
 
   function ensureTooltip() {
     if (host && host.isConnected) return;
     host = document.createElement('div');
     host.id = 'soop-promo-profile-hover';
-    host.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;left:0;top:0;';
-    const shadow = host.attachShadow({ mode: 'closed' });
-    shadow.innerHTML = '<div style="display:none;max-width:280px;padding:8px 11px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#172033;box-shadow:0 6px 22px #17203330;font:600 13px/1.4 system-ui,-apple-system,sans-serif;white-space:normal"></div>';
+    host.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:auto;left:0;top:0;';
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<div style="display:none;max-width:300px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#172033;box-shadow:0 6px 22px #17203330;font:600 13px/1.4 system-ui,-apple-system,sans-serif;white-space:normal;align-items:center;gap:9px"><span></span><button type="button" style="display:none;flex:none;border:1px solid #cbd5e1;border-radius:7px;background:#f8fafc;color:#0755b8;padding:4px 7px;font:600 11px system-ui,-apple-system,sans-serif;cursor:pointer"></button></div>';
     tooltip = shadow.querySelector('div');
+    statusLabel = shadow.querySelector('span');
+    actionButton = shadow.querySelector('button');
+    actionButton.addEventListener('click', () => { void toggleExclusion(); });
+    host.addEventListener('pointerenter', () => clearTimeout(hideTimer));
+    host.addEventListener('pointerleave', () => {
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(hide, 90);
+    });
     document.documentElement.appendChild(host);
   }
 
@@ -90,11 +102,20 @@
     host.style.top = Math.max(margin, Math.min(y, window.innerHeight - rect.height - margin)) + 'px';
   }
 
-  function show(text, color) {
+  function show(text, color, action) {
     ensureTooltip();
-    tooltip.textContent = text;
+    statusLabel.textContent = text;
     tooltip.style.color = color || '#172033';
-    tooltip.style.display = 'block';
+    tooltip.style.display = 'flex';
+    if (action) {
+      actionButton.textContent = action.label;
+      actionButton.style.display = 'inline-block';
+      actionButton.disabled = action.disabled === true;
+      actionButton.style.color = action.color || '#0755b8';
+    } else {
+      actionButton.style.display = 'none';
+      actionButton.disabled = false;
+    }
     placeTooltip();
   }
 
@@ -107,15 +128,61 @@
 
   function hide() {
     activeAnchor = null;
+    activeProfile = null;
     activeToken += 1;
+    currentStatus = null;
     if (tooltip) tooltip.style.display = 'none';
+  }
+
+  function presentLookupStatus(status, nickname) {
+    currentStatus = status;
+    if (status === 'registered') {
+      show('✅ 홍보 리스트 등록됨' + (nickname ? ': ' + nickname : ''), '#166534');
+    } else if (status === 'excluded') {
+      show('⛔ 제외된 리스트' + (nickname ? ': ' + nickname : ''), '#9b2419', { label: '제외 취소', color: '#9b2419' });
+    } else if (status === 'unregistered') {
+      show('홍보 리스트 미등록', '#526078', { label: '후보에서 제외' });
+    } else {
+      show('홍보 리스트를 확인할 수 없습니다.', '#9b2419');
+    }
+  }
+
+  async function toggleExclusion() {
+    if (!activeProfile || (currentStatus !== 'excluded' && currentStatus !== 'unregistered')) return;
+    const profile = activeProfile;
+    const nextExcluded = currentStatus !== 'excluded';
+    const cacheKey = profile.stationId.toLowerCase() + '|' + profile.nickname.normalize('NFC').toLocaleLowerCase();
+    const token = activeToken;
+    show(nextExcluded ? '제외 목록에 저장 중…' : '제외 해제 중…', '#526078', { label: '저장 중…', disabled: true });
+    try {
+      const result = await root.chrome.runtime.sendMessage({
+        type: 'setStreamerPromoExclusion',
+        lookupContext: 'profile-hover',
+        requestId: 'promo-exclude-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 7),
+        stationId: profile.stationId,
+        nickname: profile.nickname,
+        excluded: nextExcluded,
+      });
+      if (!result || result.ok !== true) throw new Error(result && result.message || '제외 상태를 저장하지 못했습니다.');
+      const status = result.excluded ? 'excluded' : 'unregistered';
+      cache.set(cacheKey, { at: Date.now(), status: status, nickname: profile.nickname });
+      window.postMessage({
+        __soopPromoExclusionChanged: true,
+        stationId: profile.stationId,
+        nickname: profile.nickname,
+        excluded: result.excluded === true,
+      }, location.origin);
+      if (token === activeToken && activeAnchor && activeAnchor.isConnected) presentLookupStatus(status, profile.nickname);
+    } catch (error) {
+      if (token === activeToken) show(String(error && error.message || '제외 상태를 저장하지 못했습니다.'), '#9b2419', { label: nextExcluded ? '다시 시도' : '다시 시도' });
+    }
   }
 
   function lookupProfile(stationId, nickname, token) {
     const key = stationId.toLowerCase() + '|' + nickname.normalize('NFC').toLocaleLowerCase();
     const cached = cache.get(key);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-      if (token === activeToken) show(cached.text, cached.color);
+      if (token === activeToken) presentLookupStatus(cached.status, cached.nickname || nickname);
       return;
     }
     show('홍보 리스트 등록 여부 확인 중…', '#526078');
@@ -130,24 +197,22 @@
       stationId: stationId,
       nickname: nickname,
     }).then((result) => {
-      let text;
-      let color;
+      let status;
       if (!result || result.ok !== true || typeof result.found !== 'boolean') {
-        text = '홍보 리스트를 확인할 수 없습니다.';
-        color = '#9b2419';
+        status = 'unavailable';
       } else if (result.found) {
-        text = '✅ 홍보 리스트 등록됨' + (result.nickname ? ': ' + result.nickname : '');
-        color = '#166534';
+        status = 'registered';
+      } else if (result.excluded === true) {
+        status = 'excluded';
       } else {
-        text = '홍보 리스트 미등록';
-        color = '#526078';
+        status = 'unregistered';
       }
-      cache.set(key, { at: Date.now(), text: text, color: color });
-      if (token === activeToken && activeAnchor && activeAnchor.isConnected) show(text, color);
+      const matchedNickname = result && result.nickname || nickname;
+      cache.set(key, { at: Date.now(), status: status, nickname: matchedNickname });
+      if (token === activeToken && activeAnchor && activeAnchor.isConnected) presentLookupStatus(status, matchedNickname);
     }).catch(() => {
-      const text = '홍보 리스트 확인에 실패했습니다.';
-      cache.set(key, { at: Date.now(), text: text, color: '#9b2419' });
-      if (token === activeToken && activeAnchor && activeAnchor.isConnected) show(text, '#9b2419');
+      cache.set(key, { at: Date.now(), status: 'unavailable', nickname: nickname });
+      if (token === activeToken && activeAnchor && activeAnchor.isConnected) presentLookupStatus('unavailable', nickname);
     });
   }
 
@@ -159,6 +224,7 @@
     activeAnchor = profile.anchor;
     const token = ++activeToken;
     const nickname = nicknameFromProfileAnchor(profile.anchor);
+    activeProfile = { stationId: profile.stationId, nickname: nickname };
     if (!nickname) {
       show('스트리머 닉네임을 확인할 수 없습니다.', '#9b2419');
       return;
@@ -174,6 +240,7 @@
   document.addEventListener('pointerout', (event) => {
     if (!activeAnchor) return;
     if (event.relatedTarget && activeAnchor.contains(event.relatedTarget)) return;
+    if (host && event.relatedTarget && (event.relatedTarget === host || host.contains(event.relatedTarget))) return;
     if (event.target === activeAnchor || activeAnchor.contains(event.target)) {
       clearTimeout(hideTimer);
       hideTimer = setTimeout(hide, 90);

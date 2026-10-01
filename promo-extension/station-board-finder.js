@@ -412,12 +412,13 @@
     if (!status) return;
     const item = duplicateLookupState;
     Array.from(status.parentElement.children).forEach((child) => {
-      if (child !== status) child.hidden = item.state === 'found';
+      if (child !== status) child.hidden = item.state === 'found' || item.state === 'excluded';
     });
-    status.className = 'duplicate-status' + (item.state === 'found' ? ' found' : item.state === 'clear' ? ' clear' : '');
+    status.className = 'duplicate-status' + (item.state === 'found' || item.state === 'excluded' ? ' found' : item.state === 'clear' ? ' clear' : '');
     status.replaceChildren();
     if (item.state === 'checking') status.textContent = '홍보 리스트에서 닉네임 중복을 확인하는 중…';
     else if (item.state === 'found') status.textContent = '⚠ 이미 홍보 리스트에 등록된 닉네임입니다' + (item.nickname ? ': ' + item.nickname : '') + '.';
+    else if (item.state === 'excluded') status.textContent = '⛔ 홍보 후보 제외 목록에 등록된 스트리머입니다' + (item.nickname ? ': ' + item.nickname : '') + '.';
     else if (item.state === 'clear') status.textContent = '홍보 리스트에서 이 닉네임을 찾지 못했습니다.';
     else if (item.state === 'unavailable') {
       status.appendChild(document.createTextNode('홍보 리스트 중복 확인을 할 수 없습니다. 관리자 센터 탭을 열고 로그인한 뒤 다시 확인해주세요.'));
@@ -456,7 +457,7 @@
         duplicateLookupState = { state: 'unavailable', requestNickname: cleanNickname, reason: String(result && result.reason || 'no-result') };
         log('promo-duplicate-lookup-failed', { requestId: requestId, stationId: stationId, reason: duplicateLookupState.reason });
       } else {
-        duplicateLookupState = { state: result.found ? 'found' : 'clear', nickname: String(result.nickname || ''), requestNickname: cleanNickname, reason: '' };
+        duplicateLookupState = { state: result.found ? 'found' : result.excluded === true ? 'excluded' : 'clear', nickname: String(result.nickname || ''), requestNickname: cleanNickname, reason: '' };
         log('promo-duplicate-lookup-succeeded', { requestId: requestId, stationId: stationId, found: result.found, matchMethod: String(result.matchMethod || '') });
       }
       renderDuplicateStatus();
@@ -731,7 +732,7 @@
     const shortcutIndex = shortcutIndexFromKey(event.code || event.key);
     if (shortcutIndex >= 0 && stationIdFromPath(location.pathname)) {
       const host = document.getElementById(ROOT_ID);
-      if (!host || host.dataset.closed === 'true' || duplicateLookupState.state === 'found' || !activeShortcutEntries[shortcutIndex]) return;
+      if (!host || host.dataset.closed === 'true' || duplicateLookupState.state === 'found' || duplicateLookupState.state === 'excluded' || !activeShortcutEntries[shortcutIndex]) return;
       event.preventDefault();
       event.stopPropagation();
       openShortcutCandidate(shortcutIndex);
@@ -746,6 +747,18 @@
       void addKeyboardConfirmedBoard();
     }
   }, true);
+
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    const stationId = stationIdFromPath(location.pathname);
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__soopPromoExclusionChanged !== true || !stationId ||
+        String(data.stationId || '').toLowerCase() !== stationId.toLowerCase()) return;
+    duplicateLookupKey = '';
+    duplicateLookupState = { state: 'idle', nickname: '', reason: '' };
+    checkPromoDuplicate(stationId, String(data.nickname || ''));
+    log('promo-exclusion-status-refreshed', { stationId: stationId, excluded: data.excluded === true });
+  });
 
   log('scanner-initialized', { href: location.origin + location.pathname });
   window.addEventListener('pointermove', (event) => {

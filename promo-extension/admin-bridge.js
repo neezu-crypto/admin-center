@@ -3,6 +3,7 @@
   const completionReplies = new Map();
   const duplicateLookupReplies = new Map();
   const candidateAddReplies = new Map();
+  const promoExclusionReplies = new Map();
   let extensionContextUnavailable = false;
 
   function trace(attemptId, stage, details) {
@@ -88,6 +89,29 @@
       }, location.origin);
       return true;
     }
+    if (message && message.type === 'setStreamerPromoExclusion' &&
+        typeof message.requestId === 'string' && typeof message.nickname === 'string' &&
+        typeof message.soopId === 'string' && typeof message.excluded === 'boolean') {
+      const timeout = setTimeout(function () {
+        promoExclusionReplies.delete(message.requestId);
+        trace('', 'admin-bridge-promo-exclusion-timeout', { requestId: message.requestId, soopId: message.soopId });
+        sendResponse({ ok: false, reason: 'admin-center-timeout', message: '관리자 센터 응답 시간이 초과되었습니다.' });
+      }, 20000);
+      promoExclusionReplies.set(message.requestId, function (result) {
+        clearTimeout(timeout);
+        promoExclusionReplies.delete(message.requestId);
+        sendResponse(result || { ok: false, reason: 'empty-admin-response' });
+      });
+      trace(message.requestId, 'admin-bridge-promo-exclusion-received', { soopId: message.soopId, excluded: message.excluded });
+      window.postMessage({
+        __soopPromoExclusionRequest: true,
+        requestId: message.requestId,
+        nickname: message.nickname,
+        soopId: message.soopId,
+        excluded: message.excluded,
+      }, location.origin);
+      return true;
+    }
     if (!message || message.type !== 'markPromoCompleted' ||
         typeof message.requestId !== 'string' || typeof message.promoKey !== 'string') return false;
     trace(message.attemptId, 'admin-bridge-received-completion', { requestId: message.requestId });
@@ -131,7 +155,18 @@
         trace('', data.ok === true ? 'admin-bridge-duplicate-lookup-succeeded' : 'admin-bridge-duplicate-lookup-failed', {
           requestId: data.requestId, found: data.found === true, reason: String(data.reason || ''),
         });
-        duplicateReply({ ok: data.ok === true, found: data.found === true, nickname: String(data.nickname || ''), matchMethod: String(data.matchMethod || ''), reason: String(data.reason || '') });
+        duplicateReply({ ok: data.ok === true, found: data.found === true, excluded: data.excluded === true, nickname: String(data.nickname || ''), matchMethod: String(data.matchMethod || ''), reason: String(data.reason || '') });
+      }
+      return;
+    }
+    if (event.source === window && event.origin === location.origin && data &&
+        data.__soopPromoExclusionResult === true && typeof data.requestId === 'string') {
+      const exclusionReply = promoExclusionReplies.get(data.requestId);
+      if (exclusionReply) {
+        trace(data.requestId, data.ok === true ? 'admin-bridge-promo-exclusion-succeeded' : 'admin-bridge-promo-exclusion-failed', {
+          soopId: String(data.soopId || ''), excluded: data.excluded === true, reason: String(data.reason || ''),
+        });
+        exclusionReply({ ok: data.ok === true, excluded: data.excluded === true, nickname: String(data.nickname || ''), reason: String(data.reason || ''), message: String(data.message || '') });
       }
       return;
     }

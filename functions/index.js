@@ -739,8 +739,24 @@ const listStreamerPromoLinks = onCall(async (request) => {
     await db.ref().update(cleanupUpdates);
   }
   const excludedPromoIds = excludedPromoSnap.val() || {};
-  const streamers = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val()).filter(function (entry) {
-    return excludedPromoIds[entry.key] !== true && excludedPromoIds[entry.soopId] !== true;
+  const knownPromoEntries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+  const isExcluded = function (entry) {
+    return excludedPromoIds[entry.key] === true || (entry.soopId && excludedPromoIds[entry.soopId] === true);
+  };
+  const excludedStreamers = Object.keys(excludedPromoIds).filter(function (key) {
+    return excludedPromoIds[key] === true;
+  }).map(function (key) {
+    const entry = knownPromoEntries.find(function (item) {
+      return String(item.key || '').toLowerCase() === key.toLowerCase() || String(item.soopId || '').toLowerCase() === key.toLowerCase();
+    });
+    return {
+      key: entry ? entry.key : key,
+      nickname: entry ? String(entry.nickname || '') : '',
+      soopId: entry ? String(entry.soopId || normalizeSoopId(key)) : normalizeSoopId(key),
+    };
+  });
+  const streamers = knownPromoEntries.filter(function (entry) {
+    return !isExcluded(entry);
   });
   streamers.sort(function (a, b) {
     return (a.nickname || a.soopId).localeCompare((b.nickname || b.soopId), 'ko') || a.soopId.localeCompare(b.soopId);
@@ -759,6 +775,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
         updatedAt: saved.updatedAt || null,
       };
     }),
+    excludedStreamers: excludedStreamers,
     recentOpened: recentOpened || null,
   };
 });
@@ -807,6 +824,39 @@ const addStreamerPromoCandidate = onCall(async (request) => {
   });
   await logToAdminAuditLog(db, request, '스트리머 홍보 후보 추가', nickname + ' (@' + soopId + ')');
   return { ok: true, nickname: nickname, soopId: soopId, writeUrl: writeUrl };
+});
+
+const setStreamerPromoExclusion = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data || {};
+  const nickname = String(data.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim();
+  const soopId = normalizeSoopId(data.soopId);
+  const excluded = data.excluded === true;
+  if (!nickname || nickname.length > 100 || !soopId) {
+    throw new HttpsError('invalid-argument', '스트리머 닉네임과 SOOP 아이디를 확인해주세요.');
+  }
+
+  const db = getDatabase();
+  const exclusionRef = db.ref('adminCenter/streamerPromoExcluded/' + soopId);
+  if (excluded) {
+    const [verifiedSnap, candidatesSnap] = await Promise.all([
+      db.ref('streamerVerifications').get(),
+      db.ref('adminCenter/streamerPromoCandidates').get(),
+    ]);
+    const known = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+    const registered = known.find(function (entry) {
+      return String(entry.soopId || '').toLowerCase() === soopId ||
+        String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === nickname.toLocaleLowerCase();
+    });
+    if (registered) {
+      throw new HttpsError('already-exists', '이미 홍보 리스트에 등록된 스트리머는 제외 목록에 추가할 수 없습니다.');
+    }
+    await exclusionRef.set(true);
+  } else {
+    await exclusionRef.remove();
+  }
+  await logToAdminAuditLog(db, request, excluded ? '홍보 후보 스트리머 제외' : '홍보 후보 스트리머 제외 해제', nickname + ' (@' + soopId + ')');
+  return { ok: true, excluded: excluded, nickname: nickname, soopId: soopId };
 });
 
 const saveStreamerPromoLink = onCall(async (request) => {
@@ -2908,6 +2958,7 @@ module.exports = {
   migratePromotedStreamers,
   listStreamerPromoLinks,
   addStreamerPromoCandidate,
+  setStreamerPromoExclusion,
   saveStreamerPromoLink,
   markStreamerPromoLinkOpened,
   setStreamerPromoCompletion,

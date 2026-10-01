@@ -135,6 +135,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'setStreamerPromoExclusion') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || ''); } catch (_) { sourceUrl = null; }
+    const soopId = typeof message.stationId === 'string' ? message.stationId.trim() : '';
+    const nickname = typeof message.nickname === 'string' ? message.nickname.trim() : '';
+    const excluded = message.excluded === true;
+    const requestId = typeof message.requestId === 'string' ? message.requestId : '';
+    const validSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
+      (sourceUrl.hostname === 'sooplive.com' || sourceUrl.hostname === 'www.sooplive.com') &&
+      message.lookupContext === 'profile-hover';
+    if (!validSender || !/^[A-Za-z0-9]{2,20}$/.test(soopId) || !nickname || nickname.length > 100 ||
+        typeof message.excluded !== 'boolean' || !requestId || requestId.length > 120) {
+      trace(requestId, 'promo-exclusion-rejected', { validSender: !!validSender, soopIdValid: /^[A-Za-z0-9]{2,20}$/.test(soopId), nicknameLength: nickname.length });
+      sendResponse({ ok: false, reason: 'invalid-request', message: '스트리머 정보를 확인할 수 없습니다.' });
+      return false;
+    }
+    findAdminTab().then((adminTab) => {
+      if (!adminTab) {
+        trace(requestId, 'promo-exclusion-unavailable', { reason: 'admin-center-not-open', soopId: soopId });
+        sendResponse({ ok: false, reason: 'admin-center-not-open', message: '관리자 센터를 열고 로그인한 뒤 다시 시도해주세요.' });
+        return;
+      }
+      trace(requestId, 'promo-exclusion-forwarded', { soopId: soopId, excluded: excluded, adminTabId: adminTab.id });
+      chrome.tabs.sendMessage(adminTab.id, {
+        type: 'setStreamerPromoExclusion',
+        requestId: requestId,
+        nickname: nickname,
+        soopId: soopId,
+        excluded: excluded,
+      }).then(sendResponse).catch((error) => {
+        trace(requestId, 'promo-exclusion-failed', { reason: 'admin-bridge-unavailable', error: String(error && error.message || error) });
+        sendResponse({ ok: false, reason: 'admin-bridge-unavailable', message: '관리자 센터를 새로고침한 뒤 다시 시도해주세요.' });
+      });
+    }).catch((error) => {
+      trace(requestId, 'promo-exclusion-failed', { reason: 'admin-tab-search-failed', error: String(error && error.message || error) });
+      sendResponse({ ok: false, reason: 'admin-tab-search-failed', message: '관리자 센터 연결을 확인해주세요.' });
+    });
+    return true;
+  }
+
   if (message.type === 'openPromoDraft') {
     if (!isAllowedAdminSender(sender)) {
       trace(message.attemptId, 'open-request-sender-rejected', {

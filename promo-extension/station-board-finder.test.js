@@ -18,7 +18,7 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   const adminSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const functionSource = fs.readFileSync(path.join(__dirname, '..', 'functions', 'index.js'), 'utf8');
   assert.match(finderSource, /이미 홍보 리스트에 등록된 닉네임입니다/);
-  assert.match(finderSource, /child\.hidden = item\.state === 'found'/);
+  assert.match(finderSource, /child\.hidden = item\.state === 'found' \|\| item\.state === 'excluded'/);
   assert.match(finderSource, /홍보 리스트 중복 확인을 할 수 없습니다/);
   assert.match(finderSource, /type:\s*'checkPromoListDuplicate'/);
   assert.match(workerSource, /type:\s*'lookupStreamerPromoDuplicate'/);
@@ -31,12 +31,15 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   assert.match(workerSource, /message\.pageUrl/);
   assert.match(workerSource, /pageMatchesWriteUrl/);
   assert.match(workerSource, /pageBoardMatch/);
+  assert.match(workerSource, /setStreamerPromoExclusion/);
   assert.match(finderSource, /pageUrl:\s*location\.href/);
   assert.match(finderSource, /data-add-promo-candidate/);
   assert.match(finderSource, /item\.currentRoute && hasWriteUrl && panelNickname/);
   assert.match(adminSource, /addStreamerPromoCandidateFn\(/);
   assert.match(functionSource, /adminCenter\/streamerPromoCandidates/);
   assert.match(functionSource, /addStreamerPromoCandidate,/);
+  assert.match(functionSource, /setStreamerPromoExclusion,/);
+  assert.match(finderSource, /홍보 후보 제외 목록에 등록된 스트리머입니다/);
 });
 
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {
@@ -108,6 +111,9 @@ test('프로필 호버는 SOOP 방송국 링크에서 ID와 닉네임을 판별�
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
   const worker = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
   const hoverSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
+  const bridge = fs.readFileSync(path.join(__dirname, 'admin-bridge.js'), 'utf8');
+  const adminPage = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const functions = fs.readFileSync(path.join(__dirname, '..', 'functions', 'index.js'), 'utf8');
   const hoverScript = manifest.content_scripts.find((entry) => entry.js.includes('profile-promo-hover.js'));
   assert.ok(hoverScript.matches.includes('https://www.sooplive.com/*'));
   assert.equal(profileHover.stationIdFromProfileHref('/station/dommiii', 'https://www.sooplive.com/search?keyword=virtual'), 'dommiii');
@@ -116,8 +122,17 @@ test('프로필 호버는 SOOP 방송국 링크에서 ID와 닉네임을 판별�
   assert.match(hoverSource, /pointerover/);
   assert.match(hoverSource, /홍보 리스트 등록됨/);
   assert.match(hoverSource, /lookupContext:\s*'profile-hover'/);
+  assert.match(hoverSource, /후보에서 제외/);
+  assert.match(hoverSource, /제외된 리스트/);
+  assert.match(hoverSource, /제외 취소/);
   assert.match(worker, /isProfileHoverLookup = message\.lookupContext === 'profile-hover'/);
   assert.match(worker, /isProfileHoverLookup \|\|/);
+  assert.match(worker, /type: 'setStreamerPromoExclusion'/);
+  assert.match(bridge, /__soopPromoExclusionRequest/);
+  assert.match(bridge, /__soopPromoExclusionResult/);
+  assert.match(adminPage, /setStreamerPromoExclusionFn/);
+  assert.match(adminPage, /excludedStreamers/);
+  assert.match(functions, /adminCenter\/streamerPromoExcluded/);
   assert.doesNotMatch(hoverSource, /preventDefault\(\)|stopPropagation\(\)/);
 });
 

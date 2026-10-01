@@ -1119,6 +1119,7 @@
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
   const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
   const addStreamerPromoCandidateFn = httpsCallable(functions, 'addStreamerPromoCandidate');
+  const setStreamerPromoExclusionFn = httpsCallable(functions, 'setStreamerPromoExclusion');
   const saveStreamerPromoLinkFn = httpsCallable(functions, 'saveStreamerPromoLink');
   const markStreamerPromoLinkOpenedFn = httpsCallable(functions, 'markStreamerPromoLinkOpened');
   const setStreamerPromoCompletionFn = httpsCallable(functions, 'setStreamerPromoCompletion');
@@ -1191,14 +1192,17 @@
       traceDuplicateLookup('promo-duplicate-list-fetch-started', { stationId: stationId });
       promoDuplicateListRequest = listStreamerPromoLinksFn().then(function (result) {
         const streamers = result && result.data && Array.isArray(result.data.streamers) ? result.data.streamers : [];
-        promoDuplicateListCache = streamers;
+        const excludedStreamers = result && result.data && Array.isArray(result.data.excludedStreamers) ? result.data.excludedStreamers : [];
+        promoDuplicateListCache = { streamers: streamers, excludedStreamers: excludedStreamers };
         promoDuplicateListExpiresAt = Date.now() + 30000;
-        traceDuplicateLookup('promo-duplicate-list-fetch-succeeded', { count: streamers.length });
-        return streamers;
+        traceDuplicateLookup('promo-duplicate-list-fetch-succeeded', { count: streamers.length, excludedCount: excludedStreamers.length });
+        return promoDuplicateListCache;
       }).finally(function () { promoDuplicateListRequest = null; });
       return promoDuplicateListRequest;
     };
-    loadPromoList().then(function (streamers) {
+    loadPromoList().then(function (promoLists) {
+      const streamers = promoLists.streamers || [];
+      const excludedStreamers = promoLists.excludedStreamers || [];
       const normalizedNickname = nickname.normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
       const normalizedStationId = stationId.toLocaleLowerCase();
       const byId = streamers.find(function (item) {
@@ -1209,11 +1213,43 @@
         return String(item.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === normalizedNickname;
       });
       const match = byId || byNickname;
+      const excludedById = excludedStreamers.find(function (item) {
+        return String(item.soopId || '').trim().toLocaleLowerCase() === normalizedStationId ||
+          String(item.key || '').trim().toLocaleLowerCase() === normalizedStationId;
+      });
+      const excludedByNickname = excludedStreamers.find(function (item) {
+        return String(item.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === normalizedNickname;
+      });
+      const excludedMatch = !match && (excludedById || excludedByNickname);
       traceDuplicateLookup('promo-duplicate-match-complete', { found: !!match, matchMethod: byId ? 'soopId' : (byNickname ? 'nickname' : '') });
-      reply({ ok: true, found: !!match, nickname: match ? String(match.nickname || '') : '', matchMethod: byId ? 'soopId' : (byNickname ? 'nickname' : '') });
+      reply({ ok: true, found: !!match, excluded: !!excludedMatch, nickname: match ? String(match.nickname || '') : (excludedMatch && excludedMatch.nickname ? String(excludedMatch.nickname) : ''), matchMethod: byId ? 'soopId' : (byNickname ? 'nickname' : excludedById ? 'excluded-soopId' : excludedByNickname ? 'excluded-nickname' : '') });
     }).catch(function (error) {
       traceDuplicateLookup('promo-duplicate-list-fetch-failed', { code: String(error && error.code || ''), message: String(error && error.message || error || '') });
       reply({ ok: false, reason: 'promo-list-unavailable' });
+    });
+  });
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__soopPromoExclusionRequest !== true || typeof data.requestId !== 'string') return;
+    const requestId = data.requestId;
+    const reply = function (payload) {
+      window.postMessage(Object.assign({ __soopPromoExclusionResult: true, requestId: requestId }, payload), location.origin);
+    };
+    const nickname = typeof data.nickname === 'string' ? data.nickname.trim() : '';
+    const soopId = typeof data.soopId === 'string' ? data.soopId.trim() : '';
+    if (!nickname || nickname.length > 100 || !/^[A-Za-z0-9]{2,20}$/.test(soopId) || typeof data.excluded !== 'boolean') {
+      reply({ ok: false, reason: 'invalid-request' });
+      return;
+    }
+    setStreamerPromoExclusionFn({ nickname: nickname, soopId: soopId, excluded: data.excluded }).then(function (result) {
+      promoDuplicateListCache = null;
+      promoDuplicateListExpiresAt = 0;
+      refreshStreamerPromoLinks();
+      reply({ ok: true, excluded: result.data && result.data.excluded === true, nickname: nickname, soopId: soopId });
+    }).catch(function (error) {
+      const code = String(error && error.code || '');
+      reply({ ok: false, reason: code || 'server-error', message: String(error && error.message || '제외 상태를 저장하지 못했습니다.') });
     });
   });
   window.addEventListener('message', function (event) {
