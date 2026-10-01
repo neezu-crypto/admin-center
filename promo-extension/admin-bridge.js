@@ -1,6 +1,7 @@
 (function () {
   const OPEN_BUTTON_ID = 'streamerPromoGeneratorOpenBtn';
   const completionReplies = new Map();
+  const duplicateLookupReplies = new Map();
   let extensionContextUnavailable = false;
 
   function trace(attemptId, stage, details) {
@@ -41,6 +42,28 @@
   }
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message && message.type === 'lookupStreamerPromoDuplicate' &&
+        typeof message.requestId === 'string' && typeof message.nickname === 'string' &&
+        typeof message.stationId === 'string') {
+      const timeout = setTimeout(function () {
+        duplicateLookupReplies.delete(message.requestId);
+        trace('', 'admin-bridge-duplicate-lookup-timeout', { requestId: message.requestId });
+        sendResponse({ ok: false, reason: 'admin-center-timeout' });
+      }, 15000);
+      duplicateLookupReplies.set(message.requestId, function (result) {
+        clearTimeout(timeout);
+        duplicateLookupReplies.delete(message.requestId);
+        sendResponse(result || { ok: false, reason: 'empty-response' });
+      });
+      trace('', 'admin-bridge-duplicate-lookup-received', { requestId: message.requestId, stationId: message.stationId });
+      window.postMessage({
+        __soopPromoDuplicateLookupRequest: true,
+        requestId: message.requestId,
+        stationId: message.stationId,
+        nickname: message.nickname,
+      }, location.origin);
+      return true;
+    }
     if (!message || message.type !== 'markPromoCompleted' ||
         typeof message.requestId !== 'string' || typeof message.promoKey !== 'string') return false;
     trace(message.attemptId, 'admin-bridge-received-completion', { requestId: message.requestId });
@@ -66,6 +89,17 @@
 
   window.addEventListener('message', function (event) {
     const data = event.data;
+    if (event.source === window && event.origin === location.origin && data &&
+        data.__soopPromoDuplicateLookupResult === true && typeof data.requestId === 'string') {
+      const duplicateReply = duplicateLookupReplies.get(data.requestId);
+      if (duplicateReply) {
+        trace('', data.ok === true ? 'admin-bridge-duplicate-lookup-succeeded' : 'admin-bridge-duplicate-lookup-failed', {
+          requestId: data.requestId, found: data.found === true, reason: String(data.reason || ''),
+        });
+        duplicateReply({ ok: data.ok === true, found: data.found === true, nickname: String(data.nickname || ''), matchMethod: String(data.matchMethod || ''), reason: String(data.reason || '') });
+      }
+      return;
+    }
     if (event.source !== window || event.origin !== location.origin || !data ||
         data.__soopPromoCompletionResult !== true || typeof data.requestId !== 'string') return;
     const reply = completionReplies.get(data.requestId);

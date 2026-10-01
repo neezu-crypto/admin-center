@@ -100,6 +100,8 @@
   let activeButtonEntries = [];
   let lastCurrentBoardLog = '';
   let attemptedWriteCopyPath = '';
+  let duplicateLookupKey = '';
+  let duplicateLookupState = { state: 'idle', nickname: '', reason: '' };
   const currentBoardTitles = new Map();
   const pendingBoardStorageKey = 'soopPromoBoardFinder.pendingBoard.' + location.hostname;
   const pendingWriteClipboardKey = 'soopPromoBoardFinder.pendingWriteClipboard.' + location.hostname;
@@ -195,7 +197,7 @@
         header{display:flex;align-items:center;justify-content:space-between;background:#f4f8ff;padding:11px 13px;border-bottom:1px solid #e1e8f2}
         h2{font-size:14px;margin:0;font-weight:750} button{font:inherit;cursor:pointer;border:1px solid #cbd5e1;background:#fff;color:#1e293b;border-radius:8px;padding:6px 9px}
         button:hover,a.action:hover{background:#eff6ff} .close{font-size:17px;line-height:1;padding:3px 8px} .body{padding:10px 12px;max-height:min(62vh,470px);overflow:auto}
-        .summary{font-size:12px;color:#526078;margin:0 0 9px}.warning{background:#fff8e7;border:1px solid #f3dda0;padding:8px;border-radius:8px;color:#674d00;font-size:12px;margin:8px 0}
+        .summary{font-size:12px;color:#526078;margin:0 0 9px}.duplicate-status{background:#f1f5f9;border:1px solid #dbe3ec;padding:8px;border-radius:8px;color:#475569;font-size:12px;margin:0 0 9px}.duplicate-status.found{background:#fff1f0;border-color:#ffc9c3;color:#9b2419;font-weight:700}.duplicate-status.clear{background:#ecfdf3;border-color:#bbf7d0;color:#166534}.duplicate-status button{margin-left:6px;padding:2px 6px;font-size:11px}.warning{background:#fff8e7;border:1px solid #f3dda0;padding:8px;border-radius:8px;color:#674d00;font-size:12px;margin:8px 0}
         .row{border:1px solid #e1e7ef;border-radius:10px;padding:9px;margin:8px 0}.title{font-weight:700;overflow-wrap:anywhere}.meta{font-size:11px;color:#5b6679;margin:3px 0 8px}
         .actions{display:flex;gap:6px;flex-wrap:wrap}.action{display:inline-block;text-decoration:none;color:#0755b8;border:1px solid #cbd5e1;background:white;border-radius:8px;padding:6px 9px;font-size:12px}
         .badge{display:inline-block;font-size:10px;padding:2px 6px;border-radius:999px;margin-left:5px;background:#e9f2ff;color:#0755b8}.badge.low{background:#fff2d6;color:#805400}
@@ -270,6 +272,65 @@
     notice.style.background = failed ? '#9b1c1c' : '#166534';
     clearTimeout(notice.__removeTimer);
     notice.__removeTimer = setTimeout(() => notice.remove(), 5500);
+  }
+
+  function renderDuplicateStatus() {
+    const host = document.getElementById(ROOT_ID);
+    const status = host && host.shadowRoot && host.shadowRoot.querySelector('.duplicate-status');
+    if (!status) return;
+    const item = duplicateLookupState;
+    status.className = 'duplicate-status' + (item.state === 'found' ? ' found' : item.state === 'clear' ? ' clear' : '');
+    status.replaceChildren();
+    if (item.state === 'checking') status.textContent = '홍보 리스트에서 닉네임 중복을 확인하는 중…';
+    else if (item.state === 'found') status.textContent = '⚠ 이미 홍보 리스트에 등록된 닉네임입니다' + (item.nickname ? ': ' + item.nickname : '') + '.';
+    else if (item.state === 'clear') status.textContent = '홍보 리스트에서 이 닉네임을 찾지 못했습니다.';
+    else if (item.state === 'unavailable') {
+      status.appendChild(document.createTextNode('홍보 리스트 중복 확인을 할 수 없습니다. 관리자 센터 탭을 열고 로그인한 뒤 다시 확인해주세요.'));
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.textContent = '다시 확인';
+      retry.addEventListener('click', () => {
+        duplicateLookupKey = '';
+        checkPromoDuplicate(stationIdFromPath(location.pathname), item.requestNickname || '');
+      });
+      status.appendChild(retry);
+    } else status.textContent = '홍보 리스트 중복 여부를 확인할 수 있는 닉네임을 읽는 중…';
+  }
+
+  function checkPromoDuplicate(stationId, nickname) {
+    const cleanNickname = cleanText(nickname);
+    if (!stationId || !cleanNickname) return;
+    const key = stationId.toLowerCase() + '|' + cleanNickname.normalize('NFC').toLocaleLowerCase();
+    if (key === duplicateLookupKey) return;
+    duplicateLookupKey = key;
+    duplicateLookupState = { state: 'checking', nickname: '', requestNickname: cleanNickname, reason: '' };
+    renderDuplicateStatus();
+    const requestId = 'duplicate-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    log('promo-duplicate-lookup-requested', { requestId: requestId, stationId: stationId, nicknameLength: cleanNickname.length });
+    if (!root.chrome || !root.chrome.runtime || !root.chrome.runtime.sendMessage) {
+      duplicateLookupState = { state: 'unavailable', requestNickname: cleanNickname, reason: 'extension-context-unavailable' };
+      log('promo-duplicate-lookup-failed', { requestId: requestId, stationId: stationId, reason: 'extension-context-unavailable' });
+      renderDuplicateStatus();
+      return;
+    }
+    root.chrome.runtime.sendMessage({
+      type: 'checkPromoListDuplicate', requestId: requestId, stationId: stationId, nickname: cleanNickname,
+    }).then((result) => {
+      if (key !== duplicateLookupKey) return;
+      if (!result || result.ok !== true || typeof result.found !== 'boolean') {
+        duplicateLookupState = { state: 'unavailable', requestNickname: cleanNickname, reason: String(result && result.reason || 'no-result') };
+        log('promo-duplicate-lookup-failed', { requestId: requestId, stationId: stationId, reason: duplicateLookupState.reason });
+      } else {
+        duplicateLookupState = { state: result.found ? 'found' : 'clear', nickname: String(result.nickname || ''), requestNickname: cleanNickname, reason: '' };
+        log('promo-duplicate-lookup-succeeded', { requestId: requestId, stationId: stationId, found: result.found, matchMethod: String(result.matchMethod || '') });
+      }
+      renderDuplicateStatus();
+    }).catch((error) => {
+      if (key !== duplicateLookupKey) return;
+      duplicateLookupState = { state: 'unavailable', requestNickname: cleanNickname, reason: 'extension-message-failed' };
+      log('promo-duplicate-lookup-failed', { requestId: requestId, stationId: stationId, reason: 'extension-message-failed', error: String(error && error.message || error) });
+      renderDuplicateStatus();
+    });
   }
 
   async function copyWritePageDetails(stationId, boardId, pathname) {
@@ -358,8 +419,9 @@
     }));
 
     if (!safeItems.length && !safeButtons.length) {
-      body.innerHTML = '<div class="empty">이름만으로 추천·요청 게시판 후보를 찾지 못했습니다.<br>왼쪽 게시판 목록이 펼쳐져 있는지 확인하거나 진단 로그를 확인해주세요.</div>' +
+      body.innerHTML = '<div class="duplicate-status" role="status"></div><div class="empty">이름만으로 추천·요청 게시판 후보를 찾지 못했습니다.<br>왼쪽 게시판 목록이 펼쳐져 있는지 확인하거나 진단 로그를 확인해주세요.</div>' +
         '<div class="warning">게시판 이름만 보고 확정하지 않습니다. 발견되지 않은 게시판은 수동으로 찾아보세요.</div>';
+      renderDuplicateStatus();
       return;
     }
     const orderedItems = sortCandidatesByConfidence(
@@ -381,9 +443,10 @@
         (low || !hasWriteUrl ? '' : '<a class="action" data-open-write-url="' + escapeHtml(item.writeUrl) + '" href="' + escapeHtml(item.writeUrl) + '">글쓰기 화면 열기</a>') +
         (hasWriteUrl ? '<button type="button" data-copy-url="' + escapeHtml(item.writeUrl) + '" data-board-id="' + escapeHtml(item.boardId) + '">글쓰기 주소 복사</button>' : '') + '</div></article>';
     }).join('');
-    body.innerHTML = '<p class="summary">방송국 ' + escapeHtml(stationId) + ' · 링크 게시판 ' + entries.links.length + '개 확인 · 후보 ' + candidates.length + '개 · 메뉴 후보 ' + safeButtons.length + '개 · 높은 후보 우선 정렬' +
+    body.innerHTML = '<div class="duplicate-status" role="status"></div><p class="summary">방송국 ' + escapeHtml(stationId) + ' · 링크 게시판 ' + entries.links.length + '개 확인 · 후보 ' + candidates.length + '개 · 메뉴 후보 ' + safeButtons.length + '개 · 높은 후보 우선 정렬' +
       (review.length ? ' · 이름만으로 판별 불가 ' + review.length + '개' : '') + '</p>' +
       '<div class="warning">이름 기반 후보입니다. 메뉴형 후보는 게시판 확인을 눌러 이동한 후 ID를 읽습니다. 글쓰기 화면이 열리면 닉네임과 URL을 클립보드에 복사합니다.</div>' + rows;
+    renderDuplicateStatus();
   }
 
   function scan() {
@@ -412,15 +475,19 @@
     if (route !== lastRoute) {
       lastRoute = route;
       lastSignature = '';
+      duplicateLookupKey = '';
       log('station-route-detected', { stationId: stationId, path: location.pathname });
     }
+    const socialTitle = document.querySelector('meta[property="og:title"]')?.content || '';
+    checkPromoDuplicate(stationId, stationNicknameFromTitles(document.title, socialTitle));
     const result = getBoardEntries(stationId);
     if (!result.links.length && !result.buttons.length) {
       const host = ensurePanel();
       const body = host.shadowRoot.querySelector('.body');
       if (body.dataset.ready !== 'empty') {
         body.dataset.ready = 'empty';
-        body.innerHTML = '<div class="empty">아직 게시판 링크를 찾지 못했습니다. 게시판 목록이 로드되거나 펼쳐지면 자동으로 다시 확인합니다.</div>';
+        body.innerHTML = '<div class="duplicate-status" role="status"></div><div class="empty">아직 게시판 링크를 찾지 못했습니다. 게시판 목록이 로드되거나 펼쳐지면 자동으로 다시 확인합니다.</div>';
+        renderDuplicateStatus();
         log('no-board-navigation-items-found', { stationId: stationId, path: location.pathname, scannedAnchors: result.scannedAnchors, scannedButtons: result.scannedButtons });
       }
       return;

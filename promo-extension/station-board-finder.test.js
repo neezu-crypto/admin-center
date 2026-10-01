@@ -10,6 +10,20 @@ test('렌더러에는 링크·버튼 배열을 포함한 스캔 결과 객체를
   assert.doesNotMatch(source, /render\(result\.links,\s*stationId,\s*result\)/);
 });
 
+test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실패를 미등록으로 표시하지 않는다', () => {
+  const finderSource = fs.readFileSync(path.join(__dirname, 'station-board-finder.js'), 'utf8');
+  const bridgeSource = fs.readFileSync(path.join(__dirname, 'admin-bridge.js'), 'utf8');
+  const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
+  const adminSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(finderSource, /이미 홍보 리스트에 등록된 닉네임입니다/);
+  assert.match(finderSource, /홍보 리스트 중복 확인을 할 수 없습니다/);
+  assert.match(finderSource, /type:\s*'checkPromoListDuplicate'/);
+  assert.match(workerSource, /type:\s*'lookupStreamerPromoDuplicate'/);
+  assert.match(bridgeSource, /__soopPromoDuplicateLookupRequest/);
+  assert.match(adminSource, /listStreamerPromoLinksFn\(\)/);
+  assert.match(adminSource, /__soopPromoDuplicateLookupResult/);
+});
+
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {
   assert.deepEqual(
     finder.extractBoardLink('/station/demo123/board/98765', 'demo123', 'https://www.sooplive.com/station/demo123'),

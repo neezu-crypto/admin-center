@@ -1164,6 +1164,57 @@
       reply(false, error && error.message ? error.message : '완료 상태 저장에 실패했습니다.');
     });
   });
+  let promoDuplicateListCache = null;
+  let promoDuplicateListExpiresAt = 0;
+  let promoDuplicateListRequest = null;
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__soopPromoDuplicateLookupRequest !== true || typeof data.requestId !== 'string') return;
+    const requestId = data.requestId;
+    const nickname = typeof data.nickname === 'string' ? data.nickname.trim() : '';
+    const stationId = typeof data.stationId === 'string' ? data.stationId.trim() : '';
+    const reply = function (payload) {
+      window.postMessage(Object.assign({ __soopPromoDuplicateLookupResult: true, requestId: requestId }, payload), location.origin);
+    };
+    if (!nickname || nickname.length > 100 || !/^[A-Za-z0-9_-]{1,80}$/.test(stationId)) {
+      reply({ ok: false, reason: 'invalid-request' });
+      return;
+    }
+    const traceDuplicateLookup = function (stage, details) {
+      console.info('[SOOP 홍보 진단]', JSON.stringify({ requestId: requestId, stage: stage, at: new Date().toISOString(), details: details || {} }));
+    };
+    const loadPromoList = function () {
+      if (promoDuplicateListCache && Date.now() < promoDuplicateListExpiresAt) return Promise.resolve(promoDuplicateListCache);
+      if (promoDuplicateListRequest) return promoDuplicateListRequest;
+      traceDuplicateLookup('promo-duplicate-list-fetch-started', { stationId: stationId });
+      promoDuplicateListRequest = listStreamerPromoLinksFn().then(function (result) {
+        const streamers = result && result.data && Array.isArray(result.data.streamers) ? result.data.streamers : [];
+        promoDuplicateListCache = streamers;
+        promoDuplicateListExpiresAt = Date.now() + 30000;
+        traceDuplicateLookup('promo-duplicate-list-fetch-succeeded', { count: streamers.length });
+        return streamers;
+      }).finally(function () { promoDuplicateListRequest = null; });
+      return promoDuplicateListRequest;
+    };
+    loadPromoList().then(function (streamers) {
+      const normalizedNickname = nickname.normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+      const normalizedStationId = stationId.toLocaleLowerCase();
+      const byId = streamers.find(function (item) {
+        return String(item.soopId || '').trim().toLocaleLowerCase() === normalizedStationId ||
+          String(item.key || '').trim().toLocaleLowerCase() === normalizedStationId;
+      });
+      const byNickname = streamers.find(function (item) {
+        return String(item.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === normalizedNickname;
+      });
+      const match = byId || byNickname;
+      traceDuplicateLookup('promo-duplicate-match-complete', { found: !!match, matchMethod: byId ? 'soopId' : (byNickname ? 'nickname' : '') });
+      reply({ ok: true, found: !!match, nickname: match ? String(match.nickname || '') : '', matchMethod: byId ? 'soopId' : (byNickname ? 'nickname' : '') });
+    }).catch(function (error) {
+      traceDuplicateLookup('promo-duplicate-list-fetch-failed', { code: String(error && error.code || ''), message: String(error && error.message || error || '') });
+      reply({ ok: false, reason: 'promo-list-unavailable' });
+    });
+  });
   const clearAllStreamerPromoCompletionFn = httpsCallable(functions, 'clearAllStreamerPromoCompletion');
   // 21번 — 배팅시장 마켓 관리. StreamBet-Market이 이미 배포한 함수를 그대로 호출한다
   // (17번 채팅·22번 게시글 홍보 현황과 동일한 "codebase가 달라도 함수 이름만 맞으면

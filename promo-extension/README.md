@@ -2,17 +2,18 @@
 
 관리 센터의 `스트리머별 홍보글 바로가기` 세션에서 선택한 스트리머의 제목·본문·HTML을 SOOP 게시글 작성 화면으로 전달하고, SOOP 방송국의 게시판 이름을 살펴 홍보 후보 게시판과 글쓰기 주소를 찾는 Chromium Manifest V3 확장 프로그램입니다.
 
-## 방송국 게시판 후보 찾기 (0.9.0)
+## 방송국 게시판 후보 찾기 (0.9.1)
 
 - SOOP 방송국 화면에서 게시판 링크와 메뉴 버튼을 찾아 오른쪽 아래 패널에 후보를 표시합니다. `뻐꾸기`·`게임 추천`·리퀘스트 등 의미가 뚜렷한 이름은 높은 후보, 제안·요청·의견은 확인이 필요한 후보, 단순히 `컨텐츠`/`게임`만 포함된 이름은 수동 확인 항목으로 분류합니다. `게임추천`처럼 띄어쓰기 없는 표기와 `🐟게임 추천🎮`, `게임🎮 추천 게시판`처럼 이모지·다른 문구가 섞인 표기도 인식합니다.
 - 후보는 높은 후보 → 보통 후보 → 확인 필요 순으로 정렬합니다. SOOP의 메뉴형 게시판은 실제로 링크가 아닌 버튼일 수 있습니다. 이 경우 확장이 버튼명을 후보로 표시하고, `게시판 확인`을 누르면 해당 SOOP 메뉴 버튼을 눌러 이동합니다. `/station/{방송국ID}/board/{게시판ID}` 경로에 도달하면 ID를 읽어 글쓰기 주소 `/station/{방송국ID}/post/write/{게시판ID}`를 구성합니다. 글쓰기 화면이 로드되면 방송국 표시 닉네임과 글쓰기 URL을 줄바꿈으로 연결해 클립보드에 복사합니다. 게시글 작성/게시, 즐겨찾기, 알림 설정은 자동으로 하지 않습니다.
 - 후보 이름은 용도를 증명하지 않습니다. 게시판으로 이동해 작성자와 게시물 성격, 글쓰기 화면에 표시되는 게시판 이름, 실제 작성 권한을 확인하세요. 스트리머 전용/공지/VOD로 보이는 게시판은 제외되지만 SOOP의 권한 상태까지 자동 판별하지는 않습니다.
+- 방송국 닉네임은 통합 관리 센터의 실제 전체 홍보 리스트(인증 스트리머와 등록 후보 포함)와 대조합니다. 중복이면 패널에 이미 등록된 닉네임 안내가 표시됩니다. 대조를 위해 네이버 웨일에서 관리자 센터 탭을 열고 관리자 로그인 상태를 유지해야 합니다. 센터 탭이 닫혔거나 목록 조회 권한/네트워크 문제가 있으면 미등록이라고 단정하지 않고 확인 불가로 표시합니다.
 - 탐색은 현재 페이지 DOM의 링크와 버튼을 읽는 방식입니다. 사이드바가 접혀 있거나 게시판 항목이 아직 로드되지 않았으면 빈 상태를 표시하고 DOM 변화 및 SPA 경로 변화를 따라 재검사합니다. 페이지 구조가 달라 항목을 읽지 못하면 추측으로 주소를 만들지 않습니다.
 - 후보는 로컬 패널에만 표시하며 통합 관리센터 서버나 외부로 전송하지 않습니다.
 
 ### 진단 로그
 
-방송국 페이지 개발자 도구 Console에서 `[SOOP 홍보 게시판 진단]`을 검색하세요. `scanner-initialized`, `station-route-detected`, `no-board-navigation-items-found`, `board-scan-complete`, `board-classified`, `board-button-classified`, `board-button-open-requested`, `current-board-route-detected`, `write-page-clipboard-armed`, `write-page-route-detected`, `write-page-clipboard-succeeded`/`write-page-clipboard-failed`, `scan-failed` 로그에 스캔 ID·방송국/게시판 ID·분류 이유·링크/버튼 개수·복사 단계 결과가 남습니다. 게시글 본문·쿠키·인증 토큰은 기록하지 않습니다. 오류를 공유할 때는 해당 접두사의 로그만 복사하고 브라우저의 토큰/쿠키는 공유하지 마세요.
+방송국 페이지 개발자 도구 Console에서 `[SOOP 홍보 게시판 진단]`을 검색하세요. `scanner-initialized`, `station-route-detected`, `promo-duplicate-lookup-requested`/`promo-duplicate-lookup-succeeded`/`promo-duplicate-lookup-failed`, `no-board-navigation-items-found`, `board-scan-complete`, `board-classified`, `board-button-classified`, `board-button-open-requested`, `current-board-route-detected`, `write-page-clipboard-armed`, `write-page-route-detected`, `write-page-clipboard-succeeded`/`write-page-clipboard-failed`, `scan-failed` 로그에 스캔 ID·방송국/게시판 ID·분류 이유·링크/버튼 개수·복사 단계 결과가 남습니다. 게시글 본문·쿠키·인증 토큰은 기록하지 않습니다. 오류를 공유할 때는 해당 접두사의 로그만 복사하고 브라우저의 토큰/쿠키는 공유하지 마세요.
 
 현재 자동 분류는 이름 기반 1차 후보 추출이며 실제 SOOP 화면에서의 실사용 검증은 별도입니다. 특히 지역·계정별 DOM 차이, 비공개/팬 전용 접근 권한, SOOP URL 구조 변경은 시험이 더 필요합니다. 이 단계에서는 글쓰기 링크를 실제로 열어 재확인하도록 하고, 자동으로 홍보 리스트에 등록하거나 게시 완료로 처리하지 않습니다.
 

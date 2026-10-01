@@ -43,6 +43,46 @@ function isAllowedAdminSender(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
 
+  if (message.type === 'checkPromoListDuplicate') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || ''); } catch (_) { sourceUrl = null; }
+    const sourceStation = sourceUrl && sourceUrl.pathname.match(/^\/station\/([A-Za-z0-9_-]+)(?:\/|$)/i);
+    const stationId = typeof message.stationId === 'string' ? message.stationId : '';
+    const nickname = typeof message.nickname === 'string' ? message.nickname.trim() : '';
+    const requestId = typeof message.requestId === 'string' ? message.requestId : '';
+    const validSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
+      (sourceUrl.hostname === 'sooplive.com' || sourceUrl.hostname === 'www.sooplive.com') &&
+      sourceStation && sourceStation[1].toLowerCase() === stationId.toLowerCase();
+    if (!validSender || !/^[A-Za-z0-9_-]{1,80}$/.test(stationId) || !nickname || nickname.length > 100 || !requestId || requestId.length > 120) {
+      trace(requestId, 'promo-duplicate-lookup-rejected', { validSender: !!validSender, nicknameLength: nickname.length });
+      sendResponse({ ok: false, reason: 'invalid-request' });
+      return false;
+    }
+    findAdminTab().then((adminTab) => {
+      if (!adminTab) {
+        trace(requestId, 'promo-duplicate-lookup-unavailable', { reason: 'admin-center-not-open', stationId: stationId });
+        sendResponse({ ok: false, reason: 'admin-center-not-open' });
+        return;
+      }
+      trace(requestId, 'promo-duplicate-lookup-forwarded', { stationId: stationId, adminTabId: adminTab.id });
+      chrome.tabs.sendMessage(adminTab.id, {
+        type: 'lookupStreamerPromoDuplicate', requestId: requestId, stationId: stationId, nickname: nickname,
+      }).then((result) => {
+        trace(requestId, result && result.ok ? 'promo-duplicate-lookup-completed' : 'promo-duplicate-lookup-failed', {
+          found: !!(result && result.found), reason: String(result && result.reason || ''),
+        });
+        sendResponse(result || { ok: false, reason: 'empty-admin-response' });
+      }).catch((error) => {
+        trace(requestId, 'promo-duplicate-lookup-unavailable', { reason: 'admin-bridge-unavailable', error: String(error && error.message || error) });
+        sendResponse({ ok: false, reason: 'admin-bridge-unavailable' });
+      });
+    }).catch((error) => {
+      trace(requestId, 'promo-duplicate-lookup-unavailable', { reason: 'admin-tab-search-failed', error: String(error && error.message || error) });
+      sendResponse({ ok: false, reason: 'admin-tab-search-failed' });
+    });
+    return true;
+  }
+
   if (message.type === 'openPromoDraft') {
     if (!isAllowedAdminSender(sender)) {
       trace(message.attemptId, 'open-request-sender-rejected', {
