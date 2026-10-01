@@ -24,7 +24,17 @@ test('뻐꾸기·추천·게임 추천은 우선 후보로 분류한다', () => 
   assert.equal(finder.classifyBoardTitle('🦉 뻐꾸기동지').kind, 'candidate');
   assert.equal(finder.classifyBoardTitle('게임 추천').confidence, '높음');
   assert.equal(finder.classifyBoardTitle('게임추천').confidence, '높음');
-  assert.match(finder.classifyBoardTitle('게임 추천 게시판').reason, /게임 추천/);
+  for (const title of [
+    '게임 추천 게시판',
+    '🐟게임 추천🎮',
+    '오늘의 🐟게임 추천🎮 모음',
+    '게임🎮 추천 게시판',
+  ]) {
+    const result = finder.classifyBoardTitle(title);
+    assert.equal(result.kind, 'candidate', title);
+    assert.equal(result.confidence, '높음', title);
+  }
+  assert.match(finder.classifyBoardTitle('🐟게임 추천🎮').reason, /게임 추천/);
 });
 
 test('제안·요청은 후보로 표시하되 확인이 필요하다고 분류한다', () => {
