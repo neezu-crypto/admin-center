@@ -76,6 +76,11 @@ test('방송국 닉네임을 추출하고 신뢰도 높은 후보부터 정렬�
 
 test('뻐꾸기·추천·게임 추천은 우선 후보로 분류한다', () => {
   assert.equal(finder.classifyBoardTitle('🦉 뻐꾸기동지').kind, 'candidate');
+  for (const title of ['🐦‍⬛뻐꾺', '🐤뻐꾹 요기 뻐꾹', '>뻐구기', '**🦉┃뻐꾹게시판']) {
+    const result = finder.classifyBoardTitle(title);
+    assert.equal(result.kind, 'candidate', title);
+    assert.equal(result.confidence, '높음', title);
+  }
   assert.equal(finder.classifyBoardTitle('게임 추천').confidence, '높음');
   assert.equal(finder.classifyBoardTitle('게임추천').confidence, '높음');
   for (const title of [
@@ -100,6 +105,8 @@ test('공지·VOD·스트리머 전용으로 보이는 게시판은 제외한다
   assert.equal(finder.classifyBoardTitle('콘텐츠 추천 공지').kind, 'exclude');
   assert.equal(finder.classifyBoardTitle('스트리머 전용 뻐꾸기').kind, 'exclude');
   assert.equal(finder.classifyBoardTitle('VOD').kind, 'exclude');
+  assert.equal(finder.classifyBoardTitle('노래 추천').kind, 'exclude');
+  assert.equal(finder.classifyBoardTitle('🎵노래┃추천 게시판').kind, 'exclude');
 });
 
 test('이름이 모호한 콘텐츠 게시판은 글쓰기 후보 대신 수동 확인으로 남긴다', () => {
