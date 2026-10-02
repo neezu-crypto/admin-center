@@ -118,7 +118,10 @@ function main() {
   const releasePath = path.join(RELEASES_DIR, version + '.html');
   const pageUrl = `https://neezu-crypto.github.io/admin-center/releases/${version}.html`;
   const latest = { version, pageUrl, adminStationUrl: ADMIN_STATION_URL, updatedAt: new Date().toISOString() };
-  fs.writeFileSync(OUTPUT_PATH, html);
+  // Keep the predictable historical path as a locked entry point. Only the
+  // random release URL receives the active version ID.
+  const lockedEntryPoint = html.replace("const APP_VERSION = '" + version + "';", "const APP_VERSION = 'legacy-entrypoint';");
+  fs.writeFileSync(OUTPUT_PATH, lockedEntryPoint);
   fs.writeFileSync(releasePath, html);
   fs.writeFileSync(LATEST_PATH, JSON.stringify(latest, null, 2) + '\n');
   console.log(`공개 페이지 생성 완료: ${releasePath} (${entries.length}명, 기준일 ${date})`);
