@@ -7,6 +7,38 @@ const PROMO_PENDING_TTL_MS = 2 * 60 * 60 * 1000;
 const COMPLETION_RETRY_MS = 5000;
 const diagnosticCheckLogKeys = new Set();
 
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== 'find-unconfirmed-profile') return;
+  chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    const tab = tabs && tabs[0];
+    let tabUrl;
+    try { tabUrl = new URL(tab && tab.url || ''); } catch (_) { tabUrl = null; }
+    if (!tab || !Number.isInteger(tab.id) || !tabUrl || tabUrl.protocol !== 'https:' ||
+        !['sooplive.com', 'www.sooplive.com'].includes(tabUrl.hostname)) {
+      console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
+        version: '0.9.17', stage: 'browser-command-ignored', at: new Date().toISOString(),
+        details: { reason: 'active-tab-is-not-soop' },
+      }));
+      return;
+    }
+    console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
+      version: '0.9.17', stage: 'browser-command-fired', at: new Date().toISOString(),
+      details: { tabId: tab.id, path: tabUrl.pathname },
+    }));
+    chrome.tabs.sendMessage(tab.id, { type: 'findUnconfirmedPromoProfile' }).catch((error) => {
+      console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
+        version: '0.9.17', stage: 'browser-command-delivery-failed', at: new Date().toISOString(),
+        details: { error: String(error && error.message || error).slice(0, 120) },
+      }));
+    });
+  }).catch((error) => {
+    console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
+      version: '0.9.17', stage: 'browser-command-query-failed', at: new Date().toISOString(),
+      details: { error: String(error && error.message || error).slice(0, 120) },
+    }));
+  });
+});
+
 function trace(attemptId, stage, details) {
   console.info('[SOOP 홍보 진단]', JSON.stringify({
     attemptId: attemptId || 'unassigned',
@@ -48,7 +80,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
     const allowedStages = new Set([
       'listener-ready', 'modified-space-keydown', 'shortcut-accepted',
-      'shortcut-candidate-found', 'shortcut-no-candidate',
+      'shortcut-candidate-found', 'shortcut-no-candidate', 'browser-command-received',
     ]);
     const payload = message.diagnostic && typeof message.diagnostic === 'object' ? message.diagnostic : {};
     const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&

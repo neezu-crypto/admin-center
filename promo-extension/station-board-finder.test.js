@@ -57,7 +57,13 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\['sooplive\.com', 'www\.sooplive\.com'\]\.includes\(sourceUrl\.hostname\)/);
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
-  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.16'/);
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
+  assert.equal(manifest.version, '0.9.17');
+  assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
+  assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
+  assert.match(workerSource, /findUnconfirmedPromoProfile/);
+  assert.match(profileSource, /browser-command-received/);
+  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.17'/);
 });
 
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {

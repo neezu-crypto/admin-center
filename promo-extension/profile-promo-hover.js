@@ -79,7 +79,7 @@
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
   root.__soopPromoProfileStatusIcons015 = true;
 
-  const DIAGNOSTIC_VERSION = '0.9.16';
+  const DIAGNOSTIC_VERSION = '0.9.17';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();
@@ -228,6 +228,14 @@
     logShortcut('shortcut-accepted', {});
     findNextUnconfirmed();
   }, true);
+
+  root.chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (!message || message.type !== 'findUnconfirmedPromoProfile') return false;
+    logShortcut('browser-command-received', {});
+    findNextUnconfirmed();
+    if (typeof sendResponse === 'function') sendResponse({ ok: true });
+    return false;
+  });
 
   function refreshKey(key, status) {
     for (const record of records) {
