@@ -79,7 +79,7 @@
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
   root.__soopPromoProfileStatusIcons015 = true;
 
-  const DIAGNOSTIC_VERSION = '0.9.17';
+  const DIAGNOSTIC_VERSION = '0.9.18';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();
@@ -194,7 +194,7 @@
     const record = candidates[index];
     lastFoundButton = record.button;
     logShortcut('shortcut-candidate-found', { count: candidates.length, index: index + 1, stationId: record.stationId, nickname: record.nickname || '' });
-    record.img.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    record.img.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
     position(record);
     clearTimeout(highlightTimer);
     record.button.style.outline = '3px solid #f59e0b';
