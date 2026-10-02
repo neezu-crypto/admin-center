@@ -43,6 +43,36 @@ function isAllowedAdminSender(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
 
+  if (message.type === 'promoShortcutDiagnostic') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
+    const allowedStages = new Set([
+      'listener-ready', 'modified-space-keydown', 'shortcut-accepted',
+      'shortcut-candidate-found', 'shortcut-no-candidate',
+    ]);
+    const payload = message.diagnostic && typeof message.diagnostic === 'object' ? message.diagnostic : {};
+    const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
+      ['sooplive.com', 'www.sooplive.com'].includes(sourceUrl.hostname);
+    if (!isSoopSender || !allowedStages.has(payload.stage)) return false;
+    const details = {};
+    for (const key of ['code', 'key', 'targetTag']) {
+      if (typeof payload[key] === 'string') details[key] = payload[key].slice(0, 32);
+    }
+    for (const key of ['keyCode', 'count', 'index', 'records']) {
+      if (Number.isFinite(payload[key])) details[key] = Math.max(0, Math.min(10000, Math.trunc(payload[key])));
+    }
+    for (const key of ['ctrlKey', 'shiftKey', 'altKey', 'metaKey', 'isTrusted']) {
+      if (typeof payload[key] === 'boolean') details[key] = payload[key];
+    }
+    console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
+      version: typeof payload.version === 'string' ? payload.version.slice(0, 16) : 'unknown',
+      stage: payload.stage,
+      at: new Date().toISOString(),
+      details,
+    }));
+    return false;
+  }
+
   if (message.type === 'addPromoCandidateFromConfirmedPage') {
     let senderUrl;
     let pageUrl;

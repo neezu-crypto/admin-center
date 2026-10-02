@@ -50,6 +50,16 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   assert.match(finderSource, /홍보 후보 제외 목록에 등록된 스트리머입니다/);
 });
 
+test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워커 로그로 전달한다', () => {
+  const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
+  const profileSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
+  assert.match(workerSource, /message\.type === 'promoShortcutDiagnostic'/);
+  assert.match(workerSource, /\['sooplive\.com', 'www\.sooplive\.com'\]\.includes\(sourceUrl\.hostname\)/);
+  assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
+  assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
+  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.16'/);
+});
+
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {
   assert.deepEqual(
     finder.extractBoardLink('/station/demo123/board/98765', 'demo123', 'https://www.sooplive.com/station/demo123'),

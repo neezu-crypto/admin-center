@@ -79,7 +79,7 @@
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
   root.__soopPromoProfileStatusIcons015 = true;
 
-  const DIAGNOSTIC_VERSION = '0.9.15';
+  const DIAGNOSTIC_VERSION = '0.9.16';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();
@@ -92,7 +92,14 @@
 
   function logShortcut(stage, details) {
     try {
-      console.info('[SOOP 홍보 단축키 진단]', JSON.stringify(Object.assign({ version: DIAGNOSTIC_VERSION, stage: stage, at: new Date().toISOString() }, details || {})));
+      const diagnostic = Object.assign({ version: DIAGNOSTIC_VERSION, stage: stage, at: new Date().toISOString() }, details || {});
+      console.info('[SOOP 홍보 단축키 진단]', JSON.stringify(diagnostic));
+      if (root.chrome && root.chrome.runtime && typeof root.chrome.runtime.sendMessage === 'function') {
+        try {
+          const result = root.chrome.runtime.sendMessage({ type: 'promoShortcutDiagnostic', diagnostic: diagnostic });
+          if (result && typeof result.catch === 'function') result.catch(function () {});
+        } catch (_) { /* Service-worker diagnostics are best-effort. */ }
+      }
     } catch (_) { /* Diagnostics must never interrupt the page. */ }
   }
 
