@@ -31,6 +31,11 @@ async function isAdminUid(uid) {
   return snap.val() === true;
 }
 
+async function isOnyuAdminUid(uid) {
+  const snap = await getDatabase().ref('onyuVn/adminUids/' + uid).get();
+  return snap.val() === true;
+}
+
 function isAdminEmail(email) {
   return !!email && email === ADMIN_EMAIL;
 }
@@ -1907,7 +1912,6 @@ const migrateBannedAccounts = onCall(async (request) => {
 // onyu-vn은 정적 GitHub Pages 게임이라 클라이언트가 승인 여부를 직접 쓰면 우회할 수
 // 있다. 신청·조회·게임 시작 판정은 이 관리자센터 codebase의 callable을 통해 처리하고,
 // 승인·무시는 관리자만 실행한다. 승인 키는 브라우저가 아니라 Firebase uid다.
-const ONYU_ADMIN_UID = '3Y2N5S5aCxT3bVDvcjx6GLyUaEs1';
 function onyuProviderLabel(request) {
   const provider = request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
   return provider === 'google.com' ? 'google' : 'kakao';
@@ -1920,7 +1924,7 @@ async function getOnyuAccessState(uid, request) {
   const provider = request && request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
   const authenticatedViewer = provider !== 'anonymous' || user.googleLinked === true || user.kakaoLinked === true;
   const loginMethod = user.googleLinked === true || provider === 'google.com' ? 'google' : user.kakaoLinked === true ? 'kakao' : null;
-  const isAdmin = uid === ONYU_ADMIN_UID;
+  const isAdmin = await isOnyuAdminUid(uid);
   const requestedMode = request && request.data && request.data.accessMode;
   // 레거시 클라이언트의 adminMode=true 요청은 관리자 모드로 한 번만 호환하고,
   // 그 외에는 일반 로그인 유저 모드로 취급한다. 권한은 항상 UID로 재검증한다.
@@ -2268,7 +2272,7 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
 // 판정하고, 일반 로그인 유저와 인증 스트리머는 역할에 맞는 활성 이용권을 확인한다.
 const onyuStartSession = onCall(async (request) => {
   const uid = requireAuth(request);
-  const isAdmin = uid === ONYU_ADMIN_UID;
+  const isAdmin = await isOnyuAdminUid(uid);
   const requestedMode = request.data && request.data.accessMode;
   const streamerFlagSnap = await getDatabase().ref('users/' + uid + '/streamerVerified').get();
   const isVerifiedStreamer = streamerFlagSnap.val() === true || await isVerifiedStreamerUid(uid);
@@ -2333,7 +2337,7 @@ const onyuSubmitReview = onCall(async (request) => {
       throw new HttpsError('invalid-argument', '스트리머 닉네임을 올바르게 입력해 주세요.');
     }
     if (!soopId) throw new HttpsError('invalid-argument', 'SOOP 아이디는 영문 소문자·숫자 2~20자로 입력해 주세요.');
-    promoteRequested = uid !== ONYU_ADMIN_UID;
+    promoteRequested = !(await isOnyuAdminUid(uid));
   }
 
   const now = Date.now();
@@ -2652,7 +2656,7 @@ async function getOnyuAnalyticsMeta(uid, request) {
   const userSnap = await db.ref('users/' + uid).get();
   const user = userSnap.val() || {};
   const provider = request && request.auth && request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
-  const isAdmin = uid === ONYU_ADMIN_UID;
+  const isAdmin = await isOnyuAdminUid(uid);
   const verified = !isAdmin && (user.streamerVerified === true || (provider !== 'anonymous' && await isVerifiedStreamerUid(uid)));
   return {
     uid,
