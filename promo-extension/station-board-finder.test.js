@@ -58,14 +58,15 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.19');
+  assert.equal(manifest.version, '0.9.20');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
+  assert.match(workerSource, /openUnconfirmedStationInNewTab/);
   assert.match(profileSource, /browser-command-received/);
-  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.19'/);
+  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.20'/);
   assert.match(profileSource, /shortcut-station-open-requested/);
-  assert.match(profileSource, /window\.location\.assign\(stationUrl\.href\)/);
+  assert.match(profileSource, /type: 'openUnconfirmedStationInNewTab'/);
 });
 
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {
@@ -168,7 +169,7 @@ test('프로필 이미지 로드 후 상태 아이콘을 표시하고 제외·�
   assert.match(hoverSource, /event\.stopPropagation\(\)/);
 });
 
-test('확장 단축키는 미확인 프로필 아이콘만 즉시 스크롤해 순회한다', () => {
+test('확장 단축키는 미확인 프로필을 찾아 방송국을 새 탭으로 연다', () => {
   const hoverSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
   assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: { soopPromoProfileStatusIcon: 'true' }, textContent: '？' }), true);
   assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: { soopPromoProfileStatusIcon: 'true' }, textContent: ' ? ' }), false);
@@ -186,7 +187,7 @@ test('확장 단축키는 미확인 프로필 아이콘만 즉시 스크롤해 �
   assert.match(hoverSource, /modifierPressed\(event, 'shiftKey', 'Shift'\)/);
   assert.match(hoverSource, /!alt && !meta && space/);
   assert.match(hoverSource, /record\.started && record\.img\.isConnected && record\.button\.isConnected && isUnconfirmedStatusIcon\(record\.button\)/);
-  assert.match(hoverSource, /window\.location\.assign\(stationUrl\.href\)/);
+  assert.match(hoverSource, /type: 'openUnconfirmedStationInNewTab'/);
   assert.match(hoverSource, /현재 페이지에 미확인\(？\) 스트리머가 없습니다/);
 });
 

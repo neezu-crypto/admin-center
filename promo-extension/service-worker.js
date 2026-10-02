@@ -16,24 +16,24 @@ chrome.commands.onCommand.addListener((command) => {
     if (!tab || !Number.isInteger(tab.id) || !tabUrl || tabUrl.protocol !== 'https:' ||
         !['sooplive.com', 'www.sooplive.com'].includes(tabUrl.hostname)) {
       console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-        version: '0.9.18', stage: 'browser-command-ignored', at: new Date().toISOString(),
+        version: '0.9.20', stage: 'browser-command-ignored', at: new Date().toISOString(),
         details: { reason: 'active-tab-is-not-soop', host: tabUrl && tabUrl.hostname || 'unknown', path: tabUrl && tabUrl.pathname || '' },
       }));
       return;
     }
     console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-      version: '0.9.18', stage: 'browser-command-fired', at: new Date().toISOString(),
+      version: '0.9.20', stage: 'browser-command-fired', at: new Date().toISOString(),
       details: { tabId: tab.id, path: tabUrl.pathname },
     }));
     chrome.tabs.sendMessage(tab.id, { type: 'findUnconfirmedPromoProfile' }).catch((error) => {
       console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-        version: '0.9.18', stage: 'browser-command-delivery-failed', at: new Date().toISOString(),
+        version: '0.9.20', stage: 'browser-command-delivery-failed', at: new Date().toISOString(),
         details: { error: String(error && error.message || error).slice(0, 120) },
       }));
     });
   }).catch((error) => {
     console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-      version: '0.9.18', stage: 'browser-command-query-failed', at: new Date().toISOString(),
+      version: '0.9.20', stage: 'browser-command-query-failed', at: new Date().toISOString(),
       details: { error: String(error && error.message || error).slice(0, 120) },
     }));
   });
@@ -74,6 +74,33 @@ function isAllowedAdminSender(sender) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
+
+  if (message.type === 'openUnconfirmedStationInNewTab') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
+    const stationId = typeof message.stationId === 'string' ? message.stationId.trim() : '';
+    const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
+      ['sooplive.com', 'www.sooplive.com'].includes(sourceUrl.hostname);
+    if (!isSoopSender || !/^[A-Za-z0-9_-]{2,40}$/.test(stationId)) {
+      sendResponse({ ok: false, reason: 'invalid-request' });
+      return false;
+    }
+    const url = 'https://www.sooplive.com/station/' + encodeURIComponent(stationId);
+    chrome.tabs.create({ url: url, active: true }).then((tab) => {
+      console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
+        version: '0.9.20', stage: 'shortcut-station-tab-created', at: new Date().toISOString(),
+        details: { stationId: stationId, tabId: tab && tab.id },
+      }));
+      sendResponse({ ok: true, tabId: tab && tab.id });
+    }).catch((error) => {
+      console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
+        version: '0.9.20', stage: 'shortcut-station-tab-failed', at: new Date().toISOString(),
+        details: { stationId: stationId, error: String(error && error.message || error).slice(0, 120) },
+      }));
+      sendResponse({ ok: false, reason: 'tab-create-failed' });
+    });
+    return true;
+  }
 
   if (message.type === 'promoShortcutDiagnostic') {
     let sourceUrl;

@@ -79,7 +79,7 @@
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
   root.__soopPromoProfileStatusIcons015 = true;
 
-  const DIAGNOSTIC_VERSION = '0.9.19';
+  const DIAGNOSTIC_VERSION = '0.9.20';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();
@@ -193,9 +193,12 @@
     const record = candidates[index];
     lastFoundButton = record.button;
     logShortcut('shortcut-candidate-found', { count: candidates.length, index: index + 1, stationId: record.stationId, nickname: record.nickname || '' });
-    const stationUrl = new URL('/station/' + encodeURIComponent(record.stationId), location.origin);
     logShortcut('shortcut-station-open-requested', { stationId: record.stationId });
-    window.location.assign(stationUrl.href);
+    root.chrome.runtime.sendMessage({ type: 'openUnconfirmedStationInNewTab', stationId: record.stationId })
+      .then((result) => {
+        if (!result || result.ok !== true) showFindNotice('방송국 새 탭 열기에 실패했습니다. 웨일 로그를 확인해주세요.');
+      })
+      .catch(() => showFindNotice('방송국 새 탭 열기에 실패했습니다. 확장 프로그램 상태를 확인해주세요.'));
   }
 
   window.addEventListener('keydown', (event) => {
