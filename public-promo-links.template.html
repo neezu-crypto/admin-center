@@ -180,7 +180,6 @@ __PROMO_SNAPSHOT__
         if (latest.version !== APP_VERSION) {
           showGate('새 업데이트가 있습니다', '이 버전은 사용할 수 없습니다. 관리자 방송국 게시판에서 최신 버전 링크를 열어 주세요.', [
             { label: '새 업데이트 받기', href: ADMIN_STATION_URL },
-            { label: '관리자 방송국 바로가기', href: ADMIN_STATION_URL, secondary: true },
           ]);
           return;
         }
@@ -189,7 +188,7 @@ __PROMO_SNAPSHOT__
         showRows();
       } catch (error) {
         showGate('최신 버전을 확인할 수 없습니다', '인터넷 연결 후 다시 열어 주세요. 오래된 버전은 확인에 성공할 때까지 사용할 수 없습니다.', [
-          { label: '관리자 방송국 바로가기', href: ADMIN_STATION_URL },
+          { label: '새 업데이트 받기', href: ADMIN_STATION_URL },
         ]);
       }
     }
