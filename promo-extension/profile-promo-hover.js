@@ -58,7 +58,12 @@
       cleanText(button.textContent) === '？';
   }
 
-  const api = { stationIdFromProfileHref, cleanText, plausibleNickname, nicknameFromProfileAnchor, isUnconfirmedStatusIcon };
+  function isFindUnconfirmedShortcut(event) {
+    return !!event && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey &&
+      (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar');
+  }
+
+  const api = { stationIdFromProfileHref, cleanText, plausibleNickname, nicknameFromProfileAnchor, isUnconfirmedStatusIcon, isFindUnconfirmedShortcut };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons012) return;
   root.__soopPromoProfileStatusIcons012 = true;
@@ -178,9 +183,7 @@
   }
 
   window.addEventListener('keydown', (event) => {
-    const isControlSpace = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey &&
-      (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar');
-    if (!isControlSpace) return;
+    if (!isFindUnconfirmedShortcut(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.stopImmediatePropagation) event.stopImmediatePropagation();

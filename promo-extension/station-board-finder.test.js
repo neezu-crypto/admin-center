@@ -150,13 +150,15 @@ test('프로필 이미지 로드 후 상태 아이콘을 표시하고 제외·�
   assert.match(hoverSource, /event\.stopPropagation\(\)/);
 });
 
-test('Ctrl+Space는 확장프로그램의 미확인 프로필 아이콘만 순회한다', () => {
+test('Control+Shift+Space는 확장프로그램의 미확인 프로필 아이콘만 순회한다', () => {
   const hoverSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
   assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: { soopPromoProfileStatusIcon: 'true' }, textContent: '？' }), true);
   assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: { soopPromoProfileStatusIcon: 'true' }, textContent: ' ? ' }), false);
   assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: {}, textContent: '？' }), false);
-  assert.match(hoverSource, /event\.ctrlKey && !event\.altKey && !event\.metaKey && !event\.shiftKey/);
-  assert.match(hoverSource, /event\.code === 'Space' \|\| event\.key === ' ' \|\| event\.key === 'Spacebar'/);
+  assert.equal(profileHover.isFindUnconfirmedShortcut({ ctrlKey: true, shiftKey: true, altKey: false, metaKey: false, code: 'Space' }), true);
+  assert.equal(profileHover.isFindUnconfirmedShortcut({ ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, code: 'Space' }), false);
+  assert.equal(profileHover.isFindUnconfirmedShortcut({ ctrlKey: true, shiftKey: true, altKey: true, metaKey: false, code: 'Space' }), false);
+  assert.match(hoverSource, /event\.ctrlKey && event\.shiftKey && !event\.altKey && !event\.metaKey/);
   assert.match(hoverSource, /record\.started && record\.img\.isConnected && record\.button\.isConnected && isUnconfirmedStatusIcon\(record\.button\)/);
   assert.match(hoverSource, /record\.img\.scrollIntoView\(\{ behavior: 'smooth', block: 'center'/);
   assert.match(hoverSource, /현재 페이지에 미확인\(？\) 스트리머가 없습니다/);
