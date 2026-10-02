@@ -3,12 +3,16 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
 const ROOT = path.resolve(__dirname, '..');
 const PROJECT = 'soop-stock-market';
 const TEMPLATE_PATH = path.join(ROOT, 'public-promo-links.template.html');
 const OUTPUT_PATH = path.join(ROOT, 'public-promo-links.html');
+const RELEASES_DIR = path.join(ROOT, 'releases');
+const LATEST_PATH = path.join(ROOT, 'public-promo-latest.json');
+const ADMIN_STATION_URL = 'https://www.sooplive.com/station/skftodwocks2/board/128562829';
 
 function readDatabase(pathname) {
   const output = execFileSync('firebase', ['database:get', pathname, '--project', PROJECT], {
@@ -106,11 +110,19 @@ function main() {
 
   const template = fs.readFileSync(TEMPLATE_PATH, 'utf8');
   const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const version = crypto.randomBytes(16).toString('hex');
   const safeJson = JSON.stringify(entries).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
-  const html = template.replace('__PROMO_SNAPSHOT__', safeJson).replace('__SNAPSHOT_DATE__', date);
-  if (html.includes('__PROMO_SNAPSHOT__') || html.includes('__SNAPSHOT_DATE__')) throw new Error('HTML 템플릿 치환이 완료되지 않았습니다.');
+  const html = template.replace('__PROMO_SNAPSHOT__', safeJson).replace('__SNAPSHOT_DATE__', date).replace('__VERSION_ID__', version);
+  if (html.includes('__PROMO_SNAPSHOT__') || html.includes('__SNAPSHOT_DATE__') || html.includes('__VERSION_ID__')) throw new Error('HTML 템플릿 치환이 완료되지 않았습니다.');
+  fs.mkdirSync(RELEASES_DIR, { recursive: true });
+  const releasePath = path.join(RELEASES_DIR, version + '.html');
+  const pageUrl = `https://neezu-crypto.github.io/admin-center/releases/${version}.html`;
+  const latest = { version, pageUrl, adminStationUrl: ADMIN_STATION_URL, updatedAt: new Date().toISOString() };
   fs.writeFileSync(OUTPUT_PATH, html);
-  console.log(`공개 페이지 생성 완료: ${OUTPUT_PATH} (${entries.length}명, 기준일 ${date})`);
+  fs.writeFileSync(releasePath, html);
+  fs.writeFileSync(LATEST_PATH, JSON.stringify(latest, null, 2) + '\n');
+  console.log(`공개 페이지 생성 완료: ${releasePath} (${entries.length}명, 기준일 ${date})`);
+  console.log(`이번 버전 URL: ${pageUrl}`);
 }
 
 try { main(); }
