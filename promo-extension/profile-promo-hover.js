@@ -58,16 +58,28 @@
       cleanText(button.textContent) === '？';
   }
 
+  function modifierPressed(event, property, name) {
+    if (event[property]) return true;
+    try { return typeof event.getModifierState === 'function' && event.getModifierState(name); }
+    catch (_) { return false; }
+  }
+
   function isFindUnconfirmedShortcut(event) {
-    return !!event && event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey &&
-      (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar');
+    if (!event) return false;
+    const control = modifierPressed(event, 'ctrlKey', 'Control');
+    const shift = modifierPressed(event, 'shiftKey', 'Shift');
+    const alt = modifierPressed(event, 'altKey', 'Alt');
+    const meta = modifierPressed(event, 'metaKey', 'Meta');
+    const space = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar' || event.key === 'Space' || event.keyCode === 32;
+    return control && shift && !alt && !meta && space;
   }
 
   const api = { stationIdFromProfileHref, cleanText, plausibleNickname, nicknameFromProfileAnchor, isUnconfirmedStatusIcon, isFindUnconfirmedShortcut };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons012) return;
-  root.__soopPromoProfileStatusIcons012 = true;
+  if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
+  root.__soopPromoProfileStatusIcons015 = true;
 
+  const DIAGNOSTIC_VERSION = '0.9.15';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();
@@ -77,6 +89,12 @@
   let lastFoundButton = null;
   let highlightTimer = 0;
   let noticeTimer = 0;
+
+  function logShortcut(stage, details) {
+    try {
+      console.info('[SOOP 홍보 단축키 진단]', JSON.stringify(Object.assign({ version: DIAGNOSTIC_VERSION, stage: stage, at: new Date().toISOString() }, details || {})));
+    } catch (_) { /* Diagnostics must never interrupt the page. */ }
+  }
 
   function cacheKey(stationId, nickname) {
     return stationId.toLowerCase() + '|' + nickname.normalize('NFC').toLocaleLowerCase();
@@ -160,6 +178,7 @@
     });
     if (!candidates.length) {
       lastFoundButton = null;
+      logShortcut('shortcut-no-candidate', { records: records.size });
       showFindNotice('현재 페이지에 미확인(？) 스트리머가 없습니다.');
       return;
     }
@@ -167,6 +186,7 @@
     index = (index + 1) % candidates.length;
     const record = candidates[index];
     lastFoundButton = record.button;
+    logShortcut('shortcut-candidate-found', { count: candidates.length, index: index + 1, stationId: record.stationId, nickname: record.nickname || '' });
     record.img.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
     position(record);
     clearTimeout(highlightTimer);
@@ -183,10 +203,22 @@
   }
 
   window.addEventListener('keydown', (event) => {
+    const space = event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar' || event.key === 'Space' || event.keyCode === 32;
+    const hasModifier = modifierPressed(event, 'ctrlKey', 'Control') || modifierPressed(event, 'shiftKey', 'Shift') ||
+      modifierPressed(event, 'altKey', 'Alt') || modifierPressed(event, 'metaKey', 'Meta');
+    if (space && hasModifier) {
+      logShortcut('modified-space-keydown', {
+        code: event.code || '', key: event.key || '', keyCode: event.keyCode || 0,
+        ctrlKey: modifierPressed(event, 'ctrlKey', 'Control'), shiftKey: modifierPressed(event, 'shiftKey', 'Shift'),
+        altKey: modifierPressed(event, 'altKey', 'Alt'), metaKey: modifierPressed(event, 'metaKey', 'Meta'),
+        targetTag: event.target && event.target.tagName || '', isTrusted: event.isTrusted === true,
+      });
+    }
     if (!isFindUnconfirmedShortcut(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    logShortcut('shortcut-accepted', {});
     findNextUnconfirmed();
   }, true);
 
@@ -330,5 +362,6 @@
   window.addEventListener('resize', positionAll, { passive: true });
   document.addEventListener('scroll', positionAll, { passive: true, capture: true });
   new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
+  logShortcut('listener-ready', { href: location.origin + location.pathname });
   scan();
 })(typeof globalThis !== 'undefined' ? globalThis : window);

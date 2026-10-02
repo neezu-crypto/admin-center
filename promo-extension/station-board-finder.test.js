@@ -156,9 +156,17 @@ test('Control+Shift+Space는 확장프로그램의 미확인 프로필 아이콘
   assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: { soopPromoProfileStatusIcon: 'true' }, textContent: ' ? ' }), false);
   assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: {}, textContent: '？' }), false);
   assert.equal(profileHover.isFindUnconfirmedShortcut({ ctrlKey: true, shiftKey: true, altKey: false, metaKey: false, code: 'Space' }), true);
+  assert.equal(profileHover.isFindUnconfirmedShortcut({ ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, code: 'Space', getModifierState: (key) => key === 'Control' || key === 'Shift' }), true);
   assert.equal(profileHover.isFindUnconfirmedShortcut({ ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, code: 'Space' }), false);
   assert.equal(profileHover.isFindUnconfirmedShortcut({ ctrlKey: true, shiftKey: true, altKey: true, metaKey: false, code: 'Space' }), false);
-  assert.match(hoverSource, /event\.ctrlKey && event\.shiftKey && !event\.altKey && !event\.metaKey/);
+  assert.match(hoverSource, /listener-ready/);
+  assert.match(hoverSource, /modified-space-keydown/);
+  assert.match(hoverSource, /shortcut-accepted/);
+  assert.match(hoverSource, /shortcut-candidate-found/);
+  assert.match(hoverSource, /shortcut-no-candidate/);
+  assert.match(hoverSource, /modifierPressed\(event, 'ctrlKey', 'Control'\)/);
+  assert.match(hoverSource, /modifierPressed\(event, 'shiftKey', 'Shift'\)/);
+  assert.match(hoverSource, /!alt && !meta && space/);
   assert.match(hoverSource, /record\.started && record\.img\.isConnected && record\.button\.isConnected && isUnconfirmedStatusIcon\(record\.button\)/);
   assert.match(hoverSource, /record\.img\.scrollIntoView\(\{ behavior: 'smooth', block: 'center'/);
   assert.match(hoverSource, /현재 페이지에 미확인\(？\) 스트리머가 없습니다/);
