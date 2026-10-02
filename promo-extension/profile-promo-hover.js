@@ -79,7 +79,7 @@
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
   root.__soopPromoProfileStatusIcons015 = true;
 
-  const DIAGNOSTIC_VERSION = '0.9.18';
+  const DIAGNOSTIC_VERSION = '0.9.19';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();
@@ -87,7 +87,6 @@
   let layer = null;
   let scanTimer = 0;
   let lastFoundButton = null;
-  let highlightTimer = 0;
   let noticeTimer = 0;
 
   function logShortcut(stage, details) {
@@ -194,19 +193,9 @@
     const record = candidates[index];
     lastFoundButton = record.button;
     logShortcut('shortcut-candidate-found', { count: candidates.length, index: index + 1, stationId: record.stationId, nickname: record.nickname || '' });
-    record.img.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
-    position(record);
-    clearTimeout(highlightTimer);
-    record.button.style.outline = '3px solid #f59e0b';
-    record.button.style.outlineOffset = '2px';
-    record.button.style.transform = 'scale(1.2)';
-    highlightTimer = window.setTimeout(() => {
-      if (!record.button.isConnected) return;
-      record.button.style.outline = '';
-      record.button.style.outlineOffset = '';
-      record.button.style.transform = '';
-    }, 1800);
-    showFindNotice('미확인 스트리머 ' + (index + 1) + '/' + candidates.length + ': ' + (record.nickname || '닉네임 확인 불가'));
+    const stationUrl = new URL('/station/' + encodeURIComponent(record.stationId), location.origin);
+    logShortcut('shortcut-station-open-requested', { stationId: record.stationId });
+    window.location.assign(stationUrl.href);
   }
 
   window.addEventListener('keydown', (event) => {

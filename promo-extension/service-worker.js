@@ -81,6 +81,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const allowedStages = new Set([
       'listener-ready', 'modified-space-keydown', 'shortcut-accepted',
       'shortcut-candidate-found', 'shortcut-no-candidate', 'browser-command-received',
+      'shortcut-station-open-requested',
     ]);
     const payload = message.diagnostic && typeof message.diagnostic === 'object' ? message.diagnostic : {};
     const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
@@ -90,6 +91,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     for (const key of ['code', 'key', 'targetTag']) {
       if (typeof payload[key] === 'string') details[key] = payload[key].slice(0, 32);
     }
+    if (typeof payload.stationId === 'string' && /^[A-Za-z0-9_-]{2,40}$/.test(payload.stationId)) details.stationId = payload.stationId;
     for (const key of ['keyCode', 'count', 'index', 'records']) {
       if (Number.isFinite(payload[key])) details[key] = Math.max(0, Math.min(10000, Math.trunc(payload[key])));
     }
