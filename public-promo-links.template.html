@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f6fa">
+  <title>뻐꾸기 · 콘텐츠 추천 · 게임 추천 게시판 링크 모음</title>
+  <style>
+    :root{color-scheme:light;--ink:#172033;--muted:#69758a;--line:#e1e6ef;--blue:#2878f0;--blue-soft:#edf4ff;--paper:#fff;--bg:#f5f6fa;--green:#14865c;--amber:#9a6700;--shadow:0 10px 30px #1720330d}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    button,input,textarea{font:inherit}button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.48}
+    .shell{max-width:1180px;margin:0 auto;padding:28px 22px 64px}.hero{padding:28px 30px;border-radius:22px;background:linear-gradient(125deg,#eef4ff,#fff 58%,#effaf6);border:1px solid #e2eaf5;box-shadow:var(--shadow)}
+    .eyebrow{font-size:12px;font-weight:800;letter-spacing:.08em;color:var(--blue);text-transform:uppercase}.hero h1{margin:8px 0 6px;font-size:clamp(23px,4vw,34px);line-height:1.25}.hero p{margin:0;color:var(--muted);max-width:820px}.updated{margin-top:14px;display:inline-flex;align-items:center;gap:7px;border:1px solid #dce7f8;background:#ffffffb8;border-radius:999px;padding:6px 11px;font-size:12px;color:#53647e}
+    .notice{margin-top:16px;padding:12px 15px;border:1px solid #eadfbf;background:#fffaf0;border-radius:12px;color:#755719;font-size:13px}
+    .layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,.86fr);gap:18px;margin-top:18px;align-items:start}.panel{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.panel-head{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.panel-head h2{font-size:16px;margin:0}.count{color:var(--muted);font-size:12px;white-space:nowrap}
+    .tools{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}.search{width:100%;border:1px solid var(--line);background:#fbfcfe;border-radius:11px;padding:10px 12px;outline:none}.search:focus,input:focus,textarea:focus{border-color:#83aef4;box-shadow:0 0 0 3px #2878f018}
+    .list{max-height:70vh;overflow:auto;padding:8px 12px}.row{padding:13px 5px;border-bottom:1px solid #edf0f5}.row:last-child{border-bottom:0}.identity{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.identity strong{font-size:15px}.id{font-size:12px;color:var(--muted)}.address-line{display:flex;gap:7px;margin-top:8px}.address{min-width:0;flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fcfdff;color:#354258;font-size:12px}.row-actions{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+    .btn{border:1px solid #d8dfeb;border-radius:9px;background:#fff;color:#34415a;padding:7px 10px;font-size:12px;font-weight:700}.btn:hover:not(:disabled){border-color:#9bb9ea;background:#f8fbff}.btn.primary{border-color:var(--blue);background:var(--blue);color:white}.btn.subtle{background:var(--blue-soft);border-color:#dce9ff;color:#2166c5}.btn.small{padding:5px 8px}.composer{padding:17px}.composer .empty{color:var(--muted);font-size:13px}.selected{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--blue-soft);border-radius:11px;margin-bottom:12px}.selected strong{font-size:14px}.field{display:block;margin:12px 0}.field span{display:block;margin-bottom:5px;font-size:12px;font-weight:800;color:#536078}.field input,.field textarea{width:100%;border:1px solid var(--line);border-radius:10px;background:white;padding:10px 11px;outline:none}.field textarea{min-height:200px;resize:vertical}.compose-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.status{font-size:12px;color:var(--green);min-height:1.4em}.backup{display:flex;gap:6px}.import-file{display:none}.empty-list{padding:34px 15px;text-align:center;color:var(--muted);font-size:13px}
+    footer{padding:18px 4px;color:#8590a3;font-size:11px;text-align:center}
+    @media(max-width:850px){.layout{grid-template-columns:1fr}.list{max-height:none}.hero{padding:22px}.shell{padding:16px 12px 42px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="eyebrow">SOOP Creator Links</div>
+      <h1>뻐꾸기 · 콘텐츠 추천 · 게임 추천<br>게시판 글쓰기 바로가기</h1>
+      <p>스트리머를 찾아 글쓰기 화면을 열고, 이 브라우저에서 홍보글 초안을 작성해 복사할 수 있습니다.</p>
+      <div class="updated">📦 기준 목록 업데이트 <time id="snapshotDate">—</time> · <span id="snapshotCount">목록 불러오는 중</span></div>
+      <div class="notice">주소 수정과 작성 중인 홍보글은 이 브라우저에만 저장됩니다. 관리자가 새 목록을 배포하면 최신 HTML 파일을 다시 받아 사용하세요. 브라우저나 파일 위치가 바뀔 때는 설정 백업을 이용할 수 있습니다.</div>
+    </header>
+
+    <section class="layout">
+      <section class="panel" aria-labelledby="listTitle">
+        <div class="panel-head"><h2 id="listTitle">스트리머 목록</h2><span class="count" id="visibleCount"></span></div>
+        <div class="tools"><input class="search" id="search" type="search" placeholder="닉네임 또는 SOOP 아이디 검색" autocomplete="off" aria-label="스트리머 검색"></div>
+        <div class="list" id="list" aria-live="polite"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="composeTitle">
+        <div class="panel-head"><h2 id="composeTitle">홍보글 작성</h2>
+          <div class="backup"><button class="btn small" id="exportBtn" type="button">백업</button><button class="btn small" id="importBtn" type="button">복원</button><input class="import-file" id="importFile" type="file" accept="application/json,.json"></div>
+        </div>
+        <div class="composer" id="composer"><p class="empty">목록에서 <b>홍보글 작성</b>을 선택하면 제목과 본문을 작성할 수 있습니다.</p></div>
+      </section>
+    </section>
+    <footer>홍보글 게시와 최종 확인은 각 SOOP 방송국에서 직접 진행해 주세요. 이 페이지는 게시글을 자동 등록하지 않습니다.</footer>
+  </main>
+
+  <script id="promoSnapshot" type="application/json">
+__PROMO_SNAPSHOT__
+  </script>
+  <script>
+  (() => {
+    'use strict';
+    const SNAPSHOT_DATE = '__SNAPSHOT_DATE__';
+    const STORAGE_KEY = 'soop-promo-public-page-local-v1';
+    const entries = JSON.parse(document.getElementById('promoSnapshot').textContent || '[]');
+    const listEl = document.getElementById('list');
+    const searchEl = document.getElementById('search');
+    const composerEl = document.getElementById('composer');
+    const localState = loadState();
+    let selectedKey = '';
+    document.getElementById('snapshotDate').textContent = SNAPSHOT_DATE;
+    document.getElementById('snapshotCount').textContent = entries.length.toLocaleString('ko-KR') + '명';
+
+    function loadState() {
+      try {
+        const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        return { addresses: value.addresses && typeof value.addresses === 'object' ? value.addresses : {}, drafts: value.drafts && typeof value.drafts === 'object' ? value.drafts : {} };
+      } catch (_) { return { addresses: {}, drafts: {} }; }
+    }
+    function persist() {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(localState)); return true; }
+      catch (_) { setStatus('브라우저 저장이 차단되었습니다. 백업 기능을 이용해 주세요.'); return false; }
+    }
+    function currentAddress(entry) {
+      return Object.prototype.hasOwnProperty.call(localState.addresses, entry.key) ? String(localState.addresses[entry.key] || '') : String(entry.writeUrl || '');
+    }
+    function safeLink(value) {
+      try {
+        const url = new URL(String(value || '').trim());
+        const host = url.hostname.toLowerCase();
+        const allowed = host === 'sooplive.com' || host.endsWith('.sooplive.com') || host === 'sooplive.co.kr' || host.endsWith('.sooplive.co.kr') || host === 'cafe.naver.com';
+        return url.protocol === 'https:' && allowed && !url.username && !url.password ? url.href : '';
+      } catch (_) { return ''; }
+    }
+    function button(label, className, onClick) {
+      const el = document.createElement('button'); el.type = 'button'; el.className = 'btn ' + (className || ''); el.textContent = label; el.addEventListener('click', onClick); return el;
+    }
+    function showRows() {
+      const query = searchEl.value.trim().toLocaleLowerCase();
+      const visible = entries.filter((entry) => (String(entry.nickname || '') + ' ' + String(entry.soopId || '')).toLocaleLowerCase().includes(query));
+      document.getElementById('visibleCount').textContent = visible.length.toLocaleString('ko-KR') + ' / ' + entries.length.toLocaleString('ko-KR') + '명';
+      listEl.replaceChildren();
+      if (!visible.length) { const empty = document.createElement('div'); empty.className = 'empty-list'; empty.textContent = '검색 결과가 없습니다.'; listEl.appendChild(empty); return; }
+      visible.forEach((entry) => {
+        const row = document.createElement('article'); row.className = 'row';
+        const identity = document.createElement('div'); identity.className = 'identity';
+        const name = document.createElement('strong'); name.textContent = entry.nickname || '(닉네임 미기재)'; identity.appendChild(name);
+        const id = document.createElement('span'); id.className = 'id'; id.textContent = entry.soopId ? '@' + entry.soopId : 'SOOP 아이디 미기재'; identity.appendChild(id);
+        const addressLine = document.createElement('div'); addressLine.className = 'address-line';
+        const address = document.createElement('input'); address.className = 'address'; address.type = 'text'; address.value = currentAddress(entry); address.placeholder = '게시판 글쓰기 주소'; address.setAttribute('aria-label', (entry.nickname || '스트리머') + ' 글쓰기 주소');
+        address.addEventListener('input', () => { localState.addresses[entry.key] = address.value; persist(); });
+        address.addEventListener('change', () => { localState.addresses[entry.key] = address.value.trim(); persist(); address.value = currentAddress(entry); });
+        addressLine.appendChild(address);
+        const actions = document.createElement('div'); actions.className = 'row-actions';
+        const writeButton = button('글쓰기 열기', 'subtle small', () => { const url = safeLink(address.value); if (!url) { setStatus('HTTPS 형식의 SOOP 또는 네이버 카페 주소를 확인해 주세요.'); address.focus(); return; } window.open(url, '_blank', 'noopener,noreferrer'); });
+        writeButton.disabled = !safeLink(address.value); address.addEventListener('input', () => { writeButton.disabled = !safeLink(address.value); });
+        const stationButton = button('방송국', 'small', () => { if (!/^[A-Za-z0-9]{2,20}$/.test(entry.soopId || '')) return; window.open('https://www.sooplive.com/station/' + encodeURIComponent(entry.soopId), '_blank', 'noopener,noreferrer'); });
+        stationButton.disabled = !/^[A-Za-z0-9]{2,20}$/.test(entry.soopId || '');
+        const composeButton = button('홍보글 작성', 'primary small', () => openComposer(entry));
+        actions.append(writeButton, stationButton, composeButton);
+        row.append(identity, addressLine, actions); listEl.appendChild(row);
+      });
+    }
+    function openComposer(entry) {
+      selectedKey = entry.key;
+      const draft = localState.drafts[selectedKey] || {};
+      composerEl.replaceChildren();
+      const selected = document.createElement('div'); selected.className = 'selected';
+      const selectedName = document.createElement('strong'); selectedName.textContent = (entry.nickname || '(닉네임 미기재)') + (entry.soopId ? ' · @' + entry.soopId : ''); selected.appendChild(selectedName);
+      const open = button('글쓰기 열기', 'subtle small', () => { const url = safeLink(currentAddress(entry)); if (url) window.open(url, '_blank', 'noopener,noreferrer'); else setStatus('먼저 올바른 글쓰기 주소를 입력해 주세요.'); }); selected.appendChild(open); composerEl.appendChild(selected);
+      const titleField = makeField('제목', 'text', '제목을 입력하세요.'); titleField.input.value = draft.title || ''; composerEl.appendChild(titleField.wrap);
+      const bodyField = makeField('본문', 'textarea', '홍보글 내용을 입력하세요.'); bodyField.input.value = draft.body || ''; composerEl.appendChild(bodyField.wrap);
+      const copy = button('제목 + 본문 복사', 'primary', async () => {
+        const text = [titleField.input.value.trim(), bodyField.input.value.trim()].filter(Boolean).join('\n\n');
+        if (!text) { setStatus('복사할 제목이나 본문을 입력해 주세요.'); return; }
+        try { await navigator.clipboard.writeText(text); setStatus('홍보글 내용을 클립보드에 복사했습니다.'); }
+        catch (_) { titleField.input.focus(); titleField.input.select(); setStatus('자동 복사할 수 없습니다. 제목과 본문을 선택해 복사해 주세요.'); }
+      });
+      const actions = document.createElement('div'); actions.className = 'compose-actions'; actions.appendChild(copy); composerEl.appendChild(actions);
+      const status = document.createElement('div'); status.className = 'status'; status.id = 'composerStatus'; status.setAttribute('role','status'); composerEl.appendChild(status);
+      const saveDraft = () => { localState.drafts[selectedKey] = { title: titleField.input.value, body: bodyField.input.value }; persist(); };
+      titleField.input.addEventListener('input', saveDraft); bodyField.input.addEventListener('input', saveDraft);
+    }
+    function makeField(label, type, placeholder) {
+      const wrap = document.createElement('label'); wrap.className = 'field'; const title = document.createElement('span'); title.textContent = label; wrap.appendChild(title);
+      const input = document.createElement(type === 'textarea' ? 'textarea' : 'input'); if (type !== 'textarea') input.type = type; input.placeholder = placeholder; wrap.appendChild(input); return { wrap, input };
+    }
+    function setStatus(message) { const el = document.getElementById('composerStatus'); if (el) el.textContent = message; }
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(localState, null, 2)], { type: 'application/json' }); const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'soop-promo-local-settings.json'; link.click(); URL.revokeObjectURL(link.href);
+    });
+    const importFile = document.getElementById('importFile');
+    document.getElementById('importBtn').addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', async () => {
+      const file = importFile.files && importFile.files[0]; if (!file) return;
+      try { const data = JSON.parse(await file.text()); if (!data || typeof data !== 'object') throw new Error('invalid'); localState.addresses = data.addresses && typeof data.addresses === 'object' ? data.addresses : {}; localState.drafts = data.drafts && typeof data.drafts === 'object' ? data.drafts : {}; persist(); showRows(); setStatus('브라우저 설정을 복원했습니다.'); }
+      catch (_) { setStatus('설정 파일을 읽지 못했습니다.'); }
+      importFile.value = '';
+    });
+    searchEl.addEventListener('input', showRows);
+    showRows();
+  })();
+  </script>
+</body>
+</html>
