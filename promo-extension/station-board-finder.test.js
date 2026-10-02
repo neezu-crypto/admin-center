@@ -5,6 +5,14 @@ const path = require('node:path');
 const finder = require('./station-board-finder.js');
 const profileHover = require('./profile-promo-hover.js');
 
+test('홍보 기본 목록은 공개 JSON 파일이 아니라 관리자 전용 RTDB에서 읽는다', () => {
+  const functionsSource = fs.readFileSync(path.join(__dirname, '..', 'functions', 'index.js'), 'utf8');
+  assert.doesNotMatch(functionsSource, /require\(['"]\.\/streamer-promo-seed\.json['"]\)/);
+  assert.match(functionsSource, /adminCenter\/streamerPromoSeed/);
+  assert.match(functionsSource, /function getKnownPromoEntries\(seedValue, verifiedValue, candidateValue\)/);
+  assert.ok(!fs.existsSync(path.join(__dirname, '..', 'functions', 'streamer-promo-seed.json')));
+});
+
 test('렌더러에는 링크·버튼 배열을 포함한 스캔 결과 객체를 전달한다', () => {
   const source = fs.readFileSync(path.join(__dirname, 'station-board-finder.js'), 'utf8');
   assert.match(source, /render\(result,\s*stationId,\s*result\)/);

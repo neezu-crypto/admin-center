@@ -352,14 +352,16 @@ codebase는 `messenger`다. 이 저장소의 `database.rules.json`은 현재 동
 6. 팬 전용 게시판의 접근 제한은 사용자가 앞서 허용한 경우에 한해 즐겨찾기(흰 별)를 추가하고
    알림을 끈 뒤 확인한다. 유료 구독, 별풍선 선물, 결제는 하지 않는다. 접근이 계속 막히면
    미확인으로 기록한다.
-7. 확인된 URL을 로컬 `functions/streamer-promo-seed.json`과 Admin Center 전체 목록에 다시
-   대조한다. 중복은 제외하고 확인된 신규 후보만 `key`/`soopId`를 방송국 ID로, `nickname`을
-   확인된 표시명으로, `writeUrl`을 글쓰기 전체 URL로 추가한다. 홍보 완료 상태는 별도 요청이
-   없는 한 바꾸지 않는다.
-8. JSON 파싱, key 중복, 신규 URL 형식, 추가/중복 수를 검증한다. `functions/index.js`에서
-   `listStreamerPromoLinks`가 seed를 읽는지 확인한다. seed만 바뀌면 이 함수만 다음처럼 배포한다:
-   `firebase deploy --only functions:admincenter:listStreamerPromoLinks --project soop-stock-market`
-   함수 코드도 수정했다면 변경된 함수명만 codebase와 함께 지정한다. 전체 Functions 배포는 금지한다.
+7. 확인된 URL을 Admin Center 전체 목록과 대조한다. 기본 목록은 Firebase RTDB의
+   `adminCenter/streamerPromoSeed`, 수동 추가 후보는 `adminCenter/streamerPromoCandidates`에
+   저장된다. 새 후보는 관리자 센터의 등록 기능을 사용하고, seed 경로를 직접 수정하는 마이그레이션은
+   기존 데이터를 먼저 백업·대조한다. 중복은 제외하고 확인된 신규 후보만 `key`/`soopId`를
+   방송국 ID로, `nickname`을 확인된 표시명으로, `writeUrl`을 글쓰기 전체 URL로 등록한다.
+   홍보 완료 상태는 별도 요청이 없는 한 바꾸지 않는다.
+8. 입력 데이터의 JSON 파싱, key 중복, 신규 URL 형식, 추가/중복 수를 검증한다.
+   `functions/index.js`의 `listStreamerPromoLinks` 및 관련 관리 함수가 RTDB seed를 읽는지
+   확인한다. seed 데이터만 바뀌면 함수 배포는 하지 않고 RTDB 반영·전체 목록 조회를 확인한다.
+   함수 코드가 수정되면 변경된 함수명만 codebase와 함께 지정한다. 전체 Functions 배포는 금지한다.
 9. 검증과 배포가 성공하면 이번 작업 파일만 한글 커밋 메시지로 커밋하고 기본 브랜치에 푸시한다.
    배포 성공을 확인한 후 완료 링크 수, 신규 추가 수, 중복 스킵 수, 접근 제한·검색 오류로 미확인인
    후보를 구분해 보고한다. 로그인/UI/권한/검증/배포 오류가 있으면 중단 사실을 투명하게 알린다.

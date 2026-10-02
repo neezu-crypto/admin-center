@@ -5,7 +5,6 @@ const { initializeApp } = require('firebase-admin/app');
 const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
-const STREAMER_PROMO_SEED = require('./streamer-promo-seed.json');
 
 initializeApp();
 
@@ -648,8 +647,9 @@ function promoStorageKey(verificationId, soopId) {
   return normalizedId || ('verification_' + String(verificationId || '').replace(/[^A-Za-z0-9_-]/g, '_'));
 }
 
-function getKnownPromoEntries(verifiedValue, candidateValue) {
-  const entries = STREAMER_PROMO_SEED.map(function (entry) {
+function getKnownPromoEntries(seedValue, verifiedValue, candidateValue) {
+  const entries = Object.keys(seedValue || {}).map(function (key) {
+    const entry = seedValue[key] || {};
     return Object.assign({}, entry, { isSeed: true });
   });
   const byKey = {};
@@ -704,12 +704,13 @@ function collectVerifiedStreamerEntries(value) {
 const listStreamerPromoLinks = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap] = await Promise.all([
+  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap, seedSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoLinks').get(),
     db.ref('adminCenter/streamerPromoRecent').get(),
     db.ref('adminCenter/streamerPromoExcluded').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
+    db.ref('adminCenter/streamerPromoSeed').get(),
   ]);
   const links = linksSnap.val() || {};
   let recentOpened = recentSnap.val() || null;
@@ -739,7 +740,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
     await db.ref().update(cleanupUpdates);
   }
   const excludedPromoIds = excludedPromoSnap.val() || {};
-  const knownPromoEntries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+  const knownPromoEntries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
   const isExcluded = function (entry) {
     return excludedPromoIds[entry.key] === true || (entry.soopId && excludedPromoIds[entry.soopId] === true);
   };
@@ -798,11 +799,12 @@ const addStreamerPromoCandidate = onCall(async (request) => {
   }
 
   const db = getDatabase();
-  const [verifiedSnap, candidatesSnap] = await Promise.all([
+  const [verifiedSnap, candidatesSnap, seedSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
+    db.ref('adminCenter/streamerPromoSeed').get(),
   ]);
-  const entries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+  const entries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
   const normalizedNickname = nickname.toLocaleLowerCase();
   const duplicate = entries.find(function (entry) {
     return String(entry.soopId || '').toLowerCase() === soopId ||
@@ -839,11 +841,12 @@ const setStreamerPromoExclusion = onCall(async (request) => {
   const db = getDatabase();
   const exclusionRef = db.ref('adminCenter/streamerPromoExcluded/' + soopId);
   if (excluded) {
-    const [verifiedSnap, candidatesSnap] = await Promise.all([
+    const [verifiedSnap, candidatesSnap, seedSnap] = await Promise.all([
       db.ref('streamerVerifications').get(),
       db.ref('adminCenter/streamerPromoCandidates').get(),
+      db.ref('adminCenter/streamerPromoSeed').get(),
     ]);
-    const known = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+    const known = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
     const registered = known.find(function (entry) {
       return String(entry.soopId || '').toLowerCase() === soopId ||
         String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === nickname.toLocaleLowerCase();
@@ -871,11 +874,12 @@ const saveStreamerPromoLink = onCall(async (request) => {
   }
 
   const db = getDatabase();
-  const [verifiedSnap, candidatesSnap] = await Promise.all([
+  const [verifiedSnap, candidatesSnap, seedSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
+    db.ref('adminCenter/streamerPromoSeed').get(),
   ]);
-  const entries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+  const entries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
   const entry = entries.find(function (item) {
     return (requestedPromoKey && item.key === requestedPromoKey) ||
       (!requestedPromoKey && requestedSoopId && item.soopId === requestedSoopId) ||
@@ -910,11 +914,12 @@ async function requireKnownPromoEntry(db, data) {
   if (!requestedKey && !requestedSoopId && !requestedVerificationId) {
     throw new HttpsError('invalid-argument', '스트리머 식별자가 필요합니다.');
   }
-  const [verifiedSnap, candidatesSnap] = await Promise.all([
+  const [verifiedSnap, candidatesSnap, seedSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
+    db.ref('adminCenter/streamerPromoSeed').get(),
   ]);
-  const entries = getKnownPromoEntries(verifiedSnap.val(), candidatesSnap.val());
+  const entries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
   const entry = entries.find(function (item) {
     return (requestedKey && item.key === requestedKey) ||
       (!requestedKey && requestedSoopId && item.soopId === requestedSoopId) ||
