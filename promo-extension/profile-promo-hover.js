@@ -53,7 +53,12 @@
     return '';
   }
 
-  const api = { stationIdFromProfileHref, cleanText, plausibleNickname, nicknameFromProfileAnchor };
+  function isUnconfirmedStatusIcon(button) {
+    return !!button && button.dataset && button.dataset.soopPromoProfileStatusIcon === 'true' &&
+      cleanText(button.textContent) === '？';
+  }
+
+  const api = { stationIdFromProfileHref, cleanText, plausibleNickname, nicknameFromProfileAnchor, isUnconfirmedStatusIcon };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons012) return;
   root.__soopPromoProfileStatusIcons012 = true;
@@ -64,6 +69,9 @@
   const records = new Set();
   let layer = null;
   let scanTimer = 0;
+  let lastFoundButton = null;
+  let highlightTimer = 0;
+  let noticeTimer = 0;
 
   function cacheKey(stationId, nickname) {
     return stationId.toLowerCase() + '|' + nickname.normalize('NFC').toLocaleLowerCase();
@@ -113,6 +121,71 @@
   function positionAll() {
     for (const record of records) position(record);
   }
+
+  function showFindNotice(message) {
+    ensureLayer();
+    let notice = document.getElementById('soop-promo-profile-find-notice');
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.id = 'soop-promo-profile-find-notice';
+      notice.setAttribute('role', 'status');
+      notice.setAttribute('aria-live', 'polite');
+      notice.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:2;padding:10px 14px;border:1px solid #b8c9e4;border-radius:10px;background:#fff;color:#172033;box-shadow:0 4px 18px #17203330;font:600 13px/1.4 system-ui,-apple-system,sans-serif;pointer-events:none;max-width:calc(100vw - 32px);';
+      layer.appendChild(notice);
+    }
+    notice.textContent = message;
+    notice.style.display = 'block';
+    clearTimeout(noticeTimer);
+    noticeTimer = window.setTimeout(() => { notice.style.display = 'none'; }, 2200);
+  }
+
+  function findNextUnconfirmed() {
+    if (scanTimer) {
+      clearTimeout(scanTimer);
+      scanTimer = 0;
+    }
+    scan();
+    const candidates = Array.from(records).filter((record) =>
+      record.started && record.img.isConnected && record.button.isConnected && isUnconfirmedStatusIcon(record.button));
+    candidates.sort((left, right) => {
+      const position = left.img.compareDocumentPosition(right.img);
+      if (position & 4) return -1; // DOCUMENT_POSITION_FOLLOWING
+      if (position & 2) return 1; // DOCUMENT_POSITION_PRECEDING
+      return 0;
+    });
+    if (!candidates.length) {
+      lastFoundButton = null;
+      showFindNotice('현재 페이지에 미확인(？) 스트리머가 없습니다.');
+      return;
+    }
+    let index = candidates.findIndex((record) => record.button === lastFoundButton);
+    index = (index + 1) % candidates.length;
+    const record = candidates[index];
+    lastFoundButton = record.button;
+    record.img.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    position(record);
+    clearTimeout(highlightTimer);
+    record.button.style.outline = '3px solid #f59e0b';
+    record.button.style.outlineOffset = '2px';
+    record.button.style.transform = 'scale(1.2)';
+    highlightTimer = window.setTimeout(() => {
+      if (!record.button.isConnected) return;
+      record.button.style.outline = '';
+      record.button.style.outlineOffset = '';
+      record.button.style.transform = '';
+    }, 1800);
+    showFindNotice('미확인 스트리머 ' + (index + 1) + '/' + candidates.length + ': ' + (record.nickname || '닉네임 확인 불가'));
+  }
+
+  window.addEventListener('keydown', (event) => {
+    const isControlSpace = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey &&
+      (event.code === 'Space' || event.key === ' ' || event.key === 'Spacebar');
+    if (!isControlSpace) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    findNextUnconfirmed();
+  }, true);
 
   function refreshKey(key, status) {
     for (const record of records) {
@@ -204,6 +277,7 @@
     const nickname = nicknameFromProfileAnchor(anchor);
     const button = document.createElement('button');
     button.type = 'button';
+    button.dataset.soopPromoProfileStatusIcon = 'true';
     button.setAttribute('aria-label', nickname ? '홍보 리스트 상태 확인 중' : '스트리머 닉네임을 확인할 수 없습니다');
     button.style.cssText = 'position:fixed;display:none;place-items:center;width:20px;height:20px;padding:0;border:1px solid #cbd5e1;border-radius:50%;box-shadow:0 1px 4px #17203330;color:#172033;font:700 12px/1 system-ui,-apple-system,sans-serif;pointer-events:auto;z-index:1;';
     record = { img: img, anchor: anchor, stationId: stationId, nickname: nickname, key: nickname ? cacheKey(stationId, nickname) : '', button: button, status: 'checking', started: false };

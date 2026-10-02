@@ -150,6 +150,18 @@ test('프로필 이미지 로드 후 상태 아이콘을 표시하고 제외·�
   assert.match(hoverSource, /event\.stopPropagation\(\)/);
 });
 
+test('Ctrl+Space는 확장프로그램의 미확인 프로필 아이콘만 순회한다', () => {
+  const hoverSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
+  assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: { soopPromoProfileStatusIcon: 'true' }, textContent: '？' }), true);
+  assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: { soopPromoProfileStatusIcon: 'true' }, textContent: ' ? ' }), false);
+  assert.equal(profileHover.isUnconfirmedStatusIcon({ dataset: {}, textContent: '？' }), false);
+  assert.match(hoverSource, /event\.ctrlKey && !event\.altKey && !event\.metaKey && !event\.shiftKey/);
+  assert.match(hoverSource, /event\.code === 'Space' \|\| event\.key === ' ' \|\| event\.key === 'Spacebar'/);
+  assert.match(hoverSource, /record\.started && record\.img\.isConnected && record\.button\.isConnected && isUnconfirmedStatusIcon\(record\.button\)/);
+  assert.match(hoverSource, /record\.img\.scrollIntoView\(\{ behavior: 'smooth', block: 'center'/);
+  assert.match(hoverSource, /현재 페이지에 미확인\(？\) 스트리머가 없습니다/);
+});
+
 test('방송국 닉네임을 추출하고 신뢰도 높은 후보부터 정렬한다', () => {
   assert.equal(finder.stationNicknameFromTitles('도미-의 방송국 | SOOP', ''), '도미-');
   assert.equal(finder.stationNicknameFromTitles('SOOP', '도미-의 방송국'), '도미-');
