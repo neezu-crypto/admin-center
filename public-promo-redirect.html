@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <meta name="referrer" content="no-referrer">
+  <title>최신 홍보 게시판 링크 모음으로 이동 중</title>
+  <style>
+    :root{color-scheme:light}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:22px;background:#eee9dd;color:#202329;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}.card{width:min(560px,100%);padding:clamp(24px,6vw,42px);background:#fbf8f0;border:1px solid #d7cfbf;box-shadow:0 14px 44px #322a1d18}.eyebrow{margin:0 0 13px;color:#8e6047;font-size:11px;font-weight:800;letter-spacing:.18em}.rule{height:4px;border-top:1px solid #262626;border-bottom:1px solid #262626}.card h1{margin:24px 0 12px;font-family:Georgia,"Batang",serif;font-size:clamp(25px,6vw,35px);line-height:1.2;letter-spacing:-.04em}.card p{margin:0;color:#666157;line-height:1.7;font-size:14px}.status{margin-top:22px;padding:13px 15px;border-left:3px solid #95694c;background:#f0ece2;color:#49463f;font-size:13px}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}.actions a,.actions button{display:inline-block;border:0;padding:12px 17px;background:#263b48;color:#fff;font:700 13px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;text-decoration:none;cursor:pointer}.actions .secondary{background:#e9e3d7;color:#3f3a32;border:1px solid #d0c7b7}.fine{margin-top:17px!important;font-size:11px!important}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">SOOP CREATOR LINKS · LATEST EDITION</p>
+    <div class="rule" aria-hidden="true"></div>
+    <h1>최신 게시판 링크 모음으로<br>이동하고 있습니다</h1>
+    <p>새 버전 주소를 확인한 뒤 안전하게 연결합니다. 잠시만 기다려 주세요.</p>
+    <div class="status" id="status" role="status" aria-live="polite">최신 버전을 확인하고 있습니다…</div>
+    <div class="actions" id="actions" hidden>
+      <button type="button" id="retry">다시 확인</button>
+      <a class="secondary" href="https://www.sooplive.com/station/skftodwocks2/board/128562829" target="_blank" rel="noopener noreferrer">관리자 방송국</a>
+    </div>
+    <p class="fine">연결이 계속되지 않으면 다시 확인하거나 관리자 방송국에서 최신 안내를 확인해 주세요.</p>
+  </main>
+  <script>
+    (function(){
+      'use strict';
+      var statusEl=document.getElementById('status');
+      var actions=document.getElementById('actions');
+      var retry=document.getElementById('retry');
+      var destinationPattern=/^\/admin-center\/releases\/([a-f0-9]{32})\.html$/;
+      function resolveLatest(){
+        statusEl.textContent='최신 버전을 확인하고 있습니다…';
+        actions.hidden=true;
+        var latestUrl=new URL('./public-promo-latest.json?refresh='+Date.now(),window.location.href);
+        fetch(latestUrl.toString(),{cache:'no-store',credentials:'omit'})
+          .then(function(response){if(!response.ok)throw new Error('목록을 불러오지 못했습니다.');return response.json();})
+          .then(function(data){
+            var target=new URL(String(data&&data.pageUrl||''));
+            var match=destinationPattern.exec(target.pathname);
+            if(target.origin!=='https://neezu-crypto.github.io'||!match||match[1]!==String(data.version||''))throw new Error('최신 링크 정보가 올바르지 않습니다.');
+            statusEl.textContent='최신 버전으로 이동합니다.';
+            window.location.replace(target.toString());
+          })
+          .catch(function(error){
+            statusEl.textContent=(error&&error.message?error.message:'최신 버전을 확인하지 못했습니다.')+' 인터넷 연결을 확인한 뒤 다시 시도해 주세요.';
+            actions.hidden=false;
+          });
+      }
+      retry.addEventListener('click',resolveLatest);
+      resolveLatest();
+    }());
+  </script>
+</body>
+</html>
