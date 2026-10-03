@@ -139,8 +139,13 @@ function main() {
   const privateMapPath = path.join(os.tmpdir(), `admin-center-public-promo-link-map-${version}.json`);
   fs.writeFileSync(privateMapPath, JSON.stringify(privateLinkMap));
   const retiredHtml = retiredPageHtml();
-  for (const filename of fs.readdirSync(RELEASES_DIR)) {
-    if (filename.endsWith('.html') && filename !== `${version}.html`) fs.writeFileSync(path.join(RELEASES_DIR, filename), retiredHtml);
+  const trackedReleaseFiles = execFileSync('git', ['ls-files', '--', 'releases/*.html'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  }).split(/\r?\n/).filter(Boolean);
+  for (const relativePath of trackedReleaseFiles) {
+    const filename = path.basename(relativePath);
+    if (filename !== `${version}.html`) fs.writeFileSync(path.join(RELEASES_DIR, filename), retiredHtml);
   }
   // Keep the predictable historical path as a locked entry point. Only the
   // random release URL receives the active version ID.
