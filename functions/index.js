@@ -36,6 +36,143 @@ const getPublicPromoPageVersion = onCall(async (request) => {
 
 const PUBLIC_PROMO_DIRECTORY_PAGE_SIZE = 30;
 const PUBLIC_PROMO_DIRECTORY_ORIGIN = 'https://neezu-crypto.github.io';
+const PUBLIC_PROMO_ANALYTICS_EVENTS = new Set(['view', 'search', 'click']);
+
+function getKoreaDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(date);
+}
+
+async function incrementPromoAnalytics(ref) {
+  await ref.transaction((value) => (Number(value) || 0) + 1, undefined, false);
+}
+
+// 공개 페이지 이벤트는 집계값만 보관한다. 검색어·계정 ID·IP 원문은 기록하지 않고,
+// 스트리머별 클릭은 key의 SHA-256 해시로만 묶는다.
+const recordPublicPromoEvent = onRequest(async (request, response) => {
+  response.set('Cache-Control', 'no-store');
+  response.set('Vary', 'Origin');
+  const origin = String(request.get('Origin') || '');
+  if (origin !== PUBLIC_PROMO_DIRECTORY_ORIGIN) {
+    response.status(403).json({ message: '허용된 페이지에서만 요청할 수 있습니다.' });
+    return;
+  }
+  response.set('Access-Control-Allow-Origin', PUBLIC_PROMO_DIRECTORY_ORIGIN);
+  if (request.method === 'OPTIONS') {
+    response.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
+    response.status(204).send('');
+    return;
+  }
+  if (request.method !== 'POST') {
+    response.status(405).json({ message: 'POST 요청만 허용됩니다.' });
+    return;
+  }
+  try {
+    let body = request.body;
+    if (Buffer.isBuffer(body)) body = body.toString('utf8');
+    if ((body === undefined || body === null || body === '') && request.rawBody) body = request.rawBody.toString('utf8');
+    if (typeof body === 'string') body = JSON.parse(body || '{}');
+    if (!body || typeof body !== 'object') body = {};
+    const version = String(body.version || '');
+    const eventName = String(body.event || '');
+    const entryKey = String(body.key || '');
+    if (!/^[a-f0-9]{32}$/.test(version) || !PUBLIC_PROMO_ANALYTICS_EVENTS.has(eventName)) {
+      response.status(400).json({ message: '이벤트 정보가 올바르지 않습니다.' });
+      return;
+    }
+    if (eventName === 'click' && (!entryKey || entryKey.length > 200 || ['.', '#', '$', '/', '[', ']'].some((character) => entryKey.includes(character)))) {
+      response.status(400).json({ message: '항목 정보가 올바르지 않습니다.' });
+      return;
+    }
+    const db = getDatabase();
+    const current = (await db.ref('adminCenter/publicPromoPage/currentVersion').get()).val();
+    const activeVersion = typeof current === 'string' ? current : String((current || {}).version || '');
+    if (activeVersion !== version) {
+      response.status(410).json({ active: false });
+      return;
+    }
+    if (!await takePublicPromoRateLimit(request, 'analytics', 240)) {
+      response.set('Retry-After', '3600');
+      response.status(429).json({ message: '요청 한도에 도달했습니다.' });
+      return;
+    }
+    const dateKey = getKoreaDateKey();
+    const dayRef = db.ref(`adminCenter/publicPromoPage/analytics/daily/${dateKey}`);
+    if (eventName === 'click') {
+      const digest = require('node:crypto').createHash('sha256').update(entryKey).digest('hex');
+      const linkExists = await db.ref(`adminCenter/publicPromoPage/linkMaps/${version}/${digest}`).get();
+      if (!linkExists.exists()) {
+        response.status(404).json({ message: '등록된 링크를 찾을 수 없습니다.' });
+        return;
+      }
+      await incrementPromoAnalytics(dayRef.child(`linkClicksByStreamer/${digest}`));
+      await incrementPromoAnalytics(dayRef.child('linkClicks'));
+    } else {
+      await incrementPromoAnalytics(dayRef.child(eventName === 'view' ? 'pageViews' : 'searches'));
+    }
+    response.status(204).send('');
+  } catch (error) {
+    console.error('recordPublicPromoEvent failed:', error);
+    response.status(500).json({ message: '통계를 기록하지 못했습니다.' });
+  }
+});
+
+const getPublicPromoPageStats = onCall(async (request) => {
+  await requireAdmin(request);
+  const requestedDays = Math.floor(Number((request.data || {}).days) || 30);
+  const days = [7, 30, 90].includes(requestedDays) ? requestedDays : 30;
+  const db = getDatabase();
+  const analyticsRef = db.ref('adminCenter/publicPromoPage/analytics/daily');
+  const [analyticsSnap, currentSnap] = await Promise.all([
+    analyticsRef.get(),
+    db.ref('adminCenter/publicPromoPage/currentVersion').get(),
+  ]);
+  const current = currentSnap.val();
+  const activeVersion = typeof current === 'string' ? current : String((current || {}).version || '');
+  const directorySnap = activeVersion
+    ? await db.ref(`adminCenter/publicPromoPage/directories/${activeVersion}/pages`).get()
+    : null;
+  const allDays = analyticsSnap.val() || {};
+  const directoryPages = directorySnap && directorySnap.val() || {};
+  const dateCursor = new Date(`${getKoreaDateKey()}T12:00:00Z`);
+  const daily = [];
+  const clicksByStreamer = {};
+  for (let offset = days - 1; offset >= 0; offset -= 1) {
+    const day = new Date(dateCursor);
+    day.setUTCDate(day.getUTCDate() - offset);
+    const date = getKoreaDateKey(day);
+    const item = allDays[date] || {};
+    const clicks = Math.max(0, Number(item.linkClicks) || 0);
+    daily.push({
+      date,
+      pageViews: Math.max(0, Number(item.pageViews) || 0),
+      searches: Math.max(0, Number(item.searches) || 0),
+      linkClicks: clicks,
+    });
+    Object.entries(item.linkClicksByStreamer || {}).forEach(([hash, count]) => {
+      clicksByStreamer[hash] = (clicksByStreamer[hash] || 0) + Math.max(0, Number(count) || 0);
+    });
+  }
+  const namesByHash = {};
+  Object.values(directoryPages).forEach((page) => {
+    Object.values(page || {}).forEach((entry) => {
+      if (!entry || !entry.key) return;
+      const hash = require('node:crypto').createHash('sha256').update(String(entry.key)).digest('hex');
+      namesByHash[hash] = { nickname: String(entry.nickname || ''), soopId: String(entry.soopId || '') };
+    });
+  });
+  const topStreamers = Object.entries(clicksByStreamer)
+    .map(([hash, clicks]) => ({ ...(namesByHash[hash] || { nickname: '현재 목록에 없는 항목', soopId: '' }), clicks }))
+    .sort((a, b) => b.clicks - a.clicks)
+    .slice(0, 20);
+  const totals = daily.reduce((sum, item) => ({
+    pageViews: sum.pageViews + item.pageViews,
+    searches: sum.searches + item.searches,
+    linkClicks: sum.linkClicks + item.linkClicks,
+  }), { pageViews: 0, searches: 0, linkClicks: 0 });
+  return { days, totals, daily, topStreamers };
+});
+
 async function takePublicPromoRateLimit(request, bucket, maxRequests) {
   const ip = String(request.ip || request.rawRequest && request.rawRequest.ip || 'unknown');
   const key = require('node:crypto').createHash('sha256').update(ip).digest('hex').slice(0, 40);
@@ -3092,6 +3229,8 @@ const activateOnyuGiftsAfterStreamerVerification = onValueWritten('/streamerVeri
 module.exports = {
   getPublicPromoPageVersion,
   getPublicPromoDirectory,
+  recordPublicPromoEvent,
+  getPublicPromoPageStats,
   openPublicPromoLink,
   getGalleryStats,
   getLifeGameStats,
