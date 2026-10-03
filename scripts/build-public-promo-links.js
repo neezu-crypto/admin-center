@@ -108,7 +108,7 @@ function main() {
         const allowed = url.protocol === 'https:' && !url.username && !url.password &&
           (host === 'sooplive.com' || host.endsWith('.sooplive.com') || host === 'sooplive.co.kr' || host.endsWith('.sooplive.co.kr') || host === 'cafe.naver.com');
         if (allowed) {
-          token = crypto.randomBytes(16).toString('hex');
+          token = crypto.createHash('sha256').update(String(entry.key || '')).digest('hex');
           privateLinkMap[token] = url.toString();
         }
       } catch (_) { /* Keep entries with no valid link visible but not openable. */ }
@@ -116,7 +116,7 @@ function main() {
         key: String(entry.key || ''),
         nickname: String(entry.nickname || '').trim(),
         soopId: normalizeSoopId(entry.soopId),
-        token,
+        hasLink: Boolean(token),
       };
     })
     .filter((entry) => {
@@ -129,15 +129,18 @@ function main() {
   const template = fs.readFileSync(TEMPLATE_PATH, 'utf8');
   const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date());
   const version = crypto.randomBytes(16).toString('hex');
-  const safeJson = JSON.stringify(entries).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
-  const html = template.replace('__PROMO_SNAPSHOT__', safeJson).replace('__SNAPSHOT_DATE__', date).replace('__VERSION_ID__', version);
-  if (html.includes('__PROMO_SNAPSHOT__') || html.includes('__SNAPSHOT_DATE__') || html.includes('__VERSION_ID__')) throw new Error('HTML 템플릿 치환이 완료되지 않았습니다.');
+  const html = template.replace('__SNAPSHOT_DATE__', date).replace('__VERSION_ID__', version);
+  if (html.includes('__SNAPSHOT_DATE__') || html.includes('__VERSION_ID__') || html.includes('__PROMO_SNAPSHOT__')) throw new Error('HTML 템플릿 치환이 완료되지 않았습니다.');
   fs.mkdirSync(RELEASES_DIR, { recursive: true });
   const releasePath = path.join(RELEASES_DIR, version + '.html');
   const pageUrl = `https://neezu-crypto.github.io/admin-center/releases/${version}.html`;
   const latest = { version, pageUrl, adminStationUrl: ADMIN_STATION_URL, updatedAt: new Date().toISOString() };
   const privateMapPath = path.join(os.tmpdir(), `admin-center-public-promo-link-map-${version}.json`);
-  fs.writeFileSync(privateMapPath, JSON.stringify(privateLinkMap));
+  const directoryPath = path.join(os.tmpdir(), `admin-center-public-promo-directory-${version}.json`);
+  const pages = {};
+  for (let offset = 0; offset < entries.length; offset += 30) pages[String(offset / 30)] = entries.slice(offset, offset + 30);
+  fs.writeFileSync(privateMapPath, JSON.stringify(privateLinkMap), { mode: 0o600 });
+  fs.writeFileSync(directoryPath, JSON.stringify({ total: entries.length, pages }), { mode: 0o600 });
   const retiredHtml = retiredPageHtml();
   const trackedReleaseFiles = execFileSync('git', ['ls-files', '--', 'releases/*.html'], {
     cwd: ROOT,
@@ -154,7 +157,7 @@ function main() {
   fs.writeFileSync(LATEST_PATH, JSON.stringify(latest, null, 2) + '\n');
   console.log(`공개 페이지 생성 완료: ${releasePath} (${entries.length}명, 기준일 ${date})`);
   console.log(`이번 버전 URL: ${pageUrl}`);
-  console.log(`주소 매핑은 공개 저장소 밖에 임시 보관했습니다. 게시 후 활성화 스크립트에서 사용됩니다 (${Object.keys(privateLinkMap).length}개 링크).`);
+  console.log(`목록과 주소 매핑은 공개 저장소 밖에 권한 제한(0600)으로 임시 보관했습니다. 게시 후 활성화 스크립트에서 사용됩니다 (${Object.keys(privateLinkMap).length}개 링크, ${entries.length}개 목록 항목).`);
 }
 
 try { main(); }

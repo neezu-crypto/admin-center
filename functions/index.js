@@ -34,29 +34,133 @@ const getPublicPromoPageVersion = onCall(async (request) => {
   return { active: activeVersion === requestedVersion, updateUrl };
 });
 
-// Public page source only contains opaque per-release tokens. Resolve a token on
-// the server and redirect only when the requesting page version is still active.
+const PUBLIC_PROMO_DIRECTORY_PAGE_SIZE = 30;
+const PUBLIC_PROMO_DIRECTORY_ORIGIN = 'https://neezu-crypto.github.io';
+async function takePublicPromoRateLimit(request, bucket, maxRequests) {
+  const ip = String(request.ip || request.rawRequest && request.rawRequest.ip || 'unknown');
+  const key = require('node:crypto').createHash('sha256').update(ip).digest('hex').slice(0, 40);
+  const windowId = Math.floor(Date.now() / (60 * 60 * 1000));
+  const ref = getDatabase().ref(`adminCenter/publicPromoPage/rateLimits/${bucket}/${key}`);
+  const result = await ref.transaction((current) => {
+    const count = current && Number(current.windowId) === windowId ? Number(current.count) || 0 : 0;
+    if (count >= maxRequests) return;
+    return { windowId, count: count + 1, expiresAt: (windowId + 2) * 60 * 60 * 1000 };
+  }, undefined, false);
+  if (!result.committed) return false;
+  return true;
+}
+
+// The public page requests small slices rather than embedding the complete
+// directory in a downloadable HTML file. This is an anti-bulk-extraction
+// measure, not access control: publicly visible records can still be copied.
+const getPublicPromoDirectory = onRequest(async (request, response) => {
+  response.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  response.set('Referrer-Policy', 'no-referrer');
+  response.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  response.set('Vary', 'Origin');
+  const origin = String(request.get('Origin') || '');
+  if (origin !== PUBLIC_PROMO_DIRECTORY_ORIGIN) {
+    response.status(403).json({ message: '허용된 페이지에서만 목록을 요청할 수 있습니다.' });
+    return;
+  }
+  response.set('Access-Control-Allow-Origin', PUBLIC_PROMO_DIRECTORY_ORIGIN);
+  if (request.method === 'OPTIONS') {
+    response.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    response.set('Access-Control-Allow-Headers', 'Content-Type');
+    response.status(204).send('');
+    return;
+  }
+  if (request.method !== 'POST') {
+    response.status(405).json({ message: 'POST 요청만 허용됩니다.' });
+    return;
+  }
+  try {
+    let body = request.body;
+    if (Buffer.isBuffer(body)) body = body.toString('utf8');
+    if ((body === undefined || body === null || body === '') && request.rawBody) body = request.rawBody.toString('utf8');
+    if (typeof body === 'string') body = JSON.parse(body || '{}');
+    if (!body || typeof body !== 'object') body = {};
+    const version = String(body.version || '');
+    if (!/^[a-f0-9]{32}$/.test(version)) {
+      response.status(400).json({ message: '페이지 버전 정보가 올바르지 않습니다.' });
+      return;
+    }
+    const current = (await getDatabase().ref('adminCenter/publicPromoPage/currentVersion').get()).val();
+    const activeVersion = typeof current === 'string' ? current : String((current || {}).version || '');
+    if (activeVersion !== version) {
+      response.status(410).json({ active: false, message: '새 업데이트가 있어 이전 목록은 사용할 수 없습니다.' });
+      return;
+    }
+    if (!await takePublicPromoRateLimit(request, 'directory', 45)) {
+      response.set('Retry-After', '3600');
+      response.status(429).json({ message: '요청 한도에 도달했습니다. 한 시간 후 다시 이용해 주세요.' });
+      return;
+    }
+    const offset = Math.max(0, Math.min(100000, Math.floor(Number(body.offset) || 0)));
+    const limit = Math.max(1, Math.min(PUBLIC_PROMO_DIRECTORY_PAGE_SIZE, Math.floor(Number(body.limit) || PUBLIC_PROMO_DIRECTORY_PAGE_SIZE)));
+    const query = String(body.query || '').trim().toLocaleLowerCase().slice(0, 80);
+    const directoryRef = getDatabase().ref(`adminCenter/publicPromoPage/directories/${version}`);
+    const meta = (await directoryRef.child('total').get()).val();
+    const total = Math.max(0, Math.floor(Number(meta) || 0));
+    let rows;
+    let matchingTotal;
+    if (query) {
+      const allPages = (await directoryRef.child('pages').get()).val() || {};
+      const matches = Object.keys(allPages).sort((a, b) => Number(a) - Number(b))
+        .flatMap((page) => Object.values(allPages[page] || {})).filter((entry) =>
+        (String(entry.nickname || '') + ' ' + String(entry.soopId || '')).toLocaleLowerCase().includes(query));
+      matchingTotal = matches.length;
+      rows = matches.slice(offset, offset + limit);
+    } else {
+      matchingTotal = total;
+      const pageIndex = Math.floor(offset / PUBLIC_PROMO_DIRECTORY_PAGE_SIZE);
+      const inPageOffset = offset % PUBLIC_PROMO_DIRECTORY_PAGE_SIZE;
+      const first = Object.values((await directoryRef.child('pages').child(String(pageIndex)).get()).val() || {});
+      rows = first.slice(inPageOffset, inPageOffset + limit);
+      if (rows.length < limit && offset + rows.length < total) {
+        const next = Object.values((await directoryRef.child('pages').child(String(pageIndex + 1)).get()).val() || {});
+        rows = rows.concat(next.slice(0, limit - rows.length));
+      }
+    }
+    response.status(200).json({ entries: rows, total: matchingTotal, offset, hasMore: offset + rows.length < matchingTotal });
+  } catch (error) {
+    console.error('getPublicPromoDirectory failed:', error);
+    response.status(500).json({ message: '목록을 불러오지 못했습니다.' });
+  }
+});
+
+// Public page source contains no write URLs or resolver tokens. The entry key is
+// hashed server-side before lookup, and the destination is returned only via a
+// version-checked, rate-limited redirect.
 const openPublicPromoLink = onRequest(async (request, response) => {
   response.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   response.set('Referrer-Policy', 'no-referrer');
   response.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
   const version = String(request.query.version || '');
   const token = String(request.query.token || '');
-  if (!/^[a-f0-9]{32}$/.test(version) || !/^[a-f0-9]{32}$/.test(token)) {
+  const entryKey = String(request.query.key || '');
+  const invalidEntryKey = !entryKey || entryKey.length > 200 || ['.', '#', '$', '/', '[', ']'].some((character) => entryKey.includes(character));
+  if (!/^[a-f0-9]{32}$/.test(version) || (!/^[a-f0-9]{32}$/.test(token) && invalidEntryKey)) {
     response.status(400).send('잘못된 링크입니다.');
     return;
   }
   const db = getDatabase();
-  const [currentSnap, linkSnap] = await Promise.all([
-    db.ref('adminCenter/publicPromoPage/currentVersion').get(),
-    db.ref('adminCenter/publicPromoPage/linkMaps/' + version + '/' + token).get(),
-  ]);
+  const currentSnap = await db.ref('adminCenter/publicPromoPage/currentVersion').get();
   const current = currentSnap.val();
   const activeVersion = typeof current === 'string' ? current : String((current || {}).version || '');
   if (activeVersion !== version) {
     response.status(410).send('이 버전은 종료되었습니다. 최신 페이지로 이동해 주세요.');
     return;
   }
+  if (!await takePublicPromoRateLimit(request, 'resolve', 90)) {
+    response.set('Retry-After', '3600');
+    response.status(429).send('요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.');
+    return;
+  }
+  const lookupKey = /^[a-f0-9]{32}$/.test(token)
+    ? token
+    : require('node:crypto').createHash('sha256').update(entryKey).digest('hex');
+  const linkSnap = await db.ref('adminCenter/publicPromoPage/linkMaps/' + version + '/' + lookupKey).get();
   const destination = String(linkSnap.val() || '');
   try {
     if (!destination || normalizePromoUrl(destination) !== new URL(destination).toString()) throw new Error('invalid destination');
@@ -2987,6 +3091,7 @@ const activateOnyuGiftsAfterStreamerVerification = onValueWritten('/streamerVeri
 
 module.exports = {
   getPublicPromoPageVersion,
+  getPublicPromoDirectory,
   openPublicPromoLink,
   getGalleryStats,
   getLifeGameStats,
