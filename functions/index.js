@@ -123,8 +123,12 @@ const getPublicPromoPageStats = onCall(async (request) => {
   const days = [7, 30, 90].includes(requestedDays) ? requestedDays : 30;
   const db = getDatabase();
   const analyticsRef = db.ref('adminCenter/publicPromoPage/analytics/daily');
+  const todayKey = getKoreaDateKey();
+  const startCursor = new Date(`${todayKey}T12:00:00Z`);
+  startCursor.setUTCDate(startCursor.getUTCDate() - (days - 1));
+  const startKey = getKoreaDateKey(startCursor);
   const [analyticsSnap, currentSnap] = await Promise.all([
-    analyticsRef.get(),
+    analyticsRef.orderByKey().startAt(startKey).endAt(todayKey).get(),
     db.ref('adminCenter/publicPromoPage/currentVersion').get(),
   ]);
   const current = currentSnap.val();
@@ -134,7 +138,7 @@ const getPublicPromoPageStats = onCall(async (request) => {
     : null;
   const allDays = analyticsSnap.val() || {};
   const directoryPages = directorySnap && directorySnap.val() || {};
-  const dateCursor = new Date(`${getKoreaDateKey()}T12:00:00Z`);
+  const dateCursor = new Date(`${todayKey}T12:00:00Z`);
   const daily = [];
   const clicksByStreamer = {};
   for (let offset = days - 1; offset >= 0; offset -= 1) {
