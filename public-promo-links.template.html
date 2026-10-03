@@ -82,7 +82,7 @@ __PROMO_SNAPSHOT__
       catch (_) { setStatus('브라우저 저장이 차단되었습니다. 백업 기능을 이용해 주세요.'); return false; }
     }
     function currentAddress(entry) {
-      return Object.prototype.hasOwnProperty.call(localState.addresses, entry.key) ? String(localState.addresses[entry.key] || '') : String(entry.writeUrl || '');
+      return Object.prototype.hasOwnProperty.call(localState.addresses, entry.key) ? String(localState.addresses[entry.key] || '') : '';
     }
     function safeLink(value) {
       try {
@@ -95,6 +95,14 @@ __PROMO_SNAPSHOT__
     function button(label, className, onClick) {
       const el = document.createElement('button'); el.type = 'button'; el.className = 'btn ' + (className || ''); el.textContent = label; el.addEventListener('click', onClick); return el;
     }
+    function openEntry(entry) {
+      const customUrl = safeLink(currentAddress(entry));
+      if (customUrl) { window.open(customUrl, '_blank', 'noopener,noreferrer'); return true; }
+      if (!entry.token || !/^[a-f0-9]{32}$/.test(entry.token)) return false;
+      const url = 'https://us-central1-soop-stock-market.cloudfunctions.net/openPublicPromoLink?version=' + encodeURIComponent(APP_VERSION) + '&token=' + encodeURIComponent(entry.token);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return true;
+    }
     function showRows() {
       const query = searchEl.value.trim().toLocaleLowerCase();
       const visible = entries.filter((entry) => (String(entry.nickname || '') + ' ' + String(entry.soopId || '')).toLocaleLowerCase().includes(query));
@@ -106,19 +114,28 @@ __PROMO_SNAPSHOT__
         const identity = document.createElement('div'); identity.className = 'identity';
         const name = document.createElement('strong'); name.textContent = entry.nickname || '(닉네임 미기재)'; identity.appendChild(name);
         const id = document.createElement('span'); id.className = 'id'; id.textContent = entry.soopId ? '@' + entry.soopId : 'SOOP 아이디 미기재'; identity.appendChild(id);
-        const addressLine = document.createElement('div'); addressLine.className = 'address-line';
-        const address = document.createElement('input'); address.className = 'address'; address.type = 'text'; address.value = currentAddress(entry); address.placeholder = '게시판 글쓰기 주소'; address.setAttribute('aria-label', (entry.nickname || '스트리머') + ' 글쓰기 주소');
-        address.addEventListener('input', () => { localState.addresses[entry.key] = address.value; persist(); });
-        address.addEventListener('change', () => { localState.addresses[entry.key] = address.value.trim(); persist(); address.value = currentAddress(entry); });
-        addressLine.appendChild(address);
+        const addressLine = document.createElement('div'); addressLine.className = 'address-line id';
+        addressLine.textContent = currentAddress(entry) ? '내 브라우저에 수정 주소 저장됨' : entry.token ? '기본 링크는 서버를 통해 안전하게 연결됩니다.' : '글쓰기 링크가 등록되지 않았습니다.';
         const actions = document.createElement('div'); actions.className = 'row-actions';
-        const writeButton = button('글쓰기 열기', 'subtle small', () => { const url = safeLink(address.value); if (!url) { setStatus('HTTPS 형식의 SOOP 또는 네이버 카페 주소를 확인해 주세요.'); address.focus(); return; } window.open(url, '_blank', 'noopener,noreferrer'); });
-        writeButton.disabled = !safeLink(address.value); address.addEventListener('input', () => { writeButton.disabled = !safeLink(address.value); });
+        const writeButton = button('게시판 열기', 'subtle small', () => { if (!openEntry(entry)) editBox.hidden = false; });
+        writeButton.disabled = !currentAddress(entry) && !entry.token;
         const stationButton = button('방송국', 'small', () => { if (!/^[A-Za-z0-9]{2,20}$/.test(entry.soopId || '')) return; window.open('https://www.sooplive.com/station/' + encodeURIComponent(entry.soopId), '_blank', 'noopener,noreferrer'); });
         stationButton.disabled = !/^[A-Za-z0-9]{2,20}$/.test(entry.soopId || '');
         const composeButton = button('홍보글 작성', 'primary small', () => openComposer(entry));
-        actions.append(writeButton, stationButton, composeButton);
-        row.append(identity, addressLine, actions); listEl.appendChild(row);
+        const editButton = button('주소 수정', 'small', () => { editBox.hidden = !editBox.hidden; });
+        actions.append(writeButton, stationButton, composeButton, editButton);
+        const editBox = document.createElement('div'); editBox.className = 'address-line'; editBox.hidden = true;
+        const address = document.createElement('input'); address.className = 'address'; address.type = 'url'; address.value = currentAddress(entry); address.placeholder = '내 브라우저에서 사용할 글쓰기 주소'; address.setAttribute('aria-label', (entry.nickname || '스트리머') + ' 내 주소 수정');
+        const saveAddress = button('저장', 'small', () => {
+          const value = address.value.trim();
+          if (value && !safeLink(value)) { address.setCustomValidity('HTTPS 형식의 SOOP 또는 네이버 카페 주소를 입력해 주세요.'); address.reportValidity(); return; }
+          address.setCustomValidity('');
+          if (value) localState.addresses[entry.key] = value; else delete localState.addresses[entry.key];
+          persist(); showRows();
+        });
+        const clearAddress = button('기본 링크 사용', 'small', () => { delete localState.addresses[entry.key]; persist(); showRows(); });
+        editBox.append(address, saveAddress, clearAddress);
+        row.append(identity, addressLine, actions, editBox); listEl.appendChild(row);
       });
     }
     function openComposer(entry) {
@@ -127,7 +144,7 @@ __PROMO_SNAPSHOT__
       composerEl.replaceChildren();
       const selected = document.createElement('div'); selected.className = 'selected';
       const selectedName = document.createElement('strong'); selectedName.textContent = (entry.nickname || '(닉네임 미기재)') + (entry.soopId ? ' · @' + entry.soopId : ''); selected.appendChild(selectedName);
-      const open = button('글쓰기 열기', 'subtle small', () => { const url = safeLink(currentAddress(entry)); if (url) window.open(url, '_blank', 'noopener,noreferrer'); else setStatus('먼저 올바른 글쓰기 주소를 입력해 주세요.'); }); selected.appendChild(open); composerEl.appendChild(selected);
+      const open = button('게시판 열기', 'subtle small', () => { if (!openEntry(entry)) setStatus('이 스트리머의 글쓰기 주소가 등록되지 않았습니다.'); }); selected.appendChild(open); open.disabled = !currentAddress(entry) && !entry.token; composerEl.appendChild(selected);
       const titleField = makeField('제목', 'text', '제목을 입력하세요.'); titleField.input.value = draft.title || ''; composerEl.appendChild(titleField.wrap);
       const bodyField = makeField('본문', 'textarea', '홍보글 내용을 입력하세요.'); bodyField.input.value = draft.body || ''; composerEl.appendChild(bodyField.wrap);
       const copy = button('제목 + 본문 복사', 'primary', async () => {

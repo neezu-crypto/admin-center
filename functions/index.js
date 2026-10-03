@@ -1,4 +1,4 @@
-const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onValueCreated, onValueUpdated, onValueWritten } = require('firebase-functions/v2/database');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
@@ -32,6 +32,39 @@ const getPublicPromoPageVersion = onCall(async (request) => {
     ? current.postUrl
     : 'https://www.sooplive.com/station/skftodwocks2/board/128562829';
   return { active: activeVersion === requestedVersion, updateUrl };
+});
+
+// Public page source only contains opaque per-release tokens. Resolve a token on
+// the server and redirect only when the requesting page version is still active.
+const openPublicPromoLink = onRequest(async (request, response) => {
+  response.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  response.set('Referrer-Policy', 'no-referrer');
+  response.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  const version = String(request.query.version || '');
+  const token = String(request.query.token || '');
+  if (!/^[a-f0-9]{32}$/.test(version) || !/^[a-f0-9]{32}$/.test(token)) {
+    response.status(400).send('잘못된 링크입니다.');
+    return;
+  }
+  const db = getDatabase();
+  const [currentSnap, linkSnap] = await Promise.all([
+    db.ref('adminCenter/publicPromoPage/currentVersion').get(),
+    db.ref('adminCenter/publicPromoPage/linkMaps/' + version + '/' + token).get(),
+  ]);
+  const current = currentSnap.val();
+  const activeVersion = typeof current === 'string' ? current : String((current || {}).version || '');
+  if (activeVersion !== version) {
+    response.status(410).send('이 버전은 종료되었습니다. 최신 페이지로 이동해 주세요.');
+    return;
+  }
+  const destination = String(linkSnap.val() || '');
+  try {
+    if (!destination || normalizePromoUrl(destination) !== new URL(destination).toString()) throw new Error('invalid destination');
+  } catch (_) {
+    response.status(404).send('링크를 찾을 수 없습니다.');
+    return;
+  }
+  response.redirect(302, destination);
 });
 
 function requireAuth(request) {
@@ -2954,6 +2987,7 @@ const activateOnyuGiftsAfterStreamerVerification = onValueWritten('/streamerVeri
 
 module.exports = {
   getPublicPromoPageVersion,
+  openPublicPromoLink,
   getGalleryStats,
   getLifeGameStats,
   listLifeGamePlayerStartRecords,
