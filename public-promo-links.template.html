@@ -18,10 +18,28 @@
     .btn{border:1px solid #cfc6b8;border-radius:2px;background:#fffdf8;color:#3f3a32;padding:7px 10px;font-size:12px;font-weight:700}.btn:hover:not(:disabled){border-color:#8c7e68;background:#f5f0e5}.btn.primary{border-color:#315b78;background:#315b78;color:white}.btn.subtle{background:var(--blue-soft);border-color:#c8d5dc;color:#315b78}.btn.small{padding:5px 8px}.composer{padding:17px}.selected{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:#f0ece3;border-left:3px solid var(--blue);margin-bottom:12px}.selected strong{font:700 16px var(--serif)}.compose-target-actions{display:flex;gap:6px;flex-wrap:wrap}.field{display:block;margin:12px 0}.field>span{display:block;margin-bottom:5px;font-size:12px;font-weight:800;color:#536078}.field input{width:100%;border:1px solid var(--line);border-radius:2px;background:#fffefa;padding:10px 11px;outline:none}.rich-tools{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-bottom:0;background:#f5f0e5}.rich-tools .hint{font-size:11px;color:var(--muted)}.rich-editor{min-height:250px;max-height:55vh;overflow:auto;padding:13px;border:1px solid var(--line);background:#fffefa;outline:none;line-height:1.7;overflow-wrap:anywhere}.rich-editor:focus{border-color:#7691a1;box-shadow:0 0 0 3px #315b7818}.rich-editor:empty:before{content:attr(data-placeholder);color:#a39a8d;pointer-events:none}.rich-editor img{display:block;max-width:100%;height:auto;margin:10px 0;border:1px solid #e4ddd1}.rich-editor p{margin:0 0 .75em}.rich-tools input{display:none}.compose-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}.compose-note{margin:8px 0;color:var(--muted);font-size:11px}.status{font-size:12px;color:var(--green);min-height:1.4em}.backup{display:flex;gap:6px}.import-file{display:none}.empty-list{padding:34px 15px;text-align:center;color:var(--muted);font-size:13px}
     footer{padding:18px 4px;color:#777168;font:12px var(--serif);text-align:center}
     .version-gate{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;padding:20px;background:#101828d9}.gate-card{width:min(520px,100%);padding:28px;border-radius:20px;background:#fff;box-shadow:0 24px 80px #0005}.gate-card h1{margin:0 0 10px;font-size:22px}.gate-card p{margin:0;color:#647087}.gate-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:20px}.gate-actions a{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:10px;text-decoration:none;font-weight:800;color:#fff;background:var(--blue)}.gate-actions a.secondary{color:#34415a;background:#f3f5f9;border:1px solid var(--line)}
+    .devbar{position:relative;z-index:30;background:#0e1116;border-bottom:1px solid rgba(255,255,255,.08)}.devbar-inner{max-width:1180px;margin:0 auto;padding:7px 20px;display:flex;align-items:center;gap:16px}.devbar-label{font:11px var(--serif);letter-spacing:.04em;color:rgba(255,255,255,.72);flex-shrink:0;white-space:nowrap}.devbar-viewport{flex:1 1 auto;min-width:0;overflow:hidden}.devbar-track{display:flex;align-items:center;gap:8px;width:max-content}.devbar-track.auto-scroll{animation:devbar-scroll var(--devbar-duration,20s) linear infinite}.devbar-track.auto-scroll:hover{animation-play-state:paused}@keyframes devbar-scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}.dev-game-link{flex-shrink:0;white-space:nowrap;padding:6px 11px;border-radius:6px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.85);font:600 12px var(--serif);text-decoration:none;transition:background .12s ease}.dev-game-link:hover{background:rgba(255,255,255,.18)}@media(prefers-reduced-motion:reduce){.devbar-track.auto-scroll{animation:none}.devbar-viewport{overflow-x:auto;-webkit-overflow-scrolling:touch}}@media(max-width:600px){.devbar-inner{padding:7px 12px;gap:10px}.devbar-label{font-size:10px}}
     @media(max-width:850px){.layout{grid-template-columns:1fr}.list{max-height:none}.hero{padding:22px}.shell{padding:16px 12px 42px}}
   </style>
 </head>
 <body>
+  <div class="devbar" id="devbar">
+    <div class="devbar-inner">
+      <div class="devbar-viewport" id="devbar-viewport">
+        <div class="devbar-track" id="devbar-track">
+          <span class="devbar-label">뻐꾸기 · 콘텐츠 추천 · 게임 추천 링크 모음 · BY 오목지면시그</span>
+          <a class="dev-game-link" href="https://www.sooplive.com/station/skftodwocks2" target="_blank" rel="noopener noreferrer">방송국</a>
+          <a class="dev-game-link" data-game-id="stockMarket" href="https://neezu-crypto.github.io/soop-stock-market/index.html" target="_blank" rel="noopener noreferrer">스트리머 주식시장</a>
+          <a class="dev-game-link" data-game-id="bettingMarket" href="https://neezu-crypto.github.io/StreamBet-Market/" target="_blank" rel="noopener noreferrer">스트리머 배팅시장</a>
+          <a class="dev-game-link" data-game-id="lifeGame" href="https://neezu-crypto.github.io/streamer-life-game/" target="_blank" rel="noopener noreferrer">스트리머 인생게임</a>
+          <a class="dev-game-link" data-game-id="onyuVn" href="https://neezu-crypto.github.io/onyu-vn/" target="_blank" rel="noopener noreferrer">당신이 여기에 온 이유</a>
+          <a class="dev-game-link" data-game-id="backgroundMarket" href="https://neezu-crypto.github.io/interior-3d-viewer/" target="_blank" rel="noopener noreferrer">스트리머 배경시장</a>
+          <a class="dev-game-link" data-game-id="gallery" href="https://neezu-crypto.github.io/streamer-gallery/" target="_blank" rel="noopener noreferrer">스트리머 갤러리</a>
+          <a class="dev-game-link" data-game-id="dontClickAds" href="https://neezu-crypto.github.io/dont-click-ads/" target="_blank" rel="noopener noreferrer">절대 광고를 클릭하지 마</a>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="version-gate" id="versionGate" role="status" aria-live="polite">
     <section class="gate-card"><h1 id="gateTitle">최신 버전을 확인하고 있습니다</h1><p id="gateMessage">잠시만 기다려 주세요.</p><div class="gate-actions" id="gateActions"></div></section>
   </div>
@@ -302,6 +320,59 @@ __PROMO_SNAPSHOT__
       importFile.value = '';
     });
     searchEl.addEventListener('input', showRows);
+
+    // 자매 페이지와 동일한 공개 devbarLinks 노드를 조회한다. 조회가 안 되거나
+    // 비어 있으면 위의 정적 링크들을 그대로 두어 상단 바로가기가 사라지지 않는다.
+    (function setupDevbarLinks() {
+      const databaseUrl = 'https://soop-stock-market-default-rtdb.firebaseio.com';
+      const selfGameId = 'promoLinkDirectory';
+      const track = document.getElementById('devbar-track');
+      if (!track) return;
+      fetch(databaseUrl + '/devbarLinks.json', { cache: 'no-store' })
+        .then((response) => {
+          if (!response.ok) throw new Error('devbar 링크 조회 HTTP ' + response.status);
+          return response.json();
+        })
+        .then((data) => {
+          if (!data || typeof data !== 'object') return;
+          const links = Object.keys(data)
+            .filter((id) => id !== selfGameId && data[id] && data[id].url)
+            .map((id) => ({ id, label: String(data[id].label || id), url: String(data[id].url) }))
+            .filter((link) => { try { return new URL(link.url).protocol === 'https:'; } catch (_) { return false; } })
+            .sort((a, b) => (Number(data[a.id].order) || 0) - (Number(data[b.id].order) || 0));
+          if (!links.length) return;
+          track.querySelectorAll('a[data-game-id]').forEach((link) => link.remove());
+          links.forEach((item) => {
+            const link = document.createElement('a');
+            link.className = 'dev-game-link'; link.dataset.gameId = item.id; link.href = item.url;
+            link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = item.label;
+            track.appendChild(link);
+          });
+          window.dispatchEvent(new Event('resize'));
+        })
+        .catch((error) => console.error('devbar 링크 조회 실패(기존 링크 유지):', error));
+    })();
+
+    (function setupDevbarMarquee() {
+      const viewport = document.getElementById('devbar-viewport');
+      const track = document.getElementById('devbar-track');
+      if (!viewport || !track) return;
+      function setup() {
+        track.classList.remove('auto-scroll');
+        track.querySelectorAll('[data-clone]').forEach((node) => node.remove());
+        if (track.scrollWidth <= viewport.clientWidth + 4) return;
+        const originalWidth = track.scrollWidth;
+        Array.from(track.children).forEach((child) => {
+          const clone = child.cloneNode(true); clone.setAttribute('data-clone', '');
+          clone.setAttribute('aria-hidden', 'true'); clone.setAttribute('tabindex', '-1'); track.appendChild(clone);
+        });
+        track.style.setProperty('--devbar-duration', Math.max(originalWidth / 40, 8) + 's');
+        track.classList.add('auto-scroll');
+      }
+      setup();
+      window.addEventListener('resize', () => { clearTimeout(window.__promoDevbarResize); window.__promoDevbarResize = setTimeout(setup, 200); });
+    })();
+
     function showGate(title, message, actions) {
       document.getElementById('appShell').hidden = true;
       document.getElementById('versionGate').hidden = false;
