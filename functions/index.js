@@ -36,7 +36,7 @@ const getPublicPromoPageVersion = onCall(async (request) => {
 
 const PUBLIC_PROMO_DIRECTORY_PAGE_SIZE = 30;
 const PUBLIC_PROMO_DIRECTORY_ORIGIN = 'https://neezu-crypto.github.io';
-const PUBLIC_PROMO_ANALYTICS_EVENTS = new Set(['view', 'search', 'click']);
+const PUBLIC_PROMO_ANALYTICS_EVENTS = new Set(['view', 'search', 'click', 'sponsorImpression', 'sponsorClick']);
 
 function getKoreaDateKey(date = new Date()) {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(date);
@@ -107,6 +107,11 @@ const recordPublicPromoEvent = onRequest(async (request, response) => {
       }
       await incrementPromoAnalytics(dayRef.child(`linkClicksByStreamer/${digest}`));
       await incrementPromoAnalytics(dayRef.child('linkClicks'));
+    } else if (eventName === 'sponsorClick' || eventName === 'sponsorImpression') {
+      const sponsor = (await db.ref('lifeGame/currentSponsor').get()).val();
+      if (sponsor && Number(sponsor.startAt) <= Date.now() && Number(sponsor.endAt) > Date.now()) {
+        await incrementPromoAnalytics(dayRef.child(eventName === 'sponsorClick' ? 'sponsorStationClicks' : 'sponsorImpressions'));
+      }
     } else {
       await incrementPromoAnalytics(dayRef.child(eventName === 'view' ? 'pageViews' : 'searches'));
     }
@@ -147,11 +152,15 @@ const getPublicPromoPageStats = onCall(async (request) => {
     const date = getKoreaDateKey(day);
     const item = allDays[date] || {};
     const clicks = Math.max(0, Number(item.linkClicks) || 0);
+    const sponsorClicks = Math.max(0, Number(item.sponsorStationClicks) || 0);
+    const sponsorImpressions = Math.max(0, Number(item.sponsorImpressions) || 0);
     daily.push({
       date,
       pageViews: Math.max(0, Number(item.pageViews) || 0),
       searches: Math.max(0, Number(item.searches) || 0),
       linkClicks: clicks,
+      sponsorImpressions,
+      sponsorStationClicks: sponsorClicks,
     });
     Object.entries(item.linkClicksByStreamer || {}).forEach(([hash, count]) => {
       clicksByStreamer[hash] = (clicksByStreamer[hash] || 0) + Math.max(0, Number(count) || 0);
@@ -173,7 +182,9 @@ const getPublicPromoPageStats = onCall(async (request) => {
     pageViews: sum.pageViews + item.pageViews,
     searches: sum.searches + item.searches,
     linkClicks: sum.linkClicks + item.linkClicks,
-  }), { pageViews: 0, searches: 0, linkClicks: 0 });
+    sponsorImpressions: sum.sponsorImpressions + item.sponsorImpressions,
+    sponsorStationClicks: sum.sponsorStationClicks + item.sponsorStationClicks,
+  }), { pageViews: 0, searches: 0, linkClicks: 0, sponsorImpressions: 0, sponsorStationClicks: 0 });
   return { days, totals, daily, topStreamers };
 });
 
