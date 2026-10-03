@@ -18,6 +18,22 @@ initializeApp();
 // 쓰이면 로그를 남겨, 이후 이 폴백을 완전히 제거해도 안전한 시점을 판단한다.
 const ADMIN_EMAIL = 'skftodwocks2@gmail.com'; // 폴백 전용으로만 유지 — 새 코드에서 직접 비교하지 말 것
 
+// 공개 홍보 링크 페이지의 정적 파일은 복사되어도 서버에서 현재 허용한 버전만
+// 기능을 사용할 수 있게 버전 게이트를 둔다. 이 공개 callable은 읽기 전용이며,
+// 허용 버전은 관리자가 새 버전을 방송국에 게시한 뒤 RTDB에서 갱신한다.
+const getPublicPromoPageVersion = onCall(async (request) => {
+  const requestedVersion = String((request.data || {}).version || '');
+  if (!/^[a-f0-9]{32}$/.test(requestedVersion)) {
+    throw new HttpsError('invalid-argument', '페이지 버전 정보가 올바르지 않습니다.');
+  }
+  const current = (await getDatabase().ref('adminCenter/publicPromoPage/currentVersion').get()).val();
+  const activeVersion = typeof current === 'string' ? current : String((current || {}).version || '');
+  const updateUrl = typeof current === 'object' && current && typeof current.postUrl === 'string'
+    ? current.postUrl
+    : 'https://www.sooplive.com/station/skftodwocks2/board/128562829';
+  return { active: activeVersion === requestedVersion, updateUrl };
+});
+
 function requireAuth(request) {
   if (!request.auth || !request.auth.uid) {
     throw new HttpsError('unauthenticated', '로그인이 필요합니다.');
@@ -2937,6 +2953,7 @@ const activateOnyuGiftsAfterStreamerVerification = onValueWritten('/streamerVeri
 });
 
 module.exports = {
+  getPublicPromoPageVersion,
   getGalleryStats,
   getLifeGameStats,
   listLifeGamePlayerStartRecords,

@@ -58,7 +58,7 @@ __PROMO_SNAPSHOT__
   (() => {
     'use strict';
     const APP_VERSION = '__VERSION_ID__';
-    const LATEST_INFO_URL = 'https://neezu-crypto.github.io/admin-center/public-promo-latest.json';
+    const VERSION_CHECK_URL = 'https://us-central1-soop-stock-market.cloudfunctions.net/getPublicPromoPageVersion';
     const ADMIN_STATION_URL = 'https://www.sooplive.com/station/skftodwocks2/board/128562829';
     const SNAPSHOT_DATE = '__SNAPSHOT_DATE__';
     const STORAGE_KEY = 'soop-promo-public-page-local-v1';
@@ -159,6 +159,8 @@ __PROMO_SNAPSHOT__
     });
     searchEl.addEventListener('input', showRows);
     function showGate(title, message, actions) {
+      document.getElementById('appShell').hidden = true;
+      document.getElementById('versionGate').hidden = false;
       document.getElementById('gateTitle').textContent = title;
       document.getElementById('gateMessage').textContent = message;
       const container = document.getElementById('gateActions'); container.replaceChildren();
@@ -172,14 +174,23 @@ __PROMO_SNAPSHOT__
     async function verifyVersion() {
       try {
         const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 8000);
-        const response = await fetch(LATEST_INFO_URL + '?check=' + Date.now(), { cache: 'no-store', signal: controller.signal });
+        const response = await fetch(VERSION_CHECK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: { version: APP_VERSION } }),
+          cache: 'no-store',
+          signal: controller.signal,
+        });
         clearTimeout(timeout);
         if (!response.ok) throw new Error('HTTP ' + response.status);
-        const latest = await response.json();
-        if (!latest || typeof latest.version !== 'string') throw new Error('버전 정보 형식 오류');
-        if (latest.version !== APP_VERSION) {
+        const result = await response.json();
+        if (!result || !result.result || typeof result.result.active !== 'boolean') throw new Error('버전 정보 형식 오류');
+        if (!result.result.active) {
+          const proposedUpdateUrl = String(result.result.updateUrl || '');
+          const updateUrl = /^https:\/\/www\.sooplive\.com\/station\/skftodwocks2\/(?:board|post)\/[A-Za-z0-9_-]+\/?$/.test(proposedUpdateUrl)
+            ? proposedUpdateUrl : ADMIN_STATION_URL;
           showGate('새 업데이트가 있습니다', '이 버전은 사용할 수 없습니다. 관리자 방송국 게시판에서 최신 버전 링크를 열어 주세요.', [
-            { label: '새 업데이트 받기', href: ADMIN_STATION_URL },
+            { label: '새 업데이트 받기', href: updateUrl },
           ]);
           return;
         }
@@ -193,6 +204,9 @@ __PROMO_SNAPSHOT__
       }
     }
     verifyVersion();
+    window.setInterval(verifyVersion, 30000);
+    window.addEventListener('focus', verifyVersion);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) verifyVersion(); });
   })();
   </script>
 </body>
