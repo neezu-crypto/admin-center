@@ -37,6 +37,7 @@ const getPublicPromoPageVersion = onCall(async (request) => {
 const PUBLIC_PROMO_DIRECTORY_PAGE_SIZE = 30;
 const PUBLIC_PROMO_DIRECTORY_ORIGIN = 'https://neezu-crypto.github.io';
 const PUBLIC_PROMO_ANALYTICS_EVENTS = new Set(['view', 'search', 'click', 'sponsorImpression', 'sponsorClick']);
+const PUBLIC_PROMO_RATE_LIMITS = Object.freeze({ analytics: 600, directory: 120, resolve: 300 });
 
 function getKoreaDateKey(date = new Date()) {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(date);
@@ -91,9 +92,10 @@ const recordPublicPromoEvent = onRequest(async (request, response) => {
       response.status(410).json({ active: false });
       return;
     }
-    if (!await takePublicPromoRateLimit(request, 'analytics', 240)) {
-      response.set('Retry-After', '3600');
-      response.status(429).json({ message: '요청 한도에 도달했습니다.' });
+    if (!await takePublicPromoRateLimit(request, 'analytics', PUBLIC_PROMO_RATE_LIMITS.analytics)) {
+      const retryAfterSeconds = publicPromoRetryAfterSeconds();
+      response.set('Retry-After', String(retryAfterSeconds));
+      response.status(429).json({ message: publicPromoRateLimitMessage(retryAfterSeconds) });
       return;
     }
     const dateKey = getKoreaDateKey();
@@ -202,6 +204,24 @@ async function takePublicPromoRateLimit(request, bucket, maxRequests) {
   return true;
 }
 
+function publicPromoRetryAfterSeconds() {
+  const hourMs = 60 * 60 * 1000;
+  return Math.max(1, Math.ceil(((Math.floor(Date.now() / hourMs) + 1) * hourMs - Date.now()) / 1000));
+}
+
+function publicPromoRateLimitMessage(retryAfterSeconds) {
+  const minutes = Math.max(1, Math.ceil(Number(retryAfterSeconds) / 60));
+  return `요청 한도를 초과했습니다. 약 ${minutes}분 후 다시 이용해 주세요.`;
+}
+
+function sendPublicPromoRateLimitPage(response, version, retryAfterSeconds) {
+  const minutes = Math.max(1, Math.ceil(Number(retryAfterSeconds) / 60));
+  const pageUrl = `${PUBLIC_PROMO_DIRECTORY_ORIGIN}/admin-center/releases/${encodeURIComponent(version)}.html`;
+  response.set('Retry-After', String(retryAfterSeconds));
+  response.set('Content-Type', 'text/html; charset=utf-8');
+  response.status(429).send(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>잠시 후 다시 이용해 주세요</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:#eee9dd;color:#24211c;font:15px/1.7 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}.card{width:min(480px,100%);padding:30px;background:#fffdf8;border:1px solid #cfc3ad;border-top:5px double #29251f;box-shadow:0 14px 44px #322a1d18}.eyebrow{margin:0 0 10px;color:#795a2d;font-size:11px;font-weight:800;letter-spacing:.15em}.card h1{margin:0 0 10px;font-family:Georgia,"Batang",serif;font-size:26px;line-height:1.25}.card p{margin:0;color:#625b50}.wait{margin-top:18px;padding:12px 14px;background:#f2eadb;border-left:3px solid #795a2d;color:#494238;font-weight:700}.back{display:inline-block;margin-top:20px;padding:10px 15px;background:#29251f;color:#fffdf8;text-decoration:none;font-size:13px;font-weight:700}</style></head><body><main class="card"><p class="eyebrow">CUCKOO BOARD DIRECTORY</p><h1>잠시 후 다시 이용해 주세요</h1><p>짧은 시간 동안 링크를 많이 열어 잠시 제한됐어요. 목록 이용에는 영향이 없으며, 아래 시간이 지난 뒤 다시 시도할 수 있습니다.</p><div class="wait">약 ${minutes}분 후 다시 시도해 주세요.</div><a class="back" href="${pageUrl}">목록 페이지로 돌아가기</a></main></body></html>`);
+}
+
 // The public page requests small slices rather than embedding the complete
 // directory in a downloadable HTML file. This is an anti-bulk-extraction
 // measure, not access control: publicly visible records can still be copied.
@@ -243,9 +263,10 @@ const getPublicPromoDirectory = onRequest(async (request, response) => {
       response.status(410).json({ active: false, message: '새 업데이트가 있어 이전 목록은 사용할 수 없습니다.' });
       return;
     }
-    if (!await takePublicPromoRateLimit(request, 'directory', 45)) {
-      response.set('Retry-After', '3600');
-      response.status(429).json({ message: '요청 한도에 도달했습니다. 한 시간 후 다시 이용해 주세요.' });
+    if (!await takePublicPromoRateLimit(request, 'directory', PUBLIC_PROMO_RATE_LIMITS.directory)) {
+      const retryAfterSeconds = publicPromoRetryAfterSeconds();
+      response.set('Retry-After', String(retryAfterSeconds));
+      response.status(429).json({ message: publicPromoRateLimitMessage(retryAfterSeconds) });
       return;
     }
     const offset = Math.max(0, Math.min(100000, Math.floor(Number(body.offset) || 0)));
@@ -304,9 +325,8 @@ const openPublicPromoLink = onRequest(async (request, response) => {
     response.status(410).send('이 버전은 종료되었습니다. 최신 페이지로 이동해 주세요.');
     return;
   }
-  if (!await takePublicPromoRateLimit(request, 'resolve', 90)) {
-    response.set('Retry-After', '3600');
-    response.status(429).send('요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.');
+  if (!await takePublicPromoRateLimit(request, 'resolve', PUBLIC_PROMO_RATE_LIMITS.resolve)) {
+    sendPublicPromoRateLimitPage(response, version, publicPromoRetryAfterSeconds());
     return;
   }
   const lookupKey = /^[a-f0-9]{32}$/.test(token)
