@@ -549,6 +549,45 @@
   .external-link-row button { flex: 0 0 auto; }
   .external-links-list.is-loading { opacity: .65; pointer-events: none; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  .promo-stats-panel { min-width: 0; margin: 18px 0; padding: 14px; border: 1px solid rgba(20,20,22,0.1); border-radius: 12px; background: rgba(255,255,255,0.55); }
+  .promo-stats-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .promo-stats-controls { display: flex; gap: 6px; align-items: center; flex: 0 0 auto; }
+  .promo-stats-controls select { padding: 7px 9px; border: 1px solid rgba(20,20,22,.16); border-radius: 8px; }
+  .promo-stats-totals { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+  .promo-stat-card { min-width: 130px; padding: 10px 12px; border-radius: 10px; background: rgba(20,20,22,.045); }
+  .promo-stat-card .hint { margin: 0 0 3px; }
+  .promo-stat-card strong { display: block; font-size: 19px; font-variant-numeric: tabular-nums; }
+  .promo-stats-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
+  .promo-stats-column { min-width: 0; }
+  .promo-stats-list { max-height: 300px; overflow: auto; margin-top: 6px; }
+  .promo-stats-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; padding: 7px 3px; border-bottom: 1px solid rgba(20,20,22,.07); font-size: 12px; }
+  .promo-stats-date { flex: 0 0 auto; color: var(--ink-soft); font-weight: 700; white-space: nowrap; }
+  .promo-stats-values { min-width: 0; color: var(--ink-soft); text-align: right; overflow-wrap: anywhere; }
+  .promo-stats-metrics { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 9px; }
+  .promo-stats-metric { white-space: nowrap; }
+  .promo-stats-metric-label { color: var(--ink-mute); }
+  .promo-stats-streamer { min-width: 0; overflow-wrap: anywhere; }
+  .promo-stats-clicks { flex: 0 0 auto; white-space: nowrap; }
+  @media (max-width: 600px) {
+    .promo-stats-panel { padding: 12px; }
+    .promo-stats-head { align-items: stretch; }
+    .promo-stats-title { min-width: 0; }
+    .promo-stats-controls { width: 100%; }
+    .promo-stats-controls select { flex: 0 0 112px; min-width: 0; }
+    .promo-stats-controls button { flex: 1 1 auto; }
+    .promo-stats-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .promo-stat-card { min-width: 0; padding: 9px 10px; }
+    .promo-stat-card:last-child { grid-column: 1 / -1; }
+    .promo-stats-columns { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    .promo-stats-list { max-height: 250px; }
+    .promo-stats-row { gap: 8px; }
+    .promo-stats-day-row { flex-direction: column; gap: 6px; }
+    .promo-stats-day-row .promo-stats-date { max-width: none; white-space: nowrap; }
+    .promo-stats-day-row .promo-stats-values { width: 100%; text-align: left; }
+    .promo-stats-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-content: stretch; gap: 5px 8px; width: 100%; }
+    .promo-stats-metric { white-space: normal; font-variant-numeric: tabular-nums; }
+    .promo-stats-metric:last-child { grid-column: 1 / -1; }
+  }
   @media (max-width: 1400px) {
     .quicknav { display: none !important; }
   }
@@ -814,19 +853,19 @@
       <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
-      <div class="promo-stats-panel" style="margin:18px 0; padding:14px; border:1px solid rgba(20,20,22,0.1); border-radius:12px; background:rgba(255,255,255,0.55);">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-          <div><h3 style="margin:0;">공개 페이지 이용 통계</h3><p class="hint" style="margin:4px 0 0;">검색어와 이용자 식별정보는 저장하지 않고, 일별 이용 횟수·스트리머별 링크 클릭·특집 광고 노출과 방송국 방문을 집계합니다.</p></div>
-          <div style="display:flex; gap:6px; align-items:center;">
-            <select id="publicPromoStatsDays" aria-label="통계 기간" style="padding:7px 9px; border:1px solid rgba(20,20,22,.16); border-radius:8px;"><option value="7">최근 7일</option><option value="30" selected>최근 30일</option><option value="90">최근 90일</option></select>
+      <div class="promo-stats-panel">
+        <div class="promo-stats-head">
+          <div class="promo-stats-title"><h3 style="margin:0;">공개 페이지 이용 통계</h3><p class="hint" style="margin:4px 0 0;">검색어와 이용자 식별정보는 저장하지 않고, 일별 이용 횟수·스트리머별 링크 클릭·특집 광고 노출과 방송국 방문을 집계합니다.</p></div>
+          <div class="promo-stats-controls">
+            <select id="publicPromoStatsDays" aria-label="통계 기간"><option value="7">최근 7일</option><option value="30" selected>최근 30일</option><option value="90">최근 90일</option></select>
             <button id="publicPromoStatsRefreshBtn" class="perm-refresh-btn" type="button">통계 새로고침</button>
           </div>
         </div>
         <div id="publicPromoStatsStatus" class="hint" style="margin-top:8px;"></div>
-        <div id="publicPromoStatsTotals" style="display:flex; gap:10px; flex-wrap:wrap; margin:10px 0;"></div>
-        <div style="display:grid; grid-template-columns:minmax(260px,1fr) minmax(260px,1fr); gap:14px;">
-          <div><strong>일별 추이</strong><div id="publicPromoStatsDaily" style="max-height:300px; overflow:auto; margin-top:6px;"></div></div>
-          <div><strong>링크 클릭 상위 스트리머</strong><div id="publicPromoStatsTop" style="max-height:300px; overflow:auto; margin-top:6px;"></div></div>
+        <div id="publicPromoStatsTotals" class="promo-stats-totals"></div>
+        <div class="promo-stats-columns">
+          <div class="promo-stats-column"><strong>일별 추이</strong><div id="publicPromoStatsDaily" class="promo-stats-list"></div></div>
+          <div class="promo-stats-column"><strong>링크 클릭 상위 스트리머</strong><div id="publicPromoStatsTop" class="promo-stats-list"></div></div>
         </div>
       </div>
       <div id="streamerPromoGenerator" class="promo-generator-panel" hidden>
@@ -2821,9 +2860,9 @@
       const totals = data.totals || {};
       const metric = function (label, value) {
         const card = document.createElement('div');
-        card.style.cssText = 'min-width:130px; padding:10px 12px; border-radius:10px; background:rgba(20,20,22,.045);';
+        card.className = 'promo-stat-card';
         const name = document.createElement('div'); name.className = 'hint'; name.textContent = label;
-        const count = document.createElement('strong'); count.style.fontSize = '19px'; count.textContent = (Number(value) || 0).toLocaleString('ko-KR');
+        const count = document.createElement('strong'); count.textContent = (Number(value) || 0).toLocaleString('ko-KR');
         card.append(name, count); return card;
       };
       publicPromoStatsTotalsEl.replaceChildren(
@@ -2832,9 +2871,15 @@
       publicPromoStatsDailyEl.replaceChildren();
       (data.daily || []).slice().reverse().forEach(function (item) {
         const row = document.createElement('div');
-        row.style.cssText = 'display:flex; justify-content:space-between; gap:8px; padding:5px 2px; border-bottom:1px solid rgba(20,20,22,.07); font-size:12px;';
-        const date = document.createElement('span'); date.textContent = item.date;
-        const counts = document.createElement('span'); counts.textContent = '열람 ' + item.pageViews + ' · 검색 ' + item.searches + ' · 링크 ' + item.linkClicks + ' · 광고 노출 ' + (item.sponsorImpressions || 0) + ' · 방문 ' + (item.sponsorStationClicks || 0);
+        row.className = 'promo-stats-row promo-stats-day-row';
+        const date = document.createElement('span'); date.className = 'promo-stats-date'; date.textContent = item.date;
+        const counts = document.createElement('div'); counts.className = 'promo-stats-values promo-stats-metrics';
+        [['열람', item.pageViews], ['검색', item.searches], ['링크', item.linkClicks], ['광고 노출', item.sponsorImpressions || 0], ['방문', item.sponsorStationClicks || 0]].forEach(function (metric) {
+          const chip = document.createElement('span'); chip.className = 'promo-stats-metric';
+          const label = document.createElement('span'); label.className = 'promo-stats-metric-label'; label.textContent = metric[0] + ' ';
+          const value = document.createElement('strong'); value.textContent = (Number(metric[1]) || 0).toLocaleString('ko-KR');
+          chip.append(label, value); counts.appendChild(chip);
+        });
         row.append(date, counts); publicPromoStatsDailyEl.appendChild(row);
       });
       publicPromoStatsTopEl.replaceChildren();
@@ -2843,9 +2888,9 @@
       } else {
         (data.topStreamers || []).forEach(function (item, index) {
           const row = document.createElement('div');
-          row.style.cssText = 'display:flex; justify-content:space-between; gap:8px; padding:5px 2px; border-bottom:1px solid rgba(20,20,22,.07); font-size:12px;';
-          const name = document.createElement('span'); name.textContent = (index + 1) + '. ' + (item.nickname || '(닉네임 미기재)') + (item.soopId ? ' @' + item.soopId : '');
-          const count = document.createElement('strong'); count.textContent = Number(item.clicks || 0).toLocaleString('ko-KR');
+          row.className = 'promo-stats-row';
+          const name = document.createElement('span'); name.className = 'promo-stats-streamer'; name.textContent = (index + 1) + '. ' + (item.nickname || '(닉네임 미기재)') + (item.soopId ? ' @' + item.soopId : '');
+          const count = document.createElement('strong'); count.className = 'promo-stats-clicks'; count.textContent = Number(item.clicks || 0).toLocaleString('ko-KR') + '회';
           row.append(name, count); publicPromoStatsTopEl.appendChild(row);
         });
       }
