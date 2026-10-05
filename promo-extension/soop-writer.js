@@ -235,7 +235,6 @@
     let minimumCheckIntervalMs = 1200;
     let lastReportedResult = '';
     let failureShown = false;
-    let mismatchLogged = false;
     let contentMismatchSince = 0;
     let timer = null;
     let fastWatchTimer = null;
@@ -287,6 +286,7 @@
             lastReportedResult = reason;
             trace('post-confirmation-result', { reason: reason, completed: !!(result && result.completed) });
           }
+          if (reason !== 'post-content-not-confirmed') contentMismatchSince = 0;
           if (result && result.completed) {
             stop();
             try { sessionStorage.removeItem(PUBLISH_CLICK_SESSION_KEY); } catch (error) { /* Storage may be blocked. */ }
@@ -299,12 +299,9 @@
             // before marking the promo complete.
           } else if (result && result.reason === 'post-content-not-confirmed') {
             if (!contentMismatchSince) contentMismatchSince = Date.now();
-            if (!mismatchLogged) {
-              mismatchLogged = true;
-              console.warn('[SOOP 홍보 보조] 게시글 상세 화면은 찾았지만 작성한 홍보글과 제목/게임 링크가 일치하지 않습니다.');
-            }
             if (!failureShown && Date.now() - contentMismatchSince > 10000) {
               failureShown = true;
+              trace('post-content-mismatch-persisted', { durationMs: Date.now() - contentMismatchSince });
               showStatus('게시글 제목 또는 게임 링크가 대기 중인 내용과 달라 완료 처리하지 않았습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
             }
           } else if (result && result.reason === 'multiple-pending-promos' && !failureShown) {

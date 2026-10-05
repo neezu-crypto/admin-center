@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SOOP 홍보글·게시판 찾기",
-  "version": "0.9.21",
+  "version": "0.9.22",
   "description": "SOOP 방송국에서 홍보 후보 게시판과 글쓰기 링크를 찾고 관리자 센터의 홍보글 작성을 보조합니다.",
   "permissions": ["storage", "clipboardWrite"],
   "host_permissions": [

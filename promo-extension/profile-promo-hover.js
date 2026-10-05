@@ -79,7 +79,7 @@
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
   root.__soopPromoProfileStatusIcons015 = true;
 
-  const DIAGNOSTIC_VERSION = '0.9.21';
+  const DIAGNOSTIC_VERSION = '0.9.22';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();

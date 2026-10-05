@@ -58,13 +58,13 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.21');
+  assert.equal(manifest.version, '0.9.22');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
   assert.match(workerSource, /openUnconfirmedStationInNewTab/);
   assert.match(profileSource, /browser-command-received/);
-  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.21'/);
+  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.22'/);
   assert.match(profileSource, /shortcut-station-open-requested/);
   assert.match(profileSource, /type: 'openUnconfirmedStationInNewTab'/);
 });
@@ -78,6 +78,9 @@ test('게시글 완료 확인은 본문 링크 URL을 포함하고 내용이 안
   assert.match(workerSource, /CONTENT_CONFIRMATION_STABILITY_MS = 1200/);
   assert.match(workerSource, /pending\.contentMatchArticleId = match\[2\]/);
   assert.match(workerSource, /now - matchedSince >= CONTENT_CONFIRMATION_STABILITY_MS/);
+  assert.match(writerSource, /if \(reason !== 'post-content-not-confirmed'\) contentMismatchSince = 0/);
+  assert.doesNotMatch(writerSource, /console\.warn\('\[SOOP 홍보 보조\] 게시글 상세 화면은 찾았지만/);
+  assert.match(writerSource, /post-content-mismatch-persisted/);
 });
 
 test('추적 중인 방송국의 게시판 주소에서 게시판과 글쓰기 주소를 만든다', () => {
