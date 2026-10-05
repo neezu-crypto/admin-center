@@ -58,13 +58,13 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.23');
+  assert.equal(manifest.version, '0.9.24');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
   assert.match(workerSource, /openUnconfirmedStationInNewTab/);
   assert.match(profileSource, /browser-command-received/);
-  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.23'/);
+  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.24'/);
   assert.match(profileSource, /shortcut-station-open-requested/);
   assert.match(profileSource, /type: 'openUnconfirmedStationInNewTab'/);
 });
@@ -137,11 +137,10 @@ test('글쓰기 경로에서 방송국과 게시판 ID를 안전하게 추출한
   assert.equal(finder.extractWriteRoute('/station/other/post/write/122232421/extra'), null);
 });
 
-test('패널은 포인터 근처에 배치하되 화면 가장자리에서 뷰포트 안으로 뒤집고 고정한다', () => {
-  assert.deepEqual(finder.positionNearPointer(100, 100, 300, 200, 1000, 800, 16), { left: 116, top: 116 });
-  assert.deepEqual(finder.positionNearPointer(900, 700, 300, 200, 1000, 800, 16), { left: 584, top: 484 });
-  const clamped = finder.positionNearPointer(2, 2, 300, 200, 1000, 800, 16);
-  assert.ok(clamped.left >= 8 && clamped.top >= 8);
+test('홍보 게시판 패널은 오른쪽 아래에 고정되고 포인터 이동에 반응하지 않는다', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'station-board-finder.js'), 'utf8');
+  assert.match(source, /position:fixed;z-index:2147483646;right:18px;bottom:18px/);
+  assert.doesNotMatch(source, /pointermove|positionPanelNearPointer|positionNearPointer/);
 });
 
 test('숫자키 1–9와 0을 패널의 1–10번째 후보 순서로 매핑한다', () => {

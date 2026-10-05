@@ -64,18 +64,6 @@
       .map((entry) => entry.item);
   }
 
-  function positionNearPointer(x, y, panelWidth, panelHeight, viewportWidth, viewportHeight, gap) {
-    const margin = 8;
-    const offset = Number.isFinite(gap) ? gap : 16;
-    let left = x + offset;
-    let top = y + offset;
-    if (left + panelWidth > viewportWidth - margin) left = x - panelWidth - offset;
-    if (top + panelHeight > viewportHeight - margin) top = y - panelHeight - offset;
-    left = Math.max(margin, Math.min(left, Math.max(margin, viewportWidth - panelWidth - margin)));
-    top = Math.max(margin, Math.min(top, Math.max(margin, viewportHeight - panelHeight - margin)));
-    return { left: Math.round(left), top: Math.round(top) };
-  }
-
   function shortcutIndexFromKey(key) {
     const match = /^(?:Digit|Numpad)([0-9])$/.exec(String(key || ''));
     if (!match) return -1;
@@ -96,7 +84,7 @@
     return { kind: 'ignore', reason: '홍보 후보 의미를 이름에서 확인하지 못함' };
   }
 
-  const api = { cleanText, stationIdFromPath, extractBoardLink, extractCurrentBoard, extractWriteRoute, stationNicknameFromTitles, sortCandidatesByConfidence, classifyBoardTitle, positionNearPointer, shortcutIndexFromKey };
+  const api = { cleanText, stationIdFromPath, extractBoardLink, extractCurrentBoard, extractWriteRoute, stationNicknameFromTitles, sortCandidatesByConfidence, classifyBoardTitle, shortcutIndexFromKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined' || !root || root.__soopPromoBoardFinder073) return;
   root.__soopPromoBoardFinder073 = true;
@@ -123,38 +111,11 @@
   let attemptedWriteCopyPath = '';
   let duplicateLookupKey = '';
   let duplicateLookupState = { state: 'idle', nickname: '', reason: '' };
-  let panelPositionedRoute = '';
-  let lastPointerPosition = null;
   const currentBoardTitles = new Map();
   const pendingBoardStorageKey = 'soopPromoBoardFinder.pendingBoard.' + location.hostname;
   const keyboardBoardStorageKey = 'soopPromoBoardFinder.keyboardBoard.' + location.hostname;
   const pendingWriteClipboardKey = 'soopPromoBoardFinder.pendingWriteClipboard.' + location.hostname;
-  const pointerPositionStorageKey = 'soopPromoBoardFinder.pointerPosition.' + location.hostname;
   const PENDING_WRITE_MAX_AGE_MS = 15 * 60 * 1000;
-  const POINTER_POSITION_MAX_AGE_MS = 60 * 1000;
-
-  function readStoredPointerPosition() {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(pointerPositionStorageKey) || 'null');
-      if (!saved || Date.now() - saved.at > POINTER_POSITION_MAX_AGE_MS ||
-          !Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return null;
-      return { x: saved.x, y: saved.y };
-    } catch (_) { return null; }
-  }
-
-  function positionPanelNearPointer(host) {
-    if (!host || !lastRoute || panelPositionedRoute === lastRoute) return;
-    const point = lastPointerPosition || readStoredPointerPosition();
-    if (!point) return;
-    const rect = host.getBoundingClientRect();
-    const position = positionNearPointer(point.x, point.y, rect.width, rect.height, window.innerWidth, window.innerHeight, 16);
-    host.style.left = position.left + 'px';
-    host.style.top = position.top + 'px';
-    host.style.right = 'auto';
-    host.style.bottom = 'auto';
-    panelPositionedRoute = lastRoute;
-    log('panel-positioned-near-pointer', { route: lastRoute, flippedLeft: point.x + rect.width + 16 > window.innerWidth - 8, flippedUp: point.y + rect.height + 16 > window.innerHeight - 8 });
-  }
 
   function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, (character) => ({
@@ -250,10 +211,7 @@
 
   function ensurePanel() {
     let host = document.getElementById(ROOT_ID);
-    if (host) {
-      positionPanelNearPointer(host);
-      return host;
-    }
+    if (host) return host;
     host = document.createElement('div');
     host.id = ROOT_ID;
     host.style.cssText = 'position:fixed;z-index:2147483646;right:18px;bottom:18px;width:min(420px,calc(100vw - 28px));font:14px/1.45 system-ui,-apple-system,sans-serif;color:#172033;';
@@ -276,7 +234,6 @@
         <div class="footer">후보 검색만 수행합니다. 글 게시·즐겨찾기·알림 설정은 자동 변경하지 않습니다.</div>
       </section>`;
     document.documentElement.appendChild(host);
-    positionPanelNearPointer(host);
     const body = shadow.querySelector('.body');
     shadow.querySelector('.close').addEventListener('click', () => {
       const isClosed = host.dataset.closed === 'true';
@@ -627,7 +584,6 @@
       lastRoute = route;
       lastSignature = '';
       duplicateLookupKey = '';
-      panelPositionedRoute = '';
       log('station-route-detected', { stationId: stationId, path: location.pathname });
     }
     const socialTitle = document.querySelector('meta[property="og:title"]')?.content || '';
@@ -761,13 +717,6 @@
   });
 
   log('scanner-initialized', { href: location.origin + location.pathname });
-  window.addEventListener('pointermove', (event) => {
-    lastPointerPosition = { x: event.clientX, y: event.clientY };
-    try { sessionStorage.setItem(pointerPositionStorageKey, JSON.stringify({ x: event.clientX, y: event.clientY, at: Date.now() })); }
-    catch (_) { /* A missing session store only leaves the panel at its default corner. */ }
-    const host = document.getElementById(ROOT_ID);
-    if (host) positionPanelNearPointer(host);
-  }, { passive: true });
   window.addEventListener('pointerdown', () => {
     try {
       const marker = JSON.parse(sessionStorage.getItem(keyboardBoardStorageKey) || 'null');
