@@ -232,7 +232,7 @@
     let stopped = false;
     let checking = false;
     let lastCheckAt = 0;
-    let minimumCheckIntervalMs = 1200;
+    let minimumCheckIntervalMs = 1000;
     let lastReportedResult = '';
     let failureShown = false;
     let contentMismatchSince = 0;
@@ -247,12 +247,12 @@
     }
     function activateFastWatch(reason) {
       if (stopped) return;
-      minimumCheckIntervalMs = 400;
+      minimumCheckIntervalMs = 250;
       clearInterval(timer);
       timer = setInterval(check, minimumCheckIntervalMs);
       clearTimeout(fastWatchTimer);
       fastWatchTimer = setTimeout(function () {
-        minimumCheckIntervalMs = 1200;
+        minimumCheckIntervalMs = 1000;
         clearInterval(timer);
         timer = setInterval(check, minimumCheckIntervalMs);
         trace('post-fast-watch-ended', { reason: reason || 'timeout' });
