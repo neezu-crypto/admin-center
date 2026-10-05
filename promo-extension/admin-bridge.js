@@ -4,6 +4,7 @@
   const duplicateLookupReplies = new Map();
   const candidateAddReplies = new Map();
   const promoExclusionReplies = new Map();
+  const verificationNoteReplies = new Map();
   let extensionContextUnavailable = false;
 
   function trace(attemptId, stage, details) {
@@ -43,7 +44,41 @@
     }
   }
 
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data || data.__streamerVerificationInboxWatch !== true) return;
+    const active = data.active === true;
+    const expiresAt = Number(data.expiresAt) || 0;
+    chrome.runtime.sendMessage({ type: 'watchStreamerVerificationInbox', active: active, expiresAt: expiresAt })
+      .then(function (result) {
+        trace('', 'verification-inbox-watch-requested', { active: active, inboxTabCount: Number(result && result.inboxTabCount) || 0 });
+      }).catch(function (error) {
+        trace('', 'verification-inbox-watch-request-failed', { error: String(error && error.message || error).slice(0, 120) });
+      });
+  });
+
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message && message.type === 'confirmStreamerVerificationNote' &&
+        typeof message.senderId === 'string' && typeof message.code === 'string' && typeof message.noteNo === 'string') {
+      const requestId = createAttemptId();
+      const timeout = setTimeout(function () {
+        verificationNoteReplies.delete(requestId);
+        sendResponse({ ok: false, reason: 'admin-center-timeout' });
+      }, 25000);
+      verificationNoteReplies.set(requestId, function (result) {
+        clearTimeout(timeout);
+        verificationNoteReplies.delete(requestId);
+        sendResponse(result || { ok: false, reason: 'empty-response' });
+      });
+      window.postMessage({
+        __streamerVerificationNoteRequest: true,
+        requestId: requestId,
+        senderId: message.senderId,
+        code: message.code,
+        noteNo: message.noteNo,
+      }, location.origin);
+      return true;
+    }
     if (message && message.type === 'addStreamerPromoCandidate' &&
         typeof message.nickname === 'string' && typeof message.soopId === 'string' && typeof message.writeUrl === 'string') {
       const requestId = createAttemptId();
@@ -137,6 +172,12 @@
 
   window.addEventListener('message', function (event) {
     const data = event.data;
+    if (event.source === window && event.origin === location.origin && data &&
+        data.__streamerVerificationNoteResult === true && typeof data.requestId === 'string') {
+      const reply = verificationNoteReplies.get(data.requestId);
+      if (reply) reply({ ok: data.ok === true, reason: String(data.reason || ''), nickname: String(data.nickname || '') });
+      return;
+    }
     if (event.source === window && event.origin === location.origin && data &&
         data.__soopPromoCandidateAddResult === true && typeof data.requestId === 'string') {
       const candidateReply = candidateAddReplies.get(data.requestId);

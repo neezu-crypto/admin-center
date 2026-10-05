@@ -17,24 +17,24 @@ chrome.commands.onCommand.addListener((command) => {
     if (!tab || !Number.isInteger(tab.id) || !tabUrl || tabUrl.protocol !== 'https:' ||
         !['sooplive.com', 'www.sooplive.com'].includes(tabUrl.hostname)) {
       console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-        version: '0.9.25', stage: 'browser-command-ignored', at: new Date().toISOString(),
+        version: '0.9.26', stage: 'browser-command-ignored', at: new Date().toISOString(),
         details: { reason: 'active-tab-is-not-soop', host: tabUrl && tabUrl.hostname || 'unknown', path: tabUrl && tabUrl.pathname || '' },
       }));
       return;
     }
     console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-      version: '0.9.25', stage: 'browser-command-fired', at: new Date().toISOString(),
+      version: '0.9.26', stage: 'browser-command-fired', at: new Date().toISOString(),
       details: { tabId: tab.id, path: tabUrl.pathname },
     }));
     chrome.tabs.sendMessage(tab.id, { type: 'findUnconfirmedPromoProfile' }).catch((error) => {
       console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-        version: '0.9.25', stage: 'browser-command-delivery-failed', at: new Date().toISOString(),
+        version: '0.9.26', stage: 'browser-command-delivery-failed', at: new Date().toISOString(),
         details: { error: String(error && error.message || error).slice(0, 120) },
       }));
     });
   }).catch((error) => {
     console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-      version: '0.9.25', stage: 'browser-command-query-failed', at: new Date().toISOString(),
+      version: '0.9.26', stage: 'browser-command-query-failed', at: new Date().toISOString(),
       details: { error: String(error && error.message || error).slice(0, 120) },
     }));
   });
@@ -76,6 +76,55 @@ function isAllowedAdminSender(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
 
+  if (message.type === 'watchStreamerVerificationInbox') {
+    if (!isAllowedAdminSender(sender)) return false;
+    const active = message.active === true;
+    const expiresAt = Math.max(Date.now(), Math.min(Number(message.expiresAt) || 0, Date.now() + 20 * 60 * 1000));
+    chrome.tabs.query({ url: ['https://note.sooplive.com/app/*'] }).then((tabs) => {
+      const inboxTabs = tabs.filter((tab) => {
+        try { return new URL(tab.url || '').searchParams.get('page') === 'recv_list'; } catch (_) { return false; }
+      });
+      return Promise.all(inboxTabs.map((tab) => chrome.tabs.sendMessage(tab.id, {
+        type: 'setStreamerVerificationInboxWatch', active: active, expiresAt: active ? expiresAt : 0,
+      }).catch(() => null))).then(() => {
+        trace('', 'verification-inbox-watch-updated', { active: active, inboxTabCount: inboxTabs.length, expiresAt: active ? expiresAt : 0 });
+        sendResponse({ ok: true, inboxTabCount: inboxTabs.length });
+      });
+    }).catch((error) => {
+      trace('', 'verification-inbox-watch-update-failed', { error: String(error && error.message || error).slice(0, 120) });
+      sendResponse({ ok: false, reason: 'inbox-tab-search-failed' });
+    });
+    return true;
+  }
+
+  if (message.type === 'confirmStreamerVerificationNoteFromInbox') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
+    const senderId = String(message.senderId || '').trim().toLowerCase();
+    const code = String(message.code || '').trim().toUpperCase();
+    const noteNo = String(message.noteNo || '').trim();
+    const isInboxSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl &&
+      sourceUrl.protocol === 'https:' && sourceUrl.hostname === 'note.sooplive.com' &&
+      sourceUrl.pathname === '/app/index.php' && sourceUrl.searchParams.get('page') === 'recv_list';
+    if (!isInboxSender || !/^[a-z0-9]{2,20}$/.test(senderId) ||
+        !/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(code) || !/^\d{1,20}$/.test(noteNo)) {
+      sendResponse({ ok: false, reason: 'invalid-note-candidate' });
+      return false;
+    }
+    findAdminTab().then((adminTab) => {
+      if (!adminTab) {
+        sendResponse({ ok: false, reason: 'admin-center-not-open' });
+        return;
+      }
+      chrome.tabs.sendMessage(adminTab.id, {
+        type: 'confirmStreamerVerificationNote', senderId: senderId, code: code, noteNo: noteNo,
+      }).then(sendResponse).catch((error) => {
+        sendResponse({ ok: false, reason: 'admin-bridge-unavailable', message: String(error && error.message || error) });
+      });
+    }).catch((error) => sendResponse({ ok: false, reason: 'admin-tab-search-failed', message: String(error && error.message || error) }));
+    return true;
+  }
+
   if (message.type === 'openUnconfirmedStationInNewTab') {
     let sourceUrl;
     try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
@@ -89,13 +138,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const url = 'https://www.sooplive.com/station/' + encodeURIComponent(stationId);
     chrome.tabs.create({ url: url, active: true }).then((tab) => {
       console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-        version: '0.9.25', stage: 'shortcut-station-tab-created', at: new Date().toISOString(),
+        version: '0.9.26', stage: 'shortcut-station-tab-created', at: new Date().toISOString(),
         details: { stationId: stationId, tabId: tab && tab.id },
       }));
       sendResponse({ ok: true, tabId: tab && tab.id });
     }).catch((error) => {
       console.info('[SOOP 홍보 단축키 진단]', JSON.stringify({
-        version: '0.9.25', stage: 'shortcut-station-tab-failed', at: new Date().toISOString(),
+        version: '0.9.26', stage: 'shortcut-station-tab-failed', at: new Date().toISOString(),
         details: { stationId: stationId, error: String(error && error.message || error).slice(0, 120) },
       }));
       sendResponse({ ok: false, reason: 'tab-create-failed' });

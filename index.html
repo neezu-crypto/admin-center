@@ -1977,9 +1977,11 @@
 
   // 인증 스트리머 관리 1단계 — 조회는 admin-center 전용 함수 하나로 모아서 받고,
   // 승인/거절/해제는 각 게임의 기존 함수를 source 태그로 그대로 라우팅한다.
-  async function refreshVerificationOverview() {
-    verificationPendingListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
-    verificationVerifiedListEl.innerHTML = '';
+  async function refreshVerificationOverview(silent) {
+    if (!silent) {
+      verificationPendingListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+      verificationVerifiedListEl.innerHTML = '';
+    }
     try {
       const result = await listStreamerVerificationOverviewFn();
       pendingRequests = result.data.pending || [];
@@ -1992,10 +1994,55 @@
       verificationVerifiedListEl.innerHTML = '';
       return;
     }
+    const noteEligibleRequests = pendingRequests.filter(function (request) {
+      return request.source === 'life-game' && !request.isSwitch && Number(request.noteVerificationCodeExpiresAt) > Date.now();
+    });
+    window.postMessage({
+      __streamerVerificationInboxWatch: true,
+      active: noteEligibleRequests.length > 0,
+      expiresAt: noteEligibleRequests.reduce(function (latest, request) {
+        return Math.max(latest, Number(request.noteVerificationCodeExpiresAt) || 0);
+      }, 0),
+    }, location.origin);
     renderPendingList();
     renderVerifiedList();
   }
   verificationRefreshBtn.addEventListener('click', refreshVerificationOverview);
+  setInterval(function () {
+    if (role === 'admin' && activeSessionId === 'identity' && document.visibilityState !== 'hidden') {
+      refreshVerificationOverview(true);
+    }
+  }, 10000);
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__streamerVerificationNoteRequest !== true || typeof data.requestId !== 'string') return;
+    const reply = function (payload) {
+      window.postMessage(Object.assign({ __streamerVerificationNoteResult: true, requestId: data.requestId }, payload), location.origin);
+    };
+    const senderId = String(data.senderId || '').trim().toLowerCase();
+    const code = String(data.code || '').trim().toUpperCase();
+    const noteNo = String(data.noteNo || '').trim();
+    if (!/^[a-z0-9]{2,20}$/.test(senderId) || !/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(code) || !/^\d{1,20}$/.test(noteNo)) {
+      reply({ ok: false, reason: 'invalid-note-candidate' });
+      return;
+    }
+    smAdminActionFn({
+      action: 'confirmStreamerVerificationByNote',
+      payload: { senderId: senderId, code: code, noteNo: noteNo },
+    }).then(function (result) {
+      const data = result && result.data || {};
+      if (data.ok) {
+        console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({ stage: 'server-approved', at: new Date().toISOString(), details: { senderId: senderId, noteNo: noteNo } }));
+        refreshVerificationOverview(true);
+      }
+      reply({ ok: data.ok === true, reason: String(data.reason || ''), nickname: String(data.nickname || '') });
+    }).catch(function (error) {
+      console.error('SOOP 인증 쪽지 자동 승인 실패:', error);
+      reply({ ok: false, reason: String(error && error.code || 'server-error') });
+    });
+  });
 
   let onyuAccessRequests = [];
   async function refreshOnyuAccessRequests() {
