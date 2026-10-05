@@ -1493,6 +1493,7 @@ const notifyBettingVerifyRequest    = makeQueueTrigger('/bettingMarket/verifyReq
 // (notifyVerifiedStreamerVisit의 marketLabel과 동일한 패턴).
 const STREAMER_VERIFY_SOURCE_LABELS = {
   'life-game': '인생게임',
+  'streamer-fanpage': '팬페이지',
   'streamer-gallery': '갤러리',
   'streamer-messenger': '스트리머 메신저',
   'onyu-vn': '온 이유',
