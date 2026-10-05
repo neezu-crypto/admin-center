@@ -266,12 +266,18 @@
       checking = true;
       lastCheckAt = Date.now();
       const visibleText = document.body ? document.body.innerText || document.body.textContent || '' : '';
+      // A published link often displays a label instead of its URL. Include
+      // actual hrefs so a correctly published game link can be verified.
+      const visibleLinks = Array.from(document.querySelectorAll('a[href]'))
+        .map(function (anchor) { return anchor.href || ''; })
+        .filter(Boolean)
+        .join('\n');
       Promise.resolve().then(function () {
         return chrome.runtime.sendMessage({
           type: 'confirmPromoPost',
           attemptId: diagnosticAttemptId,
           pageUrl: location.href,
-          visibleText: visibleText.slice(0, 30000),
+          visibleText: (visibleText + '\n' + visibleLinks).slice(0, 30000),
         });
       })
         .then(function (result) {
@@ -288,6 +294,9 @@
           } else if (result && ['admin-save-failed', 'admin-tab-unavailable'].includes(result.reason) && !failureShown) {
             failureShown = true;
             showStatus('게시글은 확인했지만 관리 센터에 완료 상태를 저장하지 못했습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
+          } else if (result && result.reason === 'content-confirmation-pending') {
+            // Wait for the same title and link to remain visible across checks
+            // before marking the promo complete.
           } else if (result && result.reason === 'post-content-not-confirmed') {
             if (!contentMismatchSince) contentMismatchSince = Date.now();
             if (!mismatchLogged) {
@@ -312,6 +321,7 @@
             }
             stop();
           } else if (result && result.reason && result.reason !== 'completion-in-progress' &&
+              result.reason !== 'content-confirmation-pending' &&
               result.reason !== 'post-content-not-confirmed' && !failureShown) {
             failureShown = true;
             showStatus('홍보 완료 확인 단계에서 오류가 발생했습니다 (' + result.reason + '). 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), true);
