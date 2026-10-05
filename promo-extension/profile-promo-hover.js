@@ -9,6 +9,29 @@
     return match ? match[1] : '';
   }
 
+  function stationIdFromProfileButton(button) {
+    if (!button || !button.getAttribute) return '';
+    const image = button.querySelector && button.querySelector('img');
+    const buttonText = cleanText(button.innerText || button.textContent);
+    const identity = [
+      button.getAttribute('data-station-id'),
+      button.getAttribute('data-user-id'),
+      button.getAttribute('aria-label'),
+      button.getAttribute('title'),
+      image && image.getAttribute('alt'),
+      image && image.getAttribute('title'),
+      buttonText,
+    ];
+    for (const value of identity) {
+      const candidate = cleanText(value);
+      if (!/^[A-Za-z0-9_-]{2,40}$/.test(candidate)) continue;
+      if (/^ico[A-Z]/.test(candidate)) continue;
+      if (buttonText && !/^[A-Za-z0-9_-]{2,40}$/.test(buttonText)) continue;
+      return candidate;
+    }
+    return '';
+  }
+
   function cleanText(value) {
     return String(value || '').replace(/[\u200B-\u200D\uFEFF]/g, ' ').replace(/\s+/g, ' ').trim();
   }
@@ -74,12 +97,12 @@
     return control && shift && !alt && !meta && space;
   }
 
-  const api = { stationIdFromProfileHref, cleanText, plausibleNickname, nicknameFromProfileAnchor, isUnconfirmedStatusIcon, isFindUnconfirmedShortcut };
+  const api = { stationIdFromProfileHref, stationIdFromProfileButton, cleanText, plausibleNickname, nicknameFromProfileAnchor, isUnconfirmedStatusIcon, isFindUnconfirmedShortcut };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (typeof document === 'undefined' || !root || root.__soopPromoProfileStatusIcons015) return;
   root.__soopPromoProfileStatusIcons015 = true;
 
-  const DIAGNOSTIC_VERSION = '0.9.22';
+  const DIAGNOSTIC_VERSION = '0.9.23';
   const CACHE_TTL_MS = 30000;
   const cache = new Map();
   const pendingLookups = new Map();
@@ -127,9 +150,13 @@
     };
     const state = labels[status] || labels.unavailable;
     record.button.textContent = state[0];
-    record.button.setAttribute('aria-label', detail ? state[1] + ': ' + detail : state[1]);
-    record.button.disabled = status !== 'unregistered' && status !== 'excluded';
-    record.button.style.cursor = record.button.disabled ? 'default' : 'pointer';
+    const canToggle = record.canToggleExclusion && (status === 'unregistered' || status === 'excluded');
+    const label = !record.canToggleExclusion && (status === 'unregistered' || status === 'excluded')
+      ? (status === 'excluded' ? '홍보 후보 제외됨' : '홍보 리스트 미등록')
+      : state[1];
+    record.button.setAttribute('aria-label', detail ? label + ': ' + detail : label);
+    record.button.disabled = !canToggle;
+    record.button.style.cursor = canToggle ? 'pointer' : 'default';
     record.button.style.background = status === 'registered' ? '#e9f8ef' : status === 'excluded' ? '#fff0ef' : '#fff';
     record.button.style.borderColor = status === 'registered' ? '#86d3a0' : status === 'excluded' ? '#f0aaa4' : '#cbd5e1';
   }
@@ -310,19 +337,22 @@
 
   function startRecord(img) {
     const anchor = img.closest('a[href]');
-    if (!anchor) return;
-    const stationId = stationIdFromProfileHref(anchor.getAttribute('href'), location.href);
+    const avatarButton = img.closest('button');
+    const profileElement = anchor || avatarButton;
+    if (!profileElement) return;
+    const stationId = (anchor && stationIdFromProfileHref(anchor.getAttribute('href'), location.href)) ||
+      stationIdFromProfileButton(avatarButton);
     if (!stationId) return;
     let record = Array.from(records).find((item) => item.img === img);
     if (record) return;
     ensureLayer();
-    const nickname = nicknameFromProfileAnchor(anchor);
+    const nickname = nicknameFromProfileAnchor(profileElement);
     const button = document.createElement('button');
     button.type = 'button';
     button.dataset.soopPromoProfileStatusIcon = 'true';
     button.setAttribute('aria-label', nickname ? '홍보 리스트 상태 확인 중' : '스트리머 닉네임을 확인할 수 없습니다');
     button.style.cssText = 'position:fixed;display:none;place-items:center;width:20px;height:20px;padding:0;border:1px solid #cbd5e1;border-radius:50%;box-shadow:0 1px 4px #17203330;color:#172033;font:700 12px/1 system-ui,-apple-system,sans-serif;pointer-events:auto;z-index:1;';
-    record = { img: img, anchor: anchor, stationId: stationId, nickname: nickname, key: nickname ? cacheKey(stationId, nickname) : '', button: button, status: 'checking', started: false };
+    record = { img: img, anchor: profileElement, canToggleExclusion: !!anchor, stationId: stationId, nickname: nickname, key: nickname ? cacheKey(stationId, nickname) : '', button: button, status: 'checking', started: false };
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -357,7 +387,7 @@
         records.delete(record);
       }
     }
-    document.querySelectorAll('a[href] img').forEach(startRecord);
+    document.querySelectorAll('a[href] img, button img').forEach(startRecord);
     positionAll();
   }
 

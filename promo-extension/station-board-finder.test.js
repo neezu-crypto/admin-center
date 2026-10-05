@@ -58,15 +58,31 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.22');
+  assert.equal(manifest.version, '0.9.23');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
   assert.match(workerSource, /openUnconfirmedStationInNewTab/);
   assert.match(profileSource, /browser-command-received/);
-  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.22'/);
+  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.23'/);
   assert.match(profileSource, /shortcut-station-open-requested/);
   assert.match(profileSource, /type: 'openUnconfirmedStationInNewTab'/);
+});
+
+test('댓글 작성자 아바타 버튼에서 SOOP 아이디를 안전하게 읽는다', () => {
+  assert.equal(profileHover.stationIdFromProfileButton({
+    getAttribute: (name) => ({ 'aria-label': '', title: '', 'data-user-id': '', 'data-station-id': '' }[name] || ''),
+    querySelector: () => ({ getAttribute: (name) => name === 'alt' ? 'gofl2237' : '' }),
+    innerText: '', textContent: '',
+  }), 'gofl2237');
+  assert.equal(profileHover.stationIdFromProfileButton({
+    getAttribute: (name) => ({ 'aria-label': '답글', title: '', 'data-user-id': '', 'data-station-id': '' }[name] || ''),
+    querySelector: () => ({ getAttribute: (name) => name === 'alt' ? 'icoChevronDown' : '' }),
+    innerText: '답글', textContent: '답글',
+  }), '');
+  const source = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
+  assert.match(source, /querySelectorAll\('a\[href\] img, button img'\)/);
+  assert.match(source, /canToggleExclusion: !!anchor/);
 });
 
 test('게시글 완료 확인은 본문 링크 URL을 포함하고 내용이 안정적으로 유지된 뒤 처리한다', () => {
@@ -161,7 +177,7 @@ test('프로필 이미지 로드 후 상태 아이콘을 표시하고 제외·�
   assert.equal(profileHover.stationIdFromProfileHref('https://example.com/station/dommiii'), '');
   assert.equal(profileHover.plausibleNickname('  도미-의 방송국 바로가기  '), '도미-');
   assert.match(hoverSource, /img\.addEventListener\('load'/);
-  assert.match(hoverSource, /querySelectorAll\('a\[href\] img'\)/);
+  assert.match(hoverSource, /querySelectorAll\('a\[href\] img, button img'\)/);
   assert.match(hoverSource, /홍보 리스트 등록됨/);
   assert.match(hoverSource, /registered: \['✅'/);
   assert.match(hoverSource, /excluded: \['🚫'/);
