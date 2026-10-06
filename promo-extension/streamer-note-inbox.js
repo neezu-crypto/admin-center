@@ -28,28 +28,44 @@
     notice._hideTimer = setTimeout(function () { notice.remove(); }, 9000);
   }
 
-  function findNoteRow(anchor) {
-    const direct = anchor.closest('tr, [role="row"], li');
-    if (direct) return direct;
+  function findCandidateRowText(anchor) {
+    // The inbox uses nested clickable cells. The nearest <tr>/<li> can contain
+    // only the linked cell in some SOOP layouts, so walk upward until the
+    // sender ID and preview code are both present in the same bounded row.
     let node = anchor;
-    for (let i = 0; node && i < 7; i += 1, node = node.parentElement) {
-      const text = node.innerText || node.textContent || '';
-      if (text.length > 0 && text.length < 1600 && /\([a-z0-9]{2,20}\)/i.test(text) && CODE_RE.test(text)) return node;
+    let fallback = null;
+    for (let i = 0; node && i < 10; i += 1, node = node.parentElement) {
+      const text = (node.innerText || node.textContent || '').normalize('NFC');
+      if (text.length > 0 && text.length < 1600) {
+        const hasSenderId = /\([a-z0-9]{2,20}\)/i.test(text);
+        const hasCode = CODE_RE.test(text);
+        if (hasSenderId && hasCode) return { text: text, hasSenderId: true, hasCode: true };
+        if (!fallback && (hasSenderId || hasCode)) {
+          fallback = { text: text, hasSenderId: hasSenderId, hasCode: hasCode };
+        }
+      }
+      if (node === document.body) break;
     }
-    return anchor.parentElement || anchor;
+    return fallback;
   }
 
-  function parseCandidate(anchor) {
+  function inspectCandidate(anchor) {
     let url;
-    try { url = new URL(anchor.href, location.href); } catch (_) { return null; }
-    if (url.hostname !== 'note.sooplive.com' || url.pathname !== '/app/index.php' || url.searchParams.get('page') !== 'recv_view') return null;
+    try { url = new URL(anchor.href, location.href); } catch (_) { return { reason: 'invalid-link' }; }
+    if (url.hostname !== 'note.sooplive.com' || url.pathname !== '/app/index.php' || url.searchParams.get('page') !== 'recv_view') {
+      return { reason: 'unexpected-link' };
+    }
     const noteNo = url.searchParams.get('no') || '';
-    if (!/^\d{1,20}$/.test(noteNo)) return null;
-    const rowText = (findNoteRow(anchor).innerText || findNoteRow(anchor).textContent || '').normalize('NFC');
-    const idMatch = rowText.match(/\(([a-z0-9]{2,20})\)/i);
-    const codeMatch = rowText.match(CODE_RE);
-    if (!idMatch || !codeMatch) return null;
-    return { noteNo: noteNo, senderId: idMatch[1].toLowerCase(), code: codeMatch[1].toUpperCase() };
+    if (!/^\d{1,20}$/.test(noteNo)) return { reason: 'missing-note-number' };
+    const row = findCandidateRowText(anchor);
+    if (!row) return { reason: 'sender-and-code-not-in-row' };
+    if (!row.hasSenderId) return { reason: 'sender-id-not-in-row' };
+    if (!row.hasCode) return { reason: 'code-not-in-row' };
+    const idMatch = row.text.match(/\(([a-z0-9]{2,20})\)/i);
+    const codeMatch = row.text.match(CODE_RE);
+    if (!idMatch) return { reason: 'sender-id-not-found' };
+    if (!codeMatch) return { reason: 'code-not-found' };
+    return { candidate: { noteNo: noteNo, senderId: idMatch[1].toLowerCase(), code: codeMatch[1].toUpperCase() } };
   }
 
   async function scanInbox() {
@@ -64,9 +80,14 @@
       }
       const seen = Array.isArray(state[SEEN_KEY]) ? state[SEEN_KEY] : [];
       const anchors = Array.from(document.querySelectorAll('a[href*="page=recv_view"]'));
+      const parseResults = {};
       for (const anchor of anchors) {
-        const candidate = parseCandidate(anchor);
-        if (!candidate) continue;
+        const inspected = inspectCandidate(anchor);
+        if (!inspected.candidate) {
+          parseResults[inspected.reason] = (parseResults[inspected.reason] || 0) + 1;
+          continue;
+        }
+        const candidate = inspected.candidate;
         const signature = candidate.noteNo + ':' + candidate.senderId + ':' + candidate.code;
         if (seen.includes(signature)) continue;
         seen.push(signature);
@@ -88,7 +109,7 @@
         }
         trace('candidate-not-approved', { senderId: candidate.senderId, noteNo: candidate.noteNo, reason: String(result && result.reason || 'empty-response') });
       }
-      trace('inbox-scan-complete', { rowsScanned: anchors.length });
+      trace('inbox-scan-complete', { rowsScanned: anchors.length, candidatesNotParsed: parseResults });
     } catch (error) {
       trace('inbox-scan-failed', { error: String(error && error.message || error).slice(0, 160) });
     } finally {
