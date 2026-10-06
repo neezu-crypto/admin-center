@@ -1836,6 +1836,7 @@
       try { unsubscribe(); } catch (e) { console.warn('세션 구독 해제 실패:', e); }
     });
     if (sessionId === 'shared') adminChatSubscribed = false;
+    if (sessionId === 'identity') streamerVerificationRequestUnsubscribe = null;
     if (sessionId === 'review') {
       reviewSubscriptionsStarted = false;
       marketManagementSubscribed = false;
@@ -1881,7 +1882,9 @@
   async function loadSessionData(sessionId) {
     if (role !== 'admin') return;
     const state = sessionState[sessionId];
-    if (!state || state.loading) return;
+    if (!state) return;
+    if (sessionId === 'identity') startStreamerVerificationRequestSubscription();
+    if (state.loading) return;
     if (state.loaded && Date.now() - state.lastLoadedAt < SESSION_CACHE_TTL_MS) return;
     state.loaded = false;
     state.loading = true;
@@ -1974,6 +1977,46 @@
 
   let pendingRequests = [];
   let verifiedStreamers = [];
+  let streamerVerificationRequestSignature = null;
+  let streamerVerificationRequestUnsubscribe = null;
+
+  function postStreamerVerificationInboxWatch(requests) {
+    const noteEligibleRequests = requests.filter(function (request) {
+      return request.source === 'life-game' && !request.isSwitch && Number(request.noteVerificationCodeExpiresAt) > Date.now();
+    });
+    window.postMessage({
+      __streamerVerificationInboxWatch: true,
+      active: noteEligibleRequests.length > 0,
+      expiresAt: noteEligibleRequests.reduce(function (latest, request) {
+        return Math.max(latest, Number(request.noteVerificationCodeExpiresAt) || 0);
+      }, 0),
+    }, location.origin);
+  }
+
+  function startStreamerVerificationRequestSubscription() {
+    if (streamerVerificationRequestUnsubscribe) return;
+    const queryRef = query(ref(db, 'streamerVerificationRequests'), orderByChild('status'), equalTo('pending'));
+    streamerVerificationRequestUnsubscribe = onValue(queryRef, function (snapshot) {
+      const requests = [];
+      snapshot.forEach(function (child) {
+        requests.push(Object.assign({ id: child.key }, child.val() || {}));
+      });
+      const signature = requests.map(function (request) {
+        return [request.id, request.source || '', request.requestedAt || 0, request.noteVerificationCodeExpiresAt || 0].join(':');
+      }).sort().join('|');
+      postStreamerVerificationInboxWatch(requests);
+      if (streamerVerificationRequestSignature === signature) return;
+      const hadPreviousSnapshot = streamerVerificationRequestSignature !== null;
+      streamerVerificationRequestSignature = signature;
+      // loadSessionData already makes the initial callable request. When the
+      // session is warm-cached or a later pending request changes, refresh the
+      // combined admin view immediately without periodic full-list polling.
+      if (hadPreviousSnapshot || !sessionState.identity.loading) refreshVerificationOverview(true);
+    }, function (error) {
+      console.error('스트리머 인증 신청 실시간 구독 실패:', error);
+    });
+    registerSessionUnsubscriber('identity', streamerVerificationRequestUnsubscribe);
+  }
 
   // 인증 스트리머 관리 1단계 — 조회는 admin-center 전용 함수 하나로 모아서 받고,
   // 승인/거절/해제는 각 게임의 기존 함수를 source 태그로 그대로 라우팅한다.
@@ -1994,25 +2037,11 @@
       verificationVerifiedListEl.innerHTML = '';
       return;
     }
-    const noteEligibleRequests = pendingRequests.filter(function (request) {
-      return request.source === 'life-game' && !request.isSwitch && Number(request.noteVerificationCodeExpiresAt) > Date.now();
-    });
-    window.postMessage({
-      __streamerVerificationInboxWatch: true,
-      active: noteEligibleRequests.length > 0,
-      expiresAt: noteEligibleRequests.reduce(function (latest, request) {
-        return Math.max(latest, Number(request.noteVerificationCodeExpiresAt) || 0);
-      }, 0),
-    }, location.origin);
+    postStreamerVerificationInboxWatch(pendingRequests);
     renderPendingList();
     renderVerifiedList();
   }
   verificationRefreshBtn.addEventListener('click', refreshVerificationOverview);
-  setInterval(function () {
-    if (role === 'admin' && activeSessionId === 'identity' && document.visibilityState !== 'hidden') {
-      refreshVerificationOverview(true);
-    }
-  }, 10000);
 
   window.addEventListener('message', function (event) {
     const data = event.data;
