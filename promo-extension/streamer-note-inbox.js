@@ -1,7 +1,8 @@
 (function () {
   const MONITOR_KEY = 'soopStreamerVerificationInboxMonitor';
-  const SEEN_KEY = 'soopStreamerVerificationInboxSeenNotes';
+  const ATTEMPT_KEY = 'soopStreamerVerificationInboxAttemptTimes';
   const REFRESH_MS = 10000;
+  const RETRY_MS = 30000;
   const CODE_RE = /(?:^|[^A-Z0-9])([ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6})(?=$|[^A-Z0-9])/i;
   let refreshTimer = null;
   let scanning = false;
@@ -72,16 +73,21 @@
     if (scanning || new URL(location.href).searchParams.get('page') !== 'recv_list') return;
     scanning = true;
     try {
-      const state = await chrome.storage.local.get([MONITOR_KEY, SEEN_KEY]);
+      const state = await chrome.storage.local.get([MONITOR_KEY, ATTEMPT_KEY]);
       const monitor = state[MONITOR_KEY] || {};
       if (!monitor.active || Number(monitor.expiresAt) <= Date.now()) {
         await chrome.storage.local.remove(MONITOR_KEY);
         return;
       }
-      const seen = Array.isArray(state[SEEN_KEY]) ? state[SEEN_KEY] : [];
+      const now = Date.now();
+      const attemptTimes = state[ATTEMPT_KEY] && typeof state[ATTEMPT_KEY] === 'object' ? state[ATTEMPT_KEY] : {};
+      Object.keys(attemptTimes).forEach(function (key) {
+        if (!Number.isFinite(Number(attemptTimes[key])) || now - Number(attemptTimes[key]) > 20 * 60 * 1000) delete attemptTimes[key];
+      });
       const anchors = Array.from(document.querySelectorAll('a[href*="page=recv_view"]'));
       const parseResults = {};
-      let alreadySeen = 0;
+      const attemptedThisScan = new Set();
+      let retryDeferred = 0;
       for (const anchor of anchors) {
         const inspected = inspectCandidate(anchor);
         if (!inspected.candidate) {
@@ -90,13 +96,18 @@
           continue;
         }
         const candidate = inspected.candidate;
-        const signature = candidate.noteNo + ':' + candidate.senderId + ':' + candidate.code;
-        if (seen.includes(signature)) {
-          alreadySeen += 1;
+        // Note number + sender identify a row without persisting the private
+        // verification code. Deduplicate duplicate links within this scan,
+        // but retry failed checks after a short cooldown and across reloads.
+        const signature = candidate.noteNo + ':' + candidate.senderId;
+        if (attemptedThisScan.has(signature)) continue;
+        attemptedThisScan.add(signature);
+        if (Number(attemptTimes[signature]) && now - Number(attemptTimes[signature]) < RETRY_MS) {
+          retryDeferred += 1;
           continue;
         }
-        seen.push(signature);
-        await chrome.storage.local.set({ [SEEN_KEY]: seen.slice(-500) });
+        attemptTimes[signature] = now;
+        await chrome.storage.local.set({ [ATTEMPT_KEY]: attemptTimes });
         trace('candidate-detected', { senderId: candidate.senderId, noteNo: candidate.noteNo });
         let result;
         try {
@@ -114,7 +125,7 @@
         }
         trace('candidate-not-approved', { senderId: candidate.senderId, noteNo: candidate.noteNo, reason: String(result && result.reason || 'empty-response') });
       }
-      trace('inbox-scan-complete', { rowsScanned: anchors.length, alreadySeen: alreadySeen, candidatesNotParsed: parseResults });
+      trace('inbox-scan-complete', { rowsScanned: anchors.length, retryDeferred: retryDeferred, candidatesNotParsed: parseResults });
     } catch (error) {
       trace('inbox-scan-failed', { error: String(error && error.message || error).slice(0, 160) });
     } finally {
@@ -140,7 +151,7 @@
     if (!message || message.type !== 'setStreamerVerificationInboxWatch') return false;
     if (message.active !== true) {
       clearTimeout(refreshTimer);
-      chrome.storage.local.remove(MONITOR_KEY).then(function () {
+      chrome.storage.local.remove([MONITOR_KEY, ATTEMPT_KEY, 'soopStreamerVerificationInboxSeenNotes']).then(function () {
         trace('inbox-watch-stopped', {});
         sendResponse({ ok: true });
       });
@@ -158,6 +169,9 @@
         sendResponse({ ok: true, expiresAt: current.expiresAt });
         return;
       }
+      // Remove signatures saved by older versions, which marked failed
+      // candidates as permanently handled and contained the verification code.
+      await chrome.storage.local.remove('soopStreamerVerificationInboxSeenNotes');
       await chrome.storage.local.set({ [MONITOR_KEY]: { active: true, expiresAt: expiresAt } });
       trace('inbox-watch-started', { expiresAt: expiresAt });
       await scanInbox();

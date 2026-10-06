@@ -49,12 +49,29 @@
     if (event.source !== window || event.origin !== location.origin || !data || data.__streamerVerificationInboxWatch !== true) return;
     const active = data.active === true;
     const expiresAt = Number(data.expiresAt) || 0;
-    chrome.runtime.sendMessage({ type: 'watchStreamerVerificationInbox', active: active, expiresAt: expiresAt })
-      .then(function (result) {
-        trace('', 'verification-inbox-watch-requested', { active: active, inboxTabCount: Number(result && result.inboxTabCount) || 0 });
-      }).catch(function (error) {
-        trace('', 'verification-inbox-watch-request-failed', { error: String(error && error.message || error).slice(0, 120) });
+    if (extensionContextUnavailable || !hasValidExtensionContext()) {
+      extensionContextUnavailable = true;
+      trace('', 'verification-inbox-watch-skipped-context-unavailable', { active: active });
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage({ type: 'watchStreamerVerificationInbox', active: active, expiresAt: expiresAt })
+        .then(function (result) {
+          trace('', 'verification-inbox-watch-requested', { active: active, inboxTabCount: Number(result && result.inboxTabCount) || 0 });
+        }).catch(function (error) {
+          const contextInvalidated = /Extension context invalidated/i.test(String(error && error.message || error));
+          if (contextInvalidated) extensionContextUnavailable = true;
+          trace('', contextInvalidated ? 'verification-inbox-watch-skipped-context-unavailable' : 'verification-inbox-watch-request-failed', {
+            active: active, error: String(error && error.message || error).slice(0, 120),
+          });
+        });
+    } catch (error) {
+      const contextInvalidated = /Extension context invalidated/i.test(String(error && error.message || error));
+      if (contextInvalidated) extensionContextUnavailable = true;
+      trace('', contextInvalidated ? 'verification-inbox-watch-skipped-context-unavailable' : 'verification-inbox-watch-request-failed', {
+        active: active, error: String(error && error.message || error).slice(0, 120),
       });
+    }
   });
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
