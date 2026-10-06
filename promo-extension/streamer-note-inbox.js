@@ -117,10 +117,11 @@
           continue;
         }
         if (result && result.ok) {
-          clearTimeout(refreshTimer);
-          await chrome.storage.local.remove(MONITOR_KEY);
           showNotice('인증 쪽지와 신청 정보가 일치해 ' + (result.nickname || '스트리머') + ' 인증을 승인했습니다.', false);
           trace('verification-approved', { senderId: candidate.senderId, noteNo: candidate.noteNo });
+          // Other sister-site requests may still be pending. Keep the inbox
+          // watcher alive until Admin Center reports that none remain.
+          await scheduleNextRefresh();
           return;
         }
         trace('candidate-not-approved', { senderId: candidate.senderId, noteNo: candidate.noteNo, reason: String(result && result.reason || 'empty-response') });
