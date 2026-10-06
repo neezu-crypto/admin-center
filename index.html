@@ -1365,6 +1365,7 @@
   // soop-stock-market 프로젝트를 공유하므로 어느 저장소가 배포했든 이름만 알면 호출 가능).
   // 배팅시장: 기능별로 이름 붙은 함수. 주식시장: adminAction 하나가 action 문자열로 분기.
   const bmApproveVerificationFn = httpsCallable(functions, 'approveVerification');
+  const bmConfirmVerificationByNoteFn = httpsCallable(functions, 'confirmBettingVerificationByNote');
   const bmRejectVerificationFn = httpsCallable(functions, 'rejectVerification');
   const bmRevokeVerificationFn = httpsCallable(functions, 'revokeVerification');
   const smAdminActionFn = httpsCallable(functions, 'adminAction');
@@ -1836,7 +1837,14 @@
       try { unsubscribe(); } catch (e) { console.warn('세션 구독 해제 실패:', e); }
     });
     if (sessionId === 'shared') adminChatSubscribed = false;
-    if (sessionId === 'identity') streamerVerificationRequestUnsubscribe = null;
+    if (sessionId === 'identity') {
+      streamerVerificationRequestUnsubscribe = null;
+      bettingVerificationRequestUnsubscribe = null;
+      streamerVerificationRequestSignature = null;
+      bettingVerificationRequestSignature = null;
+      stockNoteRequests = [];
+      bettingNoteRequests = [];
+    }
     if (sessionId === 'review') {
       reviewSubscriptionsStarted = false;
       marketManagementSubscribed = false;
@@ -1979,10 +1987,14 @@
   let verifiedStreamers = [];
   let streamerVerificationRequestSignature = null;
   let streamerVerificationRequestUnsubscribe = null;
+  let bettingVerificationRequestSignature = null;
+  let bettingVerificationRequestUnsubscribe = null;
+  let stockNoteRequests = [];
+  let bettingNoteRequests = [];
 
   function postStreamerVerificationInboxWatch(requests) {
     const noteEligibleRequests = requests.filter(function (request) {
-      return request.source === 'life-game' && !request.isSwitch && Number(request.noteVerificationCodeExpiresAt) > Date.now();
+      return !request.isSwitch && !!request.noteVerificationCodeHash && Number(request.noteVerificationCodeExpiresAt) > Date.now();
     });
     window.postMessage({
       __streamerVerificationInboxWatch: true,
@@ -1994,9 +2006,9 @@
   }
 
   function startStreamerVerificationRequestSubscription() {
-    if (streamerVerificationRequestUnsubscribe) return;
+    if (streamerVerificationRequestUnsubscribe && bettingVerificationRequestUnsubscribe) return;
     const queryRef = query(ref(db, 'streamerVerificationRequests'), orderByChild('status'), equalTo('pending'));
-    streamerVerificationRequestUnsubscribe = onValue(queryRef, function (snapshot) {
+    if (!streamerVerificationRequestUnsubscribe) streamerVerificationRequestUnsubscribe = onValue(queryRef, function (snapshot) {
       const requests = [];
       snapshot.forEach(function (child) {
         requests.push(Object.assign({ id: child.key }, child.val() || {}));
@@ -2004,7 +2016,8 @@
       const signature = requests.map(function (request) {
         return [request.id, request.source || '', request.requestedAt || 0, request.noteVerificationCodeExpiresAt || 0].join(':');
       }).sort().join('|');
-      postStreamerVerificationInboxWatch(requests);
+      stockNoteRequests = requests;
+      postStreamerVerificationInboxWatch(stockNoteRequests.concat(bettingNoteRequests));
       if (streamerVerificationRequestSignature === signature) return;
       const hadPreviousSnapshot = streamerVerificationRequestSignature !== null;
       streamerVerificationRequestSignature = signature;
@@ -2016,6 +2029,22 @@
       console.error('스트리머 인증 신청 실시간 구독 실패:', error);
     });
     registerSessionUnsubscriber('identity', streamerVerificationRequestUnsubscribe);
+    if (!bettingVerificationRequestUnsubscribe) bettingVerificationRequestUnsubscribe = onValue(ref(db, 'bettingMarket/verifyRequests'), function (snapshot) {
+      const requests = [];
+      snapshot.forEach(function (child) { requests.push(Object.assign({ id: child.key }, child.val() || {})); });
+      const signature = requests.map(function (request) {
+        return [request.id, request.submittedAt || 0, request.noteVerificationCodeExpiresAt || 0].join(':');
+      }).sort().join('|');
+      bettingNoteRequests = requests;
+      postStreamerVerificationInboxWatch(stockNoteRequests.concat(bettingNoteRequests));
+      if (bettingVerificationRequestSignature === signature) return;
+      const hadPreviousSnapshot = bettingVerificationRequestSignature !== null;
+      bettingVerificationRequestSignature = signature;
+      if (hadPreviousSnapshot || !sessionState.identity.loading) refreshVerificationOverview(true);
+    }, function (error) {
+      console.error('배팅시장 스트리머 인증 신청 실시간 구독 실패:', error);
+    });
+    registerSessionUnsubscriber('identity', bettingVerificationRequestUnsubscribe);
   }
 
   // 인증 스트리머 관리 1단계 — 조회는 admin-center 전용 함수 하나로 모아서 받고,
@@ -2061,7 +2090,14 @@
       action: 'confirmStreamerVerificationByNote',
       payload: { senderId: senderId, code: code, noteNo: noteNo },
     }).then(function (result) {
-      const data = result && result.data || {};
+      const first = result && result.data || {};
+      if (!first.ok && first.reason === 'no-matching-pending-request') {
+        return bmConfirmVerificationByNoteFn({ senderId: senderId, code: code, noteNo: noteNo }).then(function (bettingResult) {
+          return bettingResult && bettingResult.data || {};
+        });
+      }
+      return first;
+    }).then(function (data) {
       if (data.ok) {
         console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({ stage: 'server-approved', at: new Date().toISOString(), details: { senderId: senderId, noteNo: noteNo } }));
         refreshVerificationOverview(true);
