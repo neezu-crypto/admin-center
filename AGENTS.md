@@ -18,6 +18,8 @@
 - `streamer-gallery` (스트리머 갤러리, 이미지는 Cloudflare R2)
 - `onyu-vn` (온이유 비주얼 노벨)
 - `streamer-messenger` (스트리머 메신저)
+- `streamer-jurumable` (스트리머 주루마블)
+- `streamer-fanpage` (스트리머 팬페이지)
 
 `admin-center`는 이 서비스들의 통합 관리 콘솔이며, 같은 Firebase 프로젝트를 쓰고
 자체 `functions/`(codebase: `admincenter`)를 갖는다. 온이유의 인증·접근·후기 callable도
@@ -47,6 +49,14 @@
   필요한 인증·권한 부재가 있으면 커밋/배포를 강행하지 말고 구체적인 원인과 함께 사용자에게 알린다.
 - 사용자가 이번 작업에서 커밋·push·배포를 보류하거나 하지 말라고 명시하면 그 지시를 우선한다.
 - 커밋 메시지는 한글로 작성한다.
+
+### 1.1.1 신규 데이터의 저장 위치 확인
+- 새 데이터나 대량 항목을 추가하는 요청에서 저장 위치가 명시되지 않았다면 구현 전에 사용자에게
+  **코드/정적 파일에 하드코딩할지, 서버 데이터베이스에 저장할지 한 번만** 묻는다. 기존 저장
+  방식만 보고 임의로 선택하지 않는다.
+- 질문에는 공개 저장소 파일의 다운로드·열람 가능성, 서버 데이터의 관리·배포 특성 등 선택에
+  필요한 차이를 짧게 설명한다. 사용자가 이번 요청에서 저장 위치를 이미 명확히 지정했다면 다시
+  묻지 않고, 사용자가 한 번 답하면 같은 작업에서 재확인하지 않는다.
 
 ### 1.2 구현 후 검증 필수
 코드를 구현한 뒤 배포·커밋으로 넘어가기 전에 반드시 검증 단계를 거친다. 필드명·
@@ -93,6 +103,8 @@
 | streamer-life-game | `lifegame` |
 | streamer-gallery | `gallery` |
 | streamer-messenger | `messenger` |
+| streamer-jurumable | `jurumable` |
+| streamer-fanpage | `fanpage` |
 
 ### 1.4 `database.rules.json` 동기화 필수 (2026-09-26 현황 확인)
 - 이 파일의 기준 원본은 `StreamBet-Market`이다. 현재 같은 RTDB 규칙 파일을 보유한
@@ -316,8 +328,27 @@ codebase는 `messenger`다. 이 저장소의 `database.rules.json`은 현재 동
 수정 전 모든 사본의 최신 내용과 변경 이력을 확인하고, 변경 사항은 여섯 사본 전부에
 동기화·검증한다. messenger 전용 접근 조건도 전체 규칙 안에서 보존한다.
 
-### 2.9 hanja-story-quiz
+### 2.9 streamer-jurumable (스트리머 주루마블)
+스트리머 방송에서 사용하는 24칸 실시간 주루마블 보드. 정적 HTML/CSS/JavaScript와 Firebase Cloud Functions를 사용하며 codebase는 `jurumable`이다.
+
+- RTDB 게임 데이터는 `streamerJurumable/rooms/{roomId}` 아래에만 둔다. 클라이언트의 보드 쓰기는 금지하고 Cloud Functions(Admin SDK)만 공개 상태를 갱신한다.
+- OBS 브라우저 소스는 방별 읽기 키를 확인하는 Cloud Function을 통해 게임 상태를 1초 간격으로 확인한다. 게임 상태 읽기·쓰기는 서버 함수에서만 처리하며, RTDB 공유 규칙은 수정하지 않는다.
+- 새 함수 추가 전 `firebase functions:list --project soop-stock-market`에서 전역 함수명 충돌을 확인하고, 배포는 `functions:jurumable:<함수명>` 형식으로 대상 함수를 명시한다.
+- 시리즈 게임 목록은 `admin-center/functions/index.js`의 `GAME_CATALOG`에 등록한다. 접속자 분석은 presence 기록을 구현할 때만 `PRESENCE_APPS`에 추가한다.
+- 공개 웹 페이지는 GitHub Pages로 배포하며, OBS 주소는 현재 사이트의 경로를 유지한 `?room=<id>&view=1` 형식으로 생성한다.
+
+### 2.10 hanja-story-quiz
 독립 프로젝트, 이 생태계와 무관. 작업이 끝나면 한글로 summary를 채우고 커밋한다.
+
+### 2.11 streamer-fanpage (스트리머 팬페이지)
+공유 Firebase 프로젝트의 인증 스트리머마다 한 페이지씩 제공하는 검색·소개 사이트. 정적 화면은 GitHub Pages, 서버 API는 Cloud Functions codebase `fanpage`를 사용한다.
+
+- 인증 스트리머 판정과 페이지 소유권은 서버가 `streamerVerifications`의 `uid` 필드로 확인한다. 브라우저가 보낸 소유자 UID를 신뢰하지 않는다.
+- 로그인은 다른 시리즈와 공유하는 기본 Firebase Auth 세션을 사용한다. Google은 `linkGoogleAccount`, Kakao는 `linkKakaoAccount` 공유 callable을 따라 계정을 연결하고, 기존 계정으로 전환할 때는 최근 방문 기록 자동 병합이 되지 않음을 안내한다.
+- 팬페이지 데이터는 `streamerFanPages/{soopId}`에, 로그인 사용자별 최근 방문 8개는 `streamerFanPageRecentVisits/{uid}/{soopId}`에 저장한다. 읽기·쓰기는 Cloud Functions(Admin SDK)만 사용한다.
+- 페이지 검색은 인증된 스트리머 목록만 대상으로 한다. 인증 스트리머가 어느 경로로 접속해도 서버가 확인한 본인 SOOP ID 페이지로 연결한다.
+- 배포는 함수명을 모두 지정한다: `firebase deploy --only functions:fanpage:streamerFanPageBootstrap,functions:fanpage:streamerFanPageSearch,functions:fanpage:streamerFanPageRecent,functions:fanpage:streamerFanPageSave --project soop-stock-market`.
+- 공유 RTDB 규칙 사본은 브라우저 접근이 추가될 때까지 수정하지 않는다. 새 시리즈는 `admin-center/functions/index.js`의 `GAME_CATALOG`에 `streamerFanPage`로 등록한다.
 
 ---
 
