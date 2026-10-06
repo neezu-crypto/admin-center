@@ -34,14 +34,14 @@
     // sender ID and preview code are both present in the same bounded row.
     let node = anchor;
     let fallback = null;
-    for (let i = 0; node && i < 10; i += 1, node = node.parentElement) {
+    for (let i = 0; node && i < 24; i += 1, node = node.parentElement) {
       const text = (node.innerText || node.textContent || '').normalize('NFC');
       if (text.length > 0 && text.length < 1600) {
         const hasSenderId = /\([a-z0-9]{2,20}\)/i.test(text);
         const hasCode = CODE_RE.test(text);
-        if (hasSenderId && hasCode) return { text: text, hasSenderId: true, hasCode: true };
+        if (hasSenderId && hasCode) return { text: text, hasSenderId: true, hasCode: true, depth: i };
         if (!fallback && (hasSenderId || hasCode)) {
-          fallback = { text: text, hasSenderId: hasSenderId, hasCode: hasCode };
+          fallback = { text: text, hasSenderId: hasSenderId, hasCode: hasCode, depth: i };
         }
       }
       if (node === document.body) break;
@@ -58,9 +58,9 @@
     const noteNo = url.searchParams.get('no') || '';
     if (!/^\d{1,20}$/.test(noteNo)) return { reason: 'missing-note-number' };
     const row = findCandidateRowText(anchor);
-    if (!row) return { reason: 'sender-and-code-not-in-row' };
-    if (!row.hasSenderId) return { reason: 'sender-id-not-in-row' };
-    if (!row.hasCode) return { reason: 'code-not-in-row' };
+    if (!row) return { reason: 'sender-and-code-not-in-row', depth: 24 };
+    if (!row.hasSenderId) return { reason: 'sender-id-not-in-row', depth: row.depth };
+    if (!row.hasCode) return { reason: 'code-not-in-row', depth: row.depth };
     const idMatch = row.text.match(/\(([a-z0-9]{2,20})\)/i);
     const codeMatch = row.text.match(CODE_RE);
     if (!idMatch) return { reason: 'sender-id-not-found' };
@@ -81,15 +81,20 @@
       const seen = Array.isArray(state[SEEN_KEY]) ? state[SEEN_KEY] : [];
       const anchors = Array.from(document.querySelectorAll('a[href*="page=recv_view"]'));
       const parseResults = {};
+      let alreadySeen = 0;
       for (const anchor of anchors) {
         const inspected = inspectCandidate(anchor);
         if (!inspected.candidate) {
-          parseResults[inspected.reason] = (parseResults[inspected.reason] || 0) + 1;
+          const reason = inspected.reason + '-depth-' + inspected.depth;
+          parseResults[reason] = (parseResults[reason] || 0) + 1;
           continue;
         }
         const candidate = inspected.candidate;
         const signature = candidate.noteNo + ':' + candidate.senderId + ':' + candidate.code;
-        if (seen.includes(signature)) continue;
+        if (seen.includes(signature)) {
+          alreadySeen += 1;
+          continue;
+        }
         seen.push(signature);
         await chrome.storage.local.set({ [SEEN_KEY]: seen.slice(-500) });
         trace('candidate-detected', { senderId: candidate.senderId, noteNo: candidate.noteNo });
@@ -109,7 +114,7 @@
         }
         trace('candidate-not-approved', { senderId: candidate.senderId, noteNo: candidate.noteNo, reason: String(result && result.reason || 'empty-response') });
       }
-      trace('inbox-scan-complete', { rowsScanned: anchors.length, candidatesNotParsed: parseResults });
+      trace('inbox-scan-complete', { rowsScanned: anchors.length, alreadySeen: alreadySeen, candidatesNotParsed: parseResults });
     } catch (error) {
       trace('inbox-scan-failed', { error: String(error && error.message || error).slice(0, 160) });
     } finally {
