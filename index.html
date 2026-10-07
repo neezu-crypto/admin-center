@@ -1994,7 +1994,8 @@
 
   function postStreamerVerificationInboxWatch(requests) {
     const noteEligibleRequests = requests.filter(function (request) {
-      return !request.isSwitch && !!request.noteVerificationCodeHash && Number(request.noteVerificationCodeExpiresAt) > Date.now();
+      return (!request.status || request.status === 'pending') &&
+        !!request.noteVerificationCodeHash && Number(request.noteVerificationCodeExpiresAt) > Date.now();
     });
     window.postMessage({
       __streamerVerificationInboxWatch: true,
@@ -2102,7 +2103,7 @@
         console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({ stage: 'server-approved', at: new Date().toISOString(), details: { senderId: senderId, noteNo: noteNo } }));
         refreshVerificationOverview(true);
       }
-      reply({ ok: data.ok === true, reason: String(data.reason || ''), nickname: String(data.nickname || '') });
+      reply({ ok: data.ok === true, reason: String(data.reason || ''), nickname: String(data.nickname || ''), isSwitch: data.isSwitch === true });
     }).catch(function (error) {
       console.error('SOOP 인증 쪽지 자동 승인 실패:', error);
       reply({ ok: false, reason: String(error && error.code || 'server-error') });
@@ -2356,10 +2357,12 @@
       const sourceLabel = SOURCE_LABEL[r.source] || r.source;
       const soopIdText = r.soopId ? ' · SOOP: ' + escapeHtml(r.soopId) : '';
       const switchText = r.isSwitch ? ' · 계정 전환 요청' : '';
+      const applicantUid = r.isSwitch && r.requesterUid ? r.requesterUid : r.uid;
+      const existingUidText = r.isSwitch && r.existingUid ? ' · 기존 UID: ' + escapeHtml(String(r.existingUid).slice(0, 10)) : '';
       row.innerHTML =
         '<div class="verif-info"><b>' + escapeHtml(r.nickname) +
         '<span class="source-tag ' + r.source + '">' + sourceLabel + '</span></b>' +
-        '<span>uid: ' + escapeHtml(String(r.uid || '').slice(0, 10)) + soopIdText + switchText + '</span></div>' +
+        '<span>uid: ' + escapeHtml(String(applicantUid || '').slice(0, 10)) + existingUidText + soopIdText + switchText + '</span></div>' +
         '<div class="verif-actions">' +
         '<button class="approve" type="button">승인</button>' +
         '<button class="reject" type="button">거절</button>' +

@@ -117,8 +117,10 @@
           continue;
         }
         if (result && result.ok) {
-          showNotice('인증 쪽지와 신청 정보가 일치해 ' + (result.nickname || '스트리머') + ' 인증을 승인했습니다.', false);
-          trace('verification-approved', { senderId: candidate.senderId, noteNo: candidate.noteNo });
+          showNotice(result.isSwitch
+            ? '기존 인증 계정의 SOOP 아이디가 확인돼 ' + (result.nickname || '스트리머') + ' 계정 전환을 승인했습니다.'
+            : '인증 쪽지와 신청 정보가 일치해 ' + (result.nickname || '스트리머') + ' 인증을 승인했습니다.', false);
+          trace(result.isSwitch ? 'verification-switch-approved' : 'verification-approved', { senderId: candidate.senderId, noteNo: candidate.noteNo });
           // Other sister-site requests may still be pending. Keep the inbox
           // watcher alive until Admin Center reports that none remain.
           await scheduleNextRefresh();

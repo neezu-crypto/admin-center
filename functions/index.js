@@ -563,6 +563,9 @@ const listStreamerVerificationOverview = onCall(async (request) => {
 
   const pending = [];
   Object.keys(bmReq).forEach(function (id) {
+    // 일반 배팅시장 신청은 승인 시 삭제되지만 계정전환은 토큰 소비를 위해
+    // switched 이력으로 남긴다. status 없는 구버전 레코드는 대기 중으로 본다.
+    if (bmReq[id].status && bmReq[id].status !== 'pending') return;
     pending.push(Object.assign({ id: id, source: 'bettingMarket' }, bmReq[id]));
   });
   Object.keys(smReq).forEach(function (id) {
