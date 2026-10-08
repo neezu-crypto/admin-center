@@ -584,6 +584,15 @@
         return;
       }
       if (promoBatchRunId && draft.testOnly === true) {
+        // Leave the input-only batch active briefly so Esc or the manager's
+        // stop button can be exercised against the live writer tab. This path
+        // never enters the publish routine.
+        showStatus('입력 테스트가 끝났습니다. 8초 동안 중단 여부를 확인한 뒤 게시하지 않고 종료합니다.');
+        await new Promise(function (resolve) { setTimeout(resolve, 8000); });
+        if (autoPublishCancelled || !promoBatchActive) {
+          showStatus('입력 테스트를 중단했습니다. 게시·완료 처리는 하지 않았습니다.');
+          return;
+        }
         const testResult = await sendPromoBatchMessage('promoBatchTestReady');
         promoBatchActive = false;
         showStatus(testResult && testResult.ok

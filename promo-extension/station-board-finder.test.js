@@ -59,7 +59,7 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.41');
+  assert.equal(manifest.version, '0.9.42');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
@@ -93,6 +93,8 @@ test('순차 홍보 자동화는 미완료 대상·횟수·대기시간을 제�
   assert.match(workerSource, /advancePromoBatchAfterSuccess\(pending, match\[2\]\)/);
   assert.match(writerSource, /function findUniquePublishButton\(\)/);
   assert.match(writerSource, /sendPromoBatchMessage\('promoBatchTestReady'\)/);
+  assert.match(writerSource, /setTimeout\(resolve, 8000\)/);
+  assert.match(writerSource, /입력 테스트를 중단했습니다\. 게시·완료 처리는 하지 않았습니다/);
   assert.ok(writerSource.indexOf("await sendPromoBatchMessage('promoBatchPublishDispatched')") < writerSource.indexOf('target.button.click()'));
   assert.match(escapeSource, /cancelPromoBatchFromSoop/);
   assert.match(escapeSource, /event\.key !== 'Escape'/);
