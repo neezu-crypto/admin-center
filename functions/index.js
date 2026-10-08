@@ -2491,6 +2491,9 @@ function onyuGiftHasEligibleBackgroundRequest(requests, now) {
 const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB' }, async (request, response) => {
   const origin = String(request.get('Origin') || '');
   const allowedOrigin = origin === 'https://neezu-crypto.github.io' || /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
+  // Extension service-worker fetches with host permissions may omit Origin.
+  // The feed is read-only and still requires a verified Firebase bearer token.
+  const originlessBackgroundGet = !origin && request.method === 'GET';
   response.set('Vary', 'Origin');
   if (allowedOrigin) {
     response.set('Access-Control-Allow-Origin', origin);
@@ -2501,9 +2504,10 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     response.status(allowedOrigin ? 204 : 403).send('');
     return;
   }
-  if (request.method !== 'GET' || !allowedOrigin) {
+  if (request.method !== 'GET' || (!allowedOrigin && !originlessBackgroundGet)) {
     const reason = request.method === 'GET' ? 'origin-not-allowed' : 'method-not-allowed';
-    response.status(request.method === 'GET' ? 403 : 405).json({ reason, message: '허용되지 않은 요청입니다.' });
+    const originType = !origin ? 'missing' : origin.startsWith('chrome-extension://') ? 'unrecognized-extension' : 'other';
+    response.status(request.method === 'GET' ? 403 : 405).json({ reason, originType, message: '허용되지 않은 요청입니다.' });
     return;
   }
   const bearer = String(request.get('Authorization') || '').match(/^Bearer\s+(.+)$/i);
