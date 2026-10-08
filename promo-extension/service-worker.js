@@ -190,8 +190,10 @@ async function runOnyuGiftBackgroundFeed() {
       if (response.status === 401 || response.status === 403) {
         await chrome.storage.session.remove([ONYU_GIFT_MONITOR_SESSION_KEY, 'onyuGiftMonitorLastHeartbeatAt']);
         await notifyOnyuGiftWatchTabs(false, 0);
-        logOnyuGiftBackground('feed-auth-rejected', { status: response.status });
-        reportOnyuGiftMonitorStatus('failed', 'feed-auth-rejected');
+        const rejection = await response.clone().json().catch(() => ({}));
+        const reason = String(rejection.reason || 'access-rejected').slice(0, 80);
+        logOnyuGiftBackground('feed-auth-rejected', { status: response.status, reason });
+        reportOnyuGiftMonitorStatus('failed', 'feed-' + reason);
       } else {
         logOnyuGiftBackground('feed-connect-failed', { status: response.status });
         reportOnyuGiftMonitorStatus('reconnecting', 'feed-connect-failed');

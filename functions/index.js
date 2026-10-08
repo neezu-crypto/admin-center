@@ -2502,12 +2502,13 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     return;
   }
   if (request.method !== 'GET' || !allowedOrigin) {
-    response.status(request.method === 'GET' ? 403 : 405).json({ message: '허용되지 않은 요청입니다.' });
+    const reason = request.method === 'GET' ? 'origin-not-allowed' : 'method-not-allowed';
+    response.status(request.method === 'GET' ? 403 : 405).json({ reason, message: '허용되지 않은 요청입니다.' });
     return;
   }
   const bearer = String(request.get('Authorization') || '').match(/^Bearer\s+(.+)$/i);
   if (!bearer) {
-    response.status(401).json({ message: '인증이 필요합니다.' });
+    response.status(401).json({ reason: 'bearer-missing', message: '인증이 필요합니다.' });
     return;
   }
 
@@ -2516,6 +2517,15 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   let adminUid;
   try {
     decoded = await getAuth().verifyIdToken(bearer[1]);
+  } catch (error) {
+    console.warn('온이유 이용권 백그라운드 인증 토큰 거부:', {
+      reason: 'id-token-invalid',
+      errorCode: String(error && error.code || 'unknown').slice(0, 80),
+    });
+    response.status(403).json({ reason: 'id-token-invalid', message: '이용권 신청 스트림 접근 권한이 없습니다.' });
+    return;
+  }
+  try {
     if (decoded.onyuGiftMonitor === true) {
       adminUid = await requireOnyuGiftMonitorAdmin({ auth: { uid: decoded.uid, token: decoded } });
       accessMode = 'monitor';
@@ -2523,10 +2533,24 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
       adminUid = decoded.uid;
       accessMode = 'admin';
     } else {
-      throw new Error('admin-required');
+      console.warn('온이유 이용권 백그라운드 권한 거부:', {
+        reason: 'admin-required',
+        monitorClaim: false,
+      });
+      response.status(403).json({ reason: 'admin-required', message: '이용권 신청 스트림 접근 권한이 없습니다.' });
+      return;
     }
-  } catch (_) {
-    response.status(403).json({ message: '이용권 신청 스트림 접근 권한이 없습니다.' });
+  } catch (error) {
+    const reason = decoded.onyuGiftMonitor === true ? 'monitor-session-invalid' : 'admin-lookup-failed';
+    const claimedAdminUid = String(decoded.onyuGiftAdminUid || '');
+    console.warn('온이유 이용권 백그라운드 권한 거부:', {
+      reason,
+      errorCode: String(error && error.code || 'unknown').slice(0, 80),
+      monitorClaim: decoded.onyuGiftMonitor === true,
+      adminUidClaimPresent: !!claimedAdminUid,
+      monitorUidMatchesClaim: !!claimedAdminUid && decoded.uid === onyuGiftMonitorUid(claimedAdminUid),
+    });
+    response.status(403).json({ reason, message: '이용권 신청 스트림 접근 권한이 없습니다.' });
     return;
   }
 
