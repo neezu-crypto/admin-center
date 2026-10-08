@@ -1549,6 +1549,35 @@ const notifyOnyuStreamerGameGiftRequest = onValueCreated('/onyuVn/streamerGameGi
     '실제 후원을 확인한 뒤 관리자센터에서 승인해 주세요.\n' + deepLink('section-onyu-access')
   );
 });
+const notifyOnyuStreamerGameGiftAutoApproval = onValueUpdated('/onyuVn/streamerGameGiftRequests/{requestId}', async (event) => {
+  const before = event.data.before.val() || {};
+  const data = event.data.after.val() || {};
+  if (before.status === 'approved' || data.status !== 'approved' || data.verificationSource !== 'soop-donation-notification') return null;
+  const safeText = (value, fallback) => String(value || fallback || '').replace(/[\r\n`*_]/g, ' ').slice(0, 80);
+  const purchaseType = data.purchaseType === 'self-viewer'
+    ? '일반 이용자 본인 구매'
+    : data.purchaseType === 'self'
+      ? '스트리머 본인 구매'
+      : '스트리머 선물';
+  const donor = safeText(data.donorNickname, '(닉네임 미입력)');
+  const donorSoopId = safeText(data.verificationSenderSoopId || data.donorSoopId, '');
+  const target = safeText(data.targetNickname, '(대상 없음)');
+  const targetSoopId = safeText(data.targetSoopId, '');
+  const activationStatus = data.activationStatus === 'awaiting-streamer-verification'
+    ? '후원 확인 완료 · 대상 스트리머 인증 승인 후 이용권 자동 연결 대기'
+    : data.activationStatus === 'blocked-existing-entitlement'
+      ? '후원 확인 완료 · 기존 이용권 여부 관리자 확인 필요'
+      : '후원 확인 및 이용권 승인 완료';
+  await sendDiscordNotification(
+    '✅ **온이유 이용권 후원 자동 확인**\n' +
+    '신청 유형: ' + purchaseType + '\n' +
+    '후원자: ' + donor + (donorSoopId ? ' (@' + donorSoopId + ')' : '') + ' · 별풍선 ' + (Number(data.balloons) || 50) + '개\n' +
+    '대상: ' + target + (targetSoopId ? ' (@' + targetSoopId + ')' : '') + '\n' +
+    '결과: ' + activationStatus + '\n' +
+    deepLink('section-onyu-access')
+  );
+  return null;
+});
 
 // 2026-09-05 추가(신규 게임 온보딩 체크리스트) — 인생게임/갤러리의 신고 큐는
 // admin-center 페이지 안에 대응하는 섹션이 없고, 각 사이트 자체 관리 패널에서
@@ -3580,6 +3609,7 @@ module.exports = {
   onyuAdminDeletePlayerReview,
   notifyOnyuViewerAccessRequest,
   notifyOnyuStreamerGameGiftRequest,
+  notifyOnyuStreamerGameGiftAutoApproval,
   onyuGetViewerAccess,
   onyuListStreamerGiftTargets,
   onyuSubmitStreamerGameGift,
