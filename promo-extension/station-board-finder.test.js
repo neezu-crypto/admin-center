@@ -58,7 +58,7 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.31');
+  assert.equal(manifest.version, '0.9.37');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
@@ -67,6 +67,30 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.26'/);
   assert.match(profileSource, /shortcut-station-open-requested/);
   assert.match(profileSource, /type: 'openUnconfirmedStationInNewTab'/);
+});
+
+test('순차 홍보 자동화는 미완료 대상·횟수·대기시간을 제한하고 입력 전용 시험 모드를 제공한다', () => {
+  const adminSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
+  const writerSource = fs.readFileSync(path.join(__dirname, 'soop-writer.js'), 'utf8');
+  const bridgeSource = fs.readFileSync(path.join(__dirname, 'admin-bridge.js'), 'utf8');
+  assert.match(adminSource, /listStreamerPromoLinksFn\(\)/);
+  assert.match(adminSource, /item\.promotedCompleted === true/);
+  assert.match(adminSource, /streamerPromoBatchCount[^\n]*max="10"/);
+  assert.match(adminSource, /streamerPromoBatchDelay[^\n]*min="30" max="600"/);
+  assert.match(adminSource, /streamerPromoBatchTestOnly/);
+  assert.match(adminSource, /event\.key === 'Escape'/);
+  assert.match(workerSource, /PROMO_BATCH_MAX_ITEMS = 10/);
+  assert.match(workerSource, /PROMO_BATCH_MIN_DELAY_MS = 30000/);
+  assert.match(workerSource, /PROMO_BATCH_MAX_DELAY_MS = 10 \* 60 \* 1000/);
+  assert.match(workerSource, /testOnly && rawItems\.length !== 1/);
+  assert.match(workerSource, /if \(testOnly\) trace\(state\.runId, 'promo-batch-test-started'/);
+  assert.match(workerSource, /advancePromoBatchAfterSuccess\(pending, match\[2\]\)/);
+  assert.match(writerSource, /function findUniquePublishButton\(\)/);
+  assert.match(writerSource, /sendPromoBatchMessage\('promoBatchTestReady'\)/);
+  assert.ok(writerSource.indexOf("await sendPromoBatchMessage('promoBatchPublishDispatched')") < writerSource.indexOf('target.button.click()'));
+  assert.match(writerSource, /sendPromoBatchMessage\('cancelPromoBatchFromSoop'\)/);
+  assert.match(bridgeSource, /data\.__soopPromoBatchRequest !== true/);
 });
 
 test('댓글 작성자 아바타 버튼에서 SOOP 아이디를 안전하게 읽는다', () => {

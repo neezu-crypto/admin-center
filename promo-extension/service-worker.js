@@ -6,6 +6,13 @@ const SOOP_POST_PATH = /^\/station\/([A-Za-z0-9]+)\/post\/(\d+)\/?$/;
 const PROMO_PENDING_TTL_MS = 2 * 60 * 60 * 1000;
 const COMPLETION_RETRY_MS = 5000;
 const CONTENT_CONFIRMATION_STABILITY_MS = 500;
+const PROMO_BATCH_KEY = 'soopPromoBatchRun';
+const PROMO_BATCH_NEXT_ALARM = 'soopPromoBatchNext';
+const PROMO_BATCH_TIMEOUT_ALARM = 'soopPromoBatchTimeout';
+const PROMO_BATCH_MAX_ITEMS = 10;
+const PROMO_BATCH_MIN_DELAY_MS = 30000;
+const PROMO_BATCH_MAX_DELAY_MS = 10 * 60 * 1000;
+const PROMO_BATCH_PUBLISH_TIMEOUT_MS = 2 * 60 * 1000;
 const diagnosticCheckLogKeys = new Set();
 const ONYU_GIFT_WATCH_KEY = 'soopOnyuGameGiftNotificationWatch';
 const ONYU_GIFT_MONITOR_SESSION_KEY = 'onyuGiftBackgroundMonitorSession';
@@ -377,8 +384,471 @@ function isAllowedAdminSender(sender) {
     Number.isInteger(sender.tab && sender.tab.id);
 }
 
+function isAllowedPromoWriterSender(sender) {
+  const value = sender.url || (sender.tab && sender.tab.url) || '';
+  try {
+    const url = new URL(value);
+    return Number.isInteger(sender.tab && sender.tab.id) && url.protocol === 'https:' &&
+      ['sooplive.com', 'www.sooplive.com'].includes(url.hostname) &&
+      /^\/station\/[A-Za-z0-9]+\/post\/(?:write\/\d+|\d+)\/?$/.test(url.pathname);
+  } catch (_) { return false; }
+}
+
+function publicPromoBatchState(state) {
+  if (!state) return { status: 'idle' };
+  return {
+    runId: state.runId || '',
+    status: state.status || 'idle',
+    currentIndex: Number(state.currentIndex) || 0,
+    total: Array.isArray(state.items) ? state.items.length : 0,
+    completedCount: Number(state.completedCount) || 0,
+    currentNickname: String(state.currentNickname || ''),
+    delayMs: Number(state.delayMs) || 0,
+    testOnly: state.testOnly === true,
+    unresolvedPublish: state.status === 'failed' && state.publishDispatched === true,
+    message: String(state.message || ''),
+  };
+}
+
+function isActivePromoBatch(state) {
+  return !!state && ['starting', 'preparing', 'countdown', 'publishing', 'verifying', 'waiting', 'cancelling', 'stopping-after-current'].includes(state.status);
+}
+
+async function notifyPromoBatchState(state) {
+  const previousSaved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+  const previous = previousSaved[PROMO_BATCH_KEY];
+  if (previous && previous.runId === state.runId && previous.cancelRequested === true && state.cancelRequested !== true) {
+    state.cancelRequested = true;
+    state.status = previous.status;
+    state.currentTabId = previous.currentTabId;
+    state.publishDispatched = previous.publishDispatched === true;
+    state.message = previous.message || '관리자 요청으로 중단했습니다.';
+  }
+  await chrome.storage.local.set({ [PROMO_BATCH_KEY]: state });
+  const adminTab = await findAdminTab(state && state.adminTabId).catch(() => null);
+  if (adminTab && Number.isInteger(adminTab.id)) {
+    chrome.tabs.sendMessage(adminTab.id, {
+      type: 'promoBatchStatusUpdate',
+      state: publicPromoBatchState(state),
+    }).catch(() => null);
+  }
+  if (state && Number.isInteger(state.currentTabId)) {
+    chrome.tabs.sendMessage(state.currentTabId, {
+      type: 'promoBatchCurrentState',
+      state: publicPromoBatchState(state),
+    }).catch(() => null);
+  }
+  trace(state && state.runId, 'promo-batch-state-updated', {
+    status: state && state.status || 'idle',
+    currentIndex: Number(state && state.currentIndex) || 0,
+    total: Array.isArray(state && state.items) ? state.items.length : 0,
+    completedCount: Number(state && state.completedCount) || 0,
+  });
+}
+
+function promoBatchItemStationId(item) {
+  try { return new URL(item.writeUrl).pathname.match(/^\/station\/([A-Za-z0-9]+)\//i)?.[1]?.toLowerCase() || ''; }
+  catch (_) { return ''; }
+}
+
+function promoWriterSenderStationId(sender) {
+  try {
+    const url = new URL(sender.url || (sender.tab && sender.tab.url) || '');
+    return url.pathname.match(/^\/station\/([A-Za-z0-9]+)\//i)?.[1]?.toLowerCase() || '';
+  } catch (_) { return ''; }
+}
+
+function validatePromoBatchItems(rawItems, repeatCount, testOnly) {
+  if (!Array.isArray(rawItems) || rawItems.length < 1 || rawItems.length > PROMO_BATCH_MAX_ITEMS ||
+      !Number.isInteger(repeatCount) || repeatCount !== rawItems.length || repeatCount < 1 || repeatCount > PROMO_BATCH_MAX_ITEMS) {
+    return { ok: false, reason: 'invalid-repeat-count', message: '한 번 실행할 대상은 1~10건으로 설정해주세요.' };
+  }
+  if (testOnly && rawItems.length !== 1) {
+    return { ok: false, reason: 'test-mode-count-invalid', message: '입력 테스트는 한 건만 가능합니다.' };
+  }
+  const promoKeys = new Set();
+  const stationIds = new Set();
+  const items = [];
+  for (const raw of rawItems) {
+    const item = raw && typeof raw === 'object' ? raw : {};
+    const stringsValid = typeof item.promoKey === 'string' && item.promoKey.length > 0 && item.promoKey.length <= 160 &&
+      typeof item.nickname === 'string' && item.nickname.trim().length > 0 && item.nickname.length <= 100 &&
+      typeof item.soopId === 'string' && /^[A-Za-z0-9_-]{2,40}$/.test(item.soopId) &&
+      typeof item.title === 'string' && item.title.length > 0 && item.title.length <= 200 &&
+      typeof item.body === 'string' && item.body.length > 0 && item.body.length <= 10000 &&
+      typeof item.html === 'string' && item.html.length > 0 && item.html.length <= 40000 &&
+      typeof item.writeUrl === 'string' && isAllowedWriteUrl(item.writeUrl);
+    if (!stringsValid) return { ok: false, reason: 'invalid-item', message: '대상 정보나 SOOP 글쓰기 링크가 유효하지 않습니다.' };
+    const stationId = promoBatchItemStationId(item);
+    if (!stationId || stationId !== item.soopId.toLowerCase()) {
+      return { ok: false, reason: 'station-id-mismatch', message: 'SOOP 아이디와 글쓰기 주소의 방송국이 일치하지 않는 항목이 있습니다.' };
+    }
+    if (promoKeys.has(item.promoKey) || stationIds.has(stationId)) {
+      return { ok: false, reason: 'duplicate-target', message: '중복된 홍보 대상이 포함되어 있습니다.' };
+    }
+    if (!item.title.includes(item.nickname.trim()) || !item.body.includes('neezu-crypto.github.io/streamer-life-game') ||
+        !item.html.includes('neezu-crypto.github.io/streamer-life-game')) {
+      return { ok: false, reason: 'unexpected-promo-content', message: '홍보글 제목 또는 게임 링크를 확인할 수 없습니다.' };
+    }
+    promoKeys.add(item.promoKey);
+    stationIds.add(stationId);
+    items.push({
+      promoKey: item.promoKey,
+      nickname: item.nickname.trim(),
+      soopId: item.soopId,
+      writeUrl: item.writeUrl,
+      title: item.title,
+      body: item.body,
+      html: item.html,
+    });
+  }
+  return { ok: true, items: items };
+}
+
+async function startPromoBatch(message, sender) {
+  const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+  if (isActivePromoBatch(saved[PROMO_BATCH_KEY]) ||
+      (saved[PROMO_BATCH_KEY] && saved[PROMO_BATCH_KEY].status === 'failed' && saved[PROMO_BATCH_KEY].publishDispatched === true)) {
+    return { ok: false, reason: 'batch-already-active', message: '이미 자동 게시 작업이 진행 중입니다.', state: publicPromoBatchState(saved[PROMO_BATCH_KEY]) };
+  }
+  const repeatCount = Number(message.repeatCount);
+  const delayMs = Number(message.delayMs);
+  const testOnly = message.testOnly === true;
+  const validated = validatePromoBatchItems(message.items, repeatCount, testOnly);
+  if (!validated.ok) return validated;
+  if (!Number.isInteger(delayMs) || delayMs < PROMO_BATCH_MIN_DELAY_MS || delayMs > PROMO_BATCH_MAX_DELAY_MS) {
+    return { ok: false, reason: 'invalid-delay', message: '사이클 대기시간은 30초~10분으로 설정해주세요.' };
+  }
+  const currentStorage = await chrome.storage.local.get(null);
+  const currentTime = Date.now();
+  for (const item of validated.items) {
+    const stationId = promoBatchItemStationId(item);
+    const existing = Object.entries(currentStorage).find(([key, pending]) =>
+      key.startsWith(PENDING_POST_PREFIX) && pending && pending.stationId === stationId &&
+      currentTime - Number(pending.createdAt || 0) <= PROMO_PENDING_TTL_MS
+    );
+    if (existing) {
+      return { ok: false, reason: 'existing-pending-post', message: item.nickname + ' 방송국에 미완료 게시 확인이 있어 자동 게시를 시작하지 않았습니다.' };
+    }
+  }
+  await chrome.alarms.clear(PROMO_BATCH_NEXT_ALARM);
+  await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
+  const state = {
+    runId: 'promo-batch-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10),
+    status: 'starting',
+    adminTabId: sender.tab.id,
+    items: validated.items,
+    currentIndex: -1,
+    nextIndex: 0,
+    currentTabId: null,
+    currentNickname: '',
+    completedCount: 0,
+    delayMs: delayMs,
+    testOnly: testOnly,
+    cancelRequested: false,
+    publishDispatched: false,
+    startedAt: currentTime,
+    message: '',
+  };
+  await notifyPromoBatchState(state);
+  if (testOnly) trace(state.runId, 'promo-batch-test-started', { itemCount: 1 });
+  else trace(state.runId, 'promo-batch-started', { itemCount: validated.items.length, delayMs: delayMs });
+  await launchPromoBatchItem(state.runId);
+  const latest = await chrome.storage.local.get(PROMO_BATCH_KEY);
+  const latestState = latest[PROMO_BATCH_KEY] || state;
+  return { ok: true, state: publicPromoBatchState(latestState) };
+}
+
+async function launchPromoBatchItem(runId) {
+  const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+  const state = saved[PROMO_BATCH_KEY];
+  if (!state || state.runId !== runId || state.cancelRequested || !isActivePromoBatch(state)) return;
+  if (state.nextIndex >= state.items.length) {
+    state.status = 'complete';
+    state.currentTabId = null;
+    state.message = '';
+    await notifyPromoBatchState(state);
+    return;
+  }
+  const index = state.nextIndex;
+  const item = state.items[index];
+  const attemptId = runId + '-' + (index + 1);
+  let tab = null;
+  try {
+    state.currentIndex = index;
+    state.currentNickname = item.nickname;
+    state.currentTabId = null;
+    state.publishDispatched = false;
+    state.status = 'preparing';
+    state.message = '';
+    await notifyPromoBatchState(state);
+    tab = await chrome.tabs.create({ url: 'about:blank', active: true });
+    let latestState = (await chrome.storage.local.get(PROMO_BATCH_KEY))[PROMO_BATCH_KEY];
+    if (!latestState || latestState.runId !== runId || latestState.cancelRequested || !isActivePromoBatch(latestState)) {
+      await chrome.tabs.remove(tab.id).catch(() => null);
+      return;
+    }
+    const createdAt = Date.now();
+    const draftKey = PENDING_KEY_PREFIX + tab.id;
+    const pendingKey = PENDING_POST_PREFIX + tab.id;
+    await chrome.storage.local.set({
+      [draftKey]: {
+        attemptId: attemptId,
+        nickname: item.nickname,
+        title: item.title,
+        body: item.body,
+        html: item.html,
+        autoPublish: !state.testOnly,
+        testOnly: state.testOnly,
+        batchRunId: runId,
+        batchIndex: index,
+        createdAt: createdAt,
+      },
+      [pendingKey]: {
+        attemptId: attemptId,
+        adminTabId: state.adminTabId,
+        promoKey: item.promoKey,
+        soopId: item.soopId,
+        stationId: promoBatchItemStationId(item),
+        title: item.title,
+        body: item.body,
+        batchRunId: runId,
+        batchIndex: index,
+        createdAt: createdAt,
+        lastAttemptAt: 0,
+        completionRequested: false,
+      },
+    });
+    latestState = (await chrome.storage.local.get(PROMO_BATCH_KEY))[PROMO_BATCH_KEY];
+    if (!latestState || latestState.runId !== runId || latestState.cancelRequested || !isActivePromoBatch(latestState)) {
+      await chrome.storage.local.remove([draftKey, pendingKey]);
+      await chrome.tabs.remove(tab.id).catch(() => null);
+      return;
+    }
+    latestState.currentIndex = index;
+    latestState.currentNickname = item.nickname;
+    latestState.currentTabId = tab.id;
+    latestState.publishDispatched = false;
+    latestState.status = 'preparing';
+    latestState.message = '';
+    await notifyPromoBatchState(latestState);
+    latestState = (await chrome.storage.local.get(PROMO_BATCH_KEY))[PROMO_BATCH_KEY];
+    if (!latestState || latestState.runId !== runId || latestState.cancelRequested || latestState.currentTabId !== tab.id) {
+      await chrome.storage.local.remove([draftKey, pendingKey]);
+      await chrome.tabs.remove(tab.id).catch(() => null);
+      return;
+    }
+    trace(attemptId, 'promo-batch-write-tab-opening', { soopTabId: tab.id, batchIndex: index + 1 });
+    await chrome.tabs.update(tab.id, { url: item.writeUrl, active: true });
+    await chrome.alarms.create(PROMO_BATCH_TIMEOUT_ALARM, { when: Date.now() + 90000 });
+  } catch (error) {
+    if (tab && Number.isInteger(tab.id)) {
+      chrome.storage.local.remove([PENDING_KEY_PREFIX + tab.id, PENDING_POST_PREFIX + tab.id]).catch(() => null);
+    }
+    const latest = await chrome.storage.local.get(PROMO_BATCH_KEY);
+    const current = latest[PROMO_BATCH_KEY];
+    if (current && current.runId === runId) {
+      current.status = 'failed';
+      current.currentTabId = null;
+      current.message = 'SOOP 글쓰기 탭을 열지 못해 다음 게시를 중단했습니다.';
+      await notifyPromoBatchState(current);
+    }
+    trace(attemptId, 'promo-batch-write-tab-open-failed', { error: String(error && error.message || error).slice(0, 120) });
+  }
+}
+
+async function stopPromoBatch(reason) {
+  const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+  const state = saved[PROMO_BATCH_KEY];
+  if (!state || !isActivePromoBatch(state)) {
+    return { ok: false, reason: 'batch-not-active', message: '진행 중인 자동 게시가 없습니다.', state: publicPromoBatchState(state) };
+  }
+  await chrome.alarms.clear(PROMO_BATCH_NEXT_ALARM);
+  state.cancelRequested = true;
+  if (state.publishDispatched) {
+    state.status = 'stopping-after-current';
+    state.message = '현재 게시 결과를 확인한 뒤 다음 사이클은 시작하지 않습니다.';
+  } else {
+    state.status = 'cancelled';
+    state.message = '관리자 요청으로 중단했습니다.';
+  }
+  await notifyPromoBatchState(state);
+  if (Number.isInteger(state.currentTabId)) {
+    chrome.tabs.sendMessage(state.currentTabId, { type: 'cancelPromoBatchItem', runId: state.runId }).catch(() => null);
+  }
+  trace(state.runId, 'promo-batch-stop-requested', { afterCurrentPost: state.publishDispatched === true, reason: reason || 'manager-stop' });
+  return { ok: true, state: publicPromoBatchState(state) };
+}
+
+async function withCurrentPromoBatch(runId, tabId) {
+  const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+  const state = saved[PROMO_BATCH_KEY];
+  if (!state || state.runId !== runId || !isActivePromoBatch(state) || state.currentTabId !== tabId) return null;
+  return state;
+}
+
+async function advancePromoBatchAfterSuccess(pending, articleId) {
+  if (!pending || !pending.batchRunId) return;
+  const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+  const state = saved[PROMO_BATCH_KEY];
+  if (!state || state.runId !== pending.batchRunId || state.currentIndex !== pending.batchIndex) return;
+  await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
+  state.completedCount = (Number(state.completedCount) || 0) + 1;
+  state.currentTabId = null;
+  state.publishDispatched = false;
+  state.cancelRequested = state.cancelRequested === true || state.status === 'stopping-after-current' || state.status === 'cancelled';
+  trace(pending.attemptId, 'promo-batch-item-confirmed', { batchIndex: state.currentIndex + 1, articleId: String(articleId || '') });
+  if (state.cancelRequested) {
+    state.status = 'cancelled';
+    state.message = '현재 게시를 확인했습니다. 이후 사이클은 중단했습니다.';
+    await notifyPromoBatchState(state);
+    return;
+  }
+  state.nextIndex = state.currentIndex + 1;
+  if (state.nextIndex >= state.items.length) {
+    state.status = 'complete';
+    state.message = '';
+    await notifyPromoBatchState(state);
+    return;
+  }
+  state.status = 'waiting';
+  state.message = '';
+  await notifyPromoBatchState(state);
+  await chrome.alarms.create(PROMO_BATCH_NEXT_ALARM, { when: Date.now() + state.delayMs });
+}
+
+async function failPromoBatchItem(runId, tabId, reason) {
+  const state = await withCurrentPromoBatch(runId, tabId);
+  if (!state) return { ok: false, reason: 'batch-item-not-current' };
+  await chrome.alarms.clear(PROMO_BATCH_NEXT_ALARM);
+  await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
+  state.status = 'failed';
+  state.currentTabId = null;
+  state.message = '게시를 안전하게 확인하지 못해 다음 대상으로 진행하지 않았습니다. (' + String(reason || 'unknown').slice(0, 80) + ')';
+  state.cancelRequested = true;
+  await notifyPromoBatchState(state);
+  trace(runId, 'promo-batch-item-failed', { batchIndex: state.currentIndex + 1, reason: String(reason || 'unknown').slice(0, 80) });
+  return { ok: true, state: publicPromoBatchState(state) };
+}
+
+async function handlePromoBatchWriterMessage(message, sender, sendResponse) {
+  if (!isAllowedPromoWriterSender(sender) || !Number.isInteger(sender.tab && sender.tab.id)) {
+    sendResponse({ ok: false, reason: 'writer-sender-rejected' });
+    return true;
+  }
+  const runId = String(message.runId || '');
+  if (message.type === 'getPromoBatchWriterState') {
+    const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+    const state = saved[PROMO_BATCH_KEY];
+    const currentItem = state && state.items && state.items[state.currentIndex];
+    const senderStationId = promoWriterSenderStationId(sender);
+    const sameCurrentStation = !!(currentItem && senderStationId && promoBatchItemStationId(currentItem) === senderStationId);
+    const runMatches = !!(state && (!runId || state.runId === runId));
+    sendResponse({
+      ok: true,
+      active: !!(runMatches && isActivePromoBatch(state) && (state.currentTabId === sender.tab.id || sameCurrentStation)),
+      state: runMatches ? publicPromoBatchState(state) : { status: 'idle' },
+    });
+    return true;
+  }
+  if (message.type === 'cancelPromoBatchFromSoop') {
+    const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+    const state = saved[PROMO_BATCH_KEY];
+    const currentItem = state && state.items && state.items[state.currentIndex];
+    const senderStationId = promoWriterSenderStationId(sender);
+    const sameCurrentStation = !!(currentItem && senderStationId && promoBatchItemStationId(currentItem) === senderStationId);
+    if (!state || state.runId !== runId || !isActivePromoBatch(state) ||
+        (state.currentTabId !== sender.tab.id && !sameCurrentStation)) {
+      return sendResponse({ ok: false, reason: 'batch-item-not-current' }), true;
+    }
+    const result = await stopPromoBatch('escape-from-soop');
+    sendResponse(result);
+    return true;
+  }
+  if (message.type === 'promoBatchDraftReady') {
+    const state = await withCurrentPromoBatch(runId, sender.tab.id);
+    if (!state || state.cancelRequested) return sendResponse({ ok: false, reason: 'batch-cancelled' }), true;
+    await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
+    state.status = 'countdown';
+    state.message = '';
+    await notifyPromoBatchState(state);
+    sendResponse({ ok: true, state: publicPromoBatchState(state) });
+    return true;
+  }
+  if (message.type === 'promoBatchTestReady') {
+    const state = await withCurrentPromoBatch(runId, sender.tab.id);
+    if (!state || !state.testOnly) return sendResponse({ ok: false, reason: 'test-mode-not-active' }), true;
+    await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
+    await chrome.storage.local.remove(PENDING_POST_PREFIX + sender.tab.id);
+    state.status = 'test-ready';
+    state.currentTabId = null;
+    state.message = '입력 테스트가 끝났으며 게시하지 않았습니다.';
+    await notifyPromoBatchState(state);
+    trace(runId, 'promo-batch-test-ready', { batchIndex: state.currentIndex + 1 });
+    sendResponse({ ok: true, state: publicPromoBatchState(state) });
+    return true;
+  }
+  if (message.type === 'authorizePromoBatchPublish') {
+    const state = await withCurrentPromoBatch(runId, sender.tab.id);
+    if (!state || state.cancelRequested || state.testOnly || state.status !== 'countdown') {
+      sendResponse({ ok: false, reason: 'batch-not-authorized' });
+      return true;
+    }
+    state.status = 'publishing';
+    state.publishDispatched = false;
+    await notifyPromoBatchState(state);
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (message.type === 'promoBatchPublishDispatched') {
+    const state = await withCurrentPromoBatch(runId, sender.tab.id);
+    if (!state || state.status !== 'publishing' || state.cancelRequested) return sendResponse({ ok: false, reason: 'batch-item-not-publishing' }), true;
+    state.publishDispatched = true;
+    state.status = 'verifying';
+    await notifyPromoBatchState(state);
+    await chrome.alarms.create(PROMO_BATCH_TIMEOUT_ALARM, { when: Date.now() + PROMO_BATCH_PUBLISH_TIMEOUT_MS });
+    trace(runId, 'promo-batch-publish-dispatched', { batchIndex: state.currentIndex + 1 });
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (message.type === 'promoBatchItemFailed') {
+    const result = await failPromoBatchItem(runId, sender.tab.id, String(message.reason || 'unknown'));
+    sendResponse(result);
+    return true;
+  }
+  return false;
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
+
+  if (message.type === 'promoBatchControl') {
+    if (!isAllowedAdminSender(sender)) return false;
+    const action = String(message.action || '');
+    if (action === 'status') {
+      chrome.storage.local.get(PROMO_BATCH_KEY).then((saved) => {
+        sendResponse({ ok: true, state: publicPromoBatchState(saved[PROMO_BATCH_KEY] || null) });
+      }).catch((error) => sendResponse({ ok: false, reason: String(error && error.message || error) }));
+      return true;
+    }
+    if (action === 'stop') {
+      stopPromoBatch('manager-stop').then(sendResponse).catch((error) => sendResponse({ ok: false, reason: String(error && error.message || error) }));
+      return true;
+    }
+    if (action === 'start') {
+      startPromoBatch(message, sender).then(sendResponse).catch((error) => sendResponse({ ok: false, reason: 'start-failed', message: String(error && error.message || error).slice(0, 120) }));
+      return true;
+    }
+    sendResponse({ ok: false, reason: 'unknown-action', message: '지원하지 않는 자동 게시 요청입니다.' });
+    return false;
+  }
+
+  if (['getPromoBatchWriterState', 'cancelPromoBatchFromSoop', 'promoBatchDraftReady', 'promoBatchTestReady', 'authorizePromoBatchPublish', 'promoBatchPublishDispatched', 'promoBatchItemFailed'].includes(message.type)) {
+    handlePromoBatchWriterMessage(message, sender, sendResponse).catch((error) => {
+      sendResponse({ ok: false, reason: String(error && error.message || error).slice(0, 100) });
+    });
+    return true;
+  }
 
   if (message.type === 'startOnyuGiftBackgroundMonitor') {
     if (!isAllowedAdminSender(sender)) return false;
@@ -740,7 +1210,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
 
-    chrome.tabs.create({ url: 'about:blank', active: true }).then(async (tab) => {
+    chrome.storage.local.get(PROMO_BATCH_KEY).then((batchSaved) => {
+      if (isActivePromoBatch(batchSaved[PROMO_BATCH_KEY])) {
+        sendResponse({ ok: false, error: '자동 게시 사이클이 진행 중입니다. 완료되거나 중단된 뒤 다시 시도해주세요.' });
+        return null;
+      }
+      return chrome.tabs.create({ url: 'about:blank', active: true }).then(async (tab) => {
       const key = PENDING_KEY_PREFIX + tab.id;
       const pendingKey = PENDING_POST_PREFIX + tab.id;
       const createdAt = Date.now();
@@ -772,10 +1247,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await chrome.tabs.update(tab.id, { url: draft.writeUrl, active: true });
       trace(attemptId, 'soop-write-tab-opened', { soopTabId: tab.id });
       sendResponse({ ok: true });
+      }).catch((error) => {
+        trace(attemptId, 'soop-write-tab-open-failed', { error: String(error && error.message || error) });
+        console.error('SOOP 홍보글 탭 열기 실패:', error);
+        sendResponse({ ok: false, error: 'SOOP 글쓰기 탭을 열지 못했습니다.' });
+      });
     }).catch((error) => {
-      trace(attemptId, 'soop-write-tab-open-failed', { error: String(error && error.message || error) });
-      console.error('SOOP 홍보글 탭 열기 실패:', error);
-      sendResponse({ ok: false, error: 'SOOP 글쓰기 탭을 열지 못했습니다.' });
+      trace(attemptId, 'promo-batch-state-check-failed', { error: String(error && error.message || error).slice(0, 100) });
+      sendResponse({ ok: false, error: '홍보 자동화 상태를 확인하지 못했습니다.' });
     });
     return true;
   }
@@ -789,6 +1268,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const key = PENDING_KEY_PREFIX + tabId;
     chrome.storage.local.get(key).then(async (result) => {
       const draft = result[key] || null;
+      if (!draft) {
+        const batchSaved = await chrome.storage.local.get(PROMO_BATCH_KEY);
+        const batch = batchSaved[PROMO_BATCH_KEY];
+        if (batch && batch.currentTabId === tabId && isActivePromoBatch(batch)) {
+          await failPromoBatchItem(batch.runId, tabId, 'draft-missing');
+        }
+      }
+      if (draft && draft.batchRunId) {
+        const batchState = await chrome.storage.local.get(PROMO_BATCH_KEY);
+        const batch = batchState[PROMO_BATCH_KEY];
+        if (!batch || batch.runId !== draft.batchRunId || batch.cancelRequested) {
+          await chrome.storage.local.remove(key);
+          sendResponse({ ok: false, error: '자동 게시가 이미 중단되어 입력을 시작하지 않았습니다.' });
+          return;
+        }
+      }
       if (draft) await chrome.storage.local.remove(key);
       trace(draft && draft.attemptId, draft ? 'draft-delivered-to-soop' : 'draft-missing-on-soop', {
         soopTabId: tabId,
@@ -859,15 +1354,49 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (!alarm || alarm.name !== ONYU_GIFT_MONITOR_ALARM || onyuGiftFeedConnected || onyuGiftFeedConnecting) return;
-  runOnyuGiftBackgroundFeed();
+  if (!alarm) return;
+  if (alarm.name === PROMO_BATCH_NEXT_ALARM) {
+    chrome.storage.local.get(PROMO_BATCH_KEY).then((saved) => {
+      const state = saved[PROMO_BATCH_KEY];
+      if (!state || state.status !== 'waiting' || state.cancelRequested) return;
+      launchPromoBatchItem(state.runId).catch((error) => trace(state.runId, 'promo-batch-next-cycle-failed', { error: String(error && error.message || error).slice(0, 100) }));
+    }).catch((error) => trace('', 'promo-batch-next-cycle-read-failed', { error: String(error && error.message || error).slice(0, 100) }));
+    return;
+  }
+  if (alarm.name === PROMO_BATCH_TIMEOUT_ALARM) {
+    chrome.storage.local.get(PROMO_BATCH_KEY).then(async (saved) => {
+      const state = saved[PROMO_BATCH_KEY];
+      if (!state || !isActivePromoBatch(state)) return;
+      state.status = 'failed';
+      state.cancelRequested = true;
+      state.message = state.publishDispatched
+        ? '게시 요청 뒤 2분 동안 실제 게시글을 확인하지 못해 다음 대상을 중단했습니다.'
+        : '글쓰기 화면 준비에 90초 넘게 걸려 다음 대상을 중단했습니다.';
+      state.currentTabId = null;
+      await notifyPromoBatchState(state);
+      trace(state.runId, state.publishDispatched ? 'promo-batch-publish-confirmation-timeout' : 'promo-batch-editor-timeout', { batchIndex: state.currentIndex + 1 });
+    }).catch((error) => trace('', 'promo-batch-timeout-read-failed', { error: String(error && error.message || error).slice(0, 100) }));
+    return;
+  }
+  if (alarm.name === ONYU_GIFT_MONITOR_ALARM && !onyuGiftFeedConnected && !onyuGiftFeedConnecting) runOnyuGiftBackgroundFeed();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   chrome.storage.local.remove(ONYU_GIFT_WATCH_KEY).catch(() => null);
+  chrome.alarms.clear(PROMO_BATCH_NEXT_ALARM).catch(() => null);
+  chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM).catch(() => null);
   chrome.storage.local.get(null).then((allData) => {
+    const batch = allData[PROMO_BATCH_KEY];
+    if (batch && isActivePromoBatch(batch)) {
+      batch.status = 'cancelled';
+      batch.cancelRequested = true;
+      batch.currentTabId = null;
+      batch.message = '브라우저가 재시작되어 안전을 위해 자동 게시를 중단했습니다.';
+      allData[PROMO_BATCH_KEY] = batch;
+    }
     const sessionKeys = Object.keys(allData).filter((key) =>
       key.startsWith(PENDING_KEY_PREFIX) || key.startsWith(PENDING_POST_PREFIX));
+    const batchSave = batch ? chrome.storage.local.set({ [PROMO_BATCH_KEY]: batch }) : Promise.resolve();
     if (sessionKeys.length) {
       const pendingPostKeys = sessionKeys.filter((key) => key.startsWith(PENDING_POST_PREFIX));
       trace('', 'unclosed-promo-state-cleared-on-browser-startup', {
@@ -875,10 +1404,10 @@ chrome.runtime.onStartup.addListener(() => {
         pendingPostCount: pendingPostKeys.length,
         attemptIds: pendingPostKeys.map((key) => allData[key] && allData[key].attemptId || '').filter(Boolean),
       });
-      return chrome.storage.local.remove(sessionKeys);
+      return batchSave.then(() => chrome.storage.local.remove(sessionKeys));
     }
     trace('', 'browser-startup-no-pending-promo-state', {});
-    return undefined;
+    return batchSave;
   }).catch((error) => console.warn('이전 브라우저 세션의 홍보 데이터 정리 실패:', error));
 });
 
@@ -888,6 +1417,18 @@ chrome.runtime.onInstalled.addListener(() => {
   onyuGiftMonitorSession().then((session) => {
     if (session) runOnyuGiftBackgroundFeed();
     else chrome.storage.local.remove(ONYU_GIFT_WATCH_KEY).catch(() => null);
+  }).catch(() => null);
+  chrome.storage.local.get(PROMO_BATCH_KEY).then(async (saved) => {
+    const state = saved[PROMO_BATCH_KEY];
+    if (!state || !isActivePromoBatch(state)) return;
+    await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
+    await chrome.alarms.clear(PROMO_BATCH_NEXT_ALARM);
+    await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
+    state.status = 'cancelled';
+    state.cancelRequested = true;
+    state.currentTabId = null;
+    state.message = '확장 프로그램이 갱신되어 자동 게시를 안전하게 중단했습니다.';
+    await notifyPromoBatchState(state);
   }).catch(() => null);
 });
 
@@ -1073,6 +1614,7 @@ async function confirmPromoPost(message, sender) {
     }
     await chrome.storage.local.remove(matchingPendingKeys);
     trace(pending.attemptId, 'completion-flow-succeeded', { articleId: match[2] });
+    await advancePromoBatchAfterSuccess(pending, match[2]);
     return { ok: true, completed: true, articleId: match[2], attemptId: pending.attemptId || '' };
   } catch (error) {
     pending.completionRequested = false;

@@ -2,8 +2,14 @@
   const WRITE_PATH = /^\/station\/[A-Za-z0-9]+\/post\/write\/\d+\/?$/;
   const POST_DETAIL_PATH = /^\/station\/[A-Za-z0-9]+\/post\/\d+\/?$/;
   const PUBLISH_CLICK_SESSION_KEY = 'soopPromoPublishClickedAt';
+  const PROMO_BATCH_SESSION_KEY = 'soopPromoBatchRunId';
   const isWritePage = WRITE_PATH.test(location.pathname);
   let diagnosticAttemptId = '';
+  let promoBatchRunId = '';
+  let promoBatchActive = false;
+  let autoPublishCancelled = false;
+  let batchFailureReported = false;
+  try { promoBatchRunId = sessionStorage.getItem(PROMO_BATCH_SESSION_KEY) || ''; } catch (_) { /* Session storage may be blocked. */ }
 
   function trace(stage, details) {
     console.info('[SOOP 홍보 진단]', JSON.stringify({
@@ -18,6 +24,45 @@
     trace('page-route-not-supported', { host: location.hostname });
     return;
   }
+
+  function sendPromoBatchMessage(type, extra) {
+    if (!promoBatchRunId && type !== 'getPromoBatchWriterState') return Promise.resolve({ ok: false, reason: 'batch-id-unavailable' });
+    return chrome.runtime.sendMessage(Object.assign({ type: type, runId: promoBatchRunId }, extra || {}))
+      .catch(function (error) {
+        trace('promo-batch-message-failed', { type: type, error: String(error && error.message || error).slice(0, 100) });
+        return { ok: false, reason: 'extension-message-failed' };
+      });
+  }
+
+  sendPromoBatchMessage('getPromoBatchWriterState').then(function (result) {
+    if (result && result.ok && result.active && result.state) {
+      promoBatchRunId = String(result.state.runId || promoBatchRunId);
+      promoBatchActive = true;
+      try { sessionStorage.setItem(PROMO_BATCH_SESSION_KEY, promoBatchRunId); } catch (_) { /* Storage may be blocked. */ }
+    } else {
+      promoBatchActive = false;
+    }
+  });
+
+  chrome.runtime.onMessage.addListener(function (message) {
+    if (message && message.type === 'promoBatchCurrentState' && message.state && message.state.runId === promoBatchRunId) {
+      promoBatchActive = ['starting', 'preparing', 'countdown', 'publishing', 'verifying', 'waiting', 'cancelling', 'stopping-after-current'].includes(message.state.status);
+    }
+    if (message && message.type === 'cancelPromoBatchItem' && message.runId === promoBatchRunId) {
+      autoPublishCancelled = true;
+      promoBatchActive = false;
+      trace('promo-batch-cancel-received', {});
+    }
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape' || !promoBatchRunId || !promoBatchActive) return;
+    event.preventDefault();
+    event.stopPropagation();
+    autoPublishCancelled = true;
+    trace('promo-batch-escape-stop-requested', { isTrusted: event.isTrusted });
+    sendPromoBatchMessage('cancelPromoBatchFromSoop');
+  }, true);
 
   function isVisible(element) {
     if (!element || !element.getBoundingClientRect) return false;
@@ -228,6 +273,103 @@
     status._hideTimer = setTimeout(function () { status.remove(); }, 9000);
   }
 
+  function findUniquePublishButton() {
+    const candidates = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]')).filter(function (element) {
+      if (!isVisible(element) || element.disabled || element.getAttribute('aria-disabled') === 'true') return false;
+      const label = element instanceof HTMLInputElement
+        ? element.value
+        : (element.innerText || element.textContent || element.getAttribute('aria-label') || element.getAttribute('title') || '');
+      return String(label).replace(/\s+/g, ' ').trim() === '게시';
+    });
+    return { button: candidates.length === 1 ? candidates[0] : null, count: candidates.length };
+  }
+
+  function waitForPostDetail(timeoutMs) {
+    return new Promise(function (resolve) {
+      const deadline = Date.now() + timeoutMs;
+      const check = function () {
+        if (POST_DETAIL_PATH.test(location.pathname)) return resolve(true);
+        if (Date.now() >= deadline) return resolve(false);
+        setTimeout(check, 250);
+      };
+      check();
+    });
+  }
+
+  async function runPromoBatchPublish(titleField, bodyEditor, draft) {
+    const ready = await sendPromoBatchMessage('promoBatchDraftReady');
+    if (!ready || !ready.ok) {
+      promoBatchActive = false;
+      showStatus('자동 게시가 중단됐거나 준비 상태를 확인하지 못했습니다. 게시하지 않았습니다.', true);
+      return;
+    }
+    for (let remaining = 5; remaining > 0; remaining -= 1) {
+      if (autoPublishCancelled) {
+        showStatus('Esc 입력으로 자동 게시를 중단했습니다. 게시하지 않았습니다.', false);
+        return;
+      }
+      showStatus('제목·본문 입력을 확인했습니다. ' + remaining + '초 뒤 게시합니다. 중단하려면 Esc를 누르세요.', false);
+      await new Promise(function (resolve) { setTimeout(resolve, 1000); });
+    }
+    if (autoPublishCancelled) {
+      showStatus('Esc 입력으로 자동 게시를 중단했습니다. 게시하지 않았습니다.', false);
+      return;
+    }
+    const currentTitleMatches = getTitleValue(titleField).trim() === draft.title;
+    const currentBodyText = bodyEditor.innerText || bodyEditor.textContent || '';
+    const currentImageCount = bodyEditor.querySelectorAll('img').length;
+    const currentGameLinkMatches = Array.from(bodyEditor.querySelectorAll('a[href]')).some(function (link) {
+      return /neezu-crypto\.github\.io\/streamer-life-game/.test(link.href || '');
+    });
+    if (!currentTitleMatches || !currentBodyText.includes(draft.nickname) || currentImageCount < 2 || !currentGameLinkMatches) {
+      batchFailureReported = true;
+      promoBatchActive = false;
+      await sendPromoBatchMessage('promoBatchItemFailed', { reason: 'editor-changed-before-publish' });
+      showStatus('게시 직전 제목·본문이 변경되어 자동 게시를 중단했습니다. 게시하지 않았습니다.', true);
+      return;
+    }
+    const authorization = await sendPromoBatchMessage('authorizePromoBatchPublish');
+    if (!authorization || !authorization.ok || autoPublishCancelled) {
+      promoBatchActive = false;
+      showStatus('자동 게시 중단 신호를 확인했습니다. 게시하지 않았습니다.', false);
+      return;
+    }
+    const target = findUniquePublishButton();
+    if (!target.button || target.count !== 1) {
+      batchFailureReported = true;
+      promoBatchActive = false;
+      await sendPromoBatchMessage('promoBatchItemFailed', { reason: target.count ? 'publish-button-ambiguous' : 'publish-button-not-found' });
+      showStatus('게시 버튼을 하나로 특정하지 못해 자동 게시를 중단했습니다. 직접 확인해주세요.', true);
+      return;
+    }
+    if (autoPublishCancelled) {
+      promoBatchActive = false;
+      showStatus('Esc 입력으로 게시 직전 자동화를 중단했습니다. 게시하지 않았습니다.', false);
+      return;
+    }
+    target.button.scrollIntoView({ block: 'center', behavior: 'auto' });
+    // Commit the publish step in the service worker before clicking. If the
+    // user stops before this acknowledgement, the click is never dispatched.
+    const dispatched = await sendPromoBatchMessage('promoBatchPublishDispatched');
+    if (!dispatched || !dispatched.ok) {
+      batchFailureReported = true;
+      promoBatchActive = false;
+      showStatus('게시 직전 중단 또는 상태 오류를 확인했습니다. 게시하지 않았습니다.', true);
+      return;
+    }
+    try { sessionStorage.setItem(PUBLISH_CLICK_SESSION_KEY, String(Date.now())); } catch (_) { /* Storage may be blocked. */ }
+    trace('auto-publish-button-clicked', { isTrusted: false });
+    target.button.click();
+    showStatus('게시 요청을 보냈습니다. 실제 등록된 글의 제목·게임 링크를 확인 중입니다.', false);
+    const navigated = await waitForPostDetail(20000);
+    if (!navigated && !batchFailureReported) {
+      batchFailureReported = true;
+      promoBatchActive = false;
+      await sendPromoBatchMessage('promoBatchItemFailed', { reason: 'post-detail-not-opened' });
+      showStatus('게시 상세 화면으로 이동하지 않아 다음 자동 게시를 중단했습니다. 게시 여부를 직접 확인해주세요.', true);
+    }
+  }
+
   function startPublishedPostWatch() {
     let stopped = false;
     let checking = false;
@@ -288,6 +430,7 @@
           }
           if (reason !== 'post-content-not-confirmed') contentMismatchSince = 0;
           if (result && result.completed) {
+            promoBatchActive = false;
             stop();
             try { sessionStorage.removeItem(PUBLISH_CLICK_SESSION_KEY); } catch (error) { /* Storage may be blocked. */ }
             showStatus('게시글 등록을 확인해 홍보 완료로 표시했습니다. 진단 ID: ' + (diagnosticAttemptId || '확인 불가'), false);
@@ -380,6 +523,13 @@
       return;
     }
     diagnosticAttemptId = draft.attemptId || '';
+    promoBatchRunId = String(draft.batchRunId || '');
+    promoBatchActive = !!promoBatchRunId;
+    autoPublishCancelled = false;
+    batchFailureReported = false;
+    if (promoBatchRunId) {
+      try { sessionStorage.setItem(PROMO_BATCH_SESSION_KEY, promoBatchRunId); } catch (_) { /* Storage may be blocked. */ }
+    }
     try { sessionStorage.setItem('soopPromoDiagnosticAttemptId', diagnosticAttemptId); } catch (error) { /* Storage may be blocked. */ }
     trace('draft-received', {
       titleLength: (draft.title || '').length,
@@ -395,6 +545,11 @@
     const titleField = fields.titleField;
     if (!titleField || !bodyEditor) {
       trace('editor-fields-not-found', { titleFieldFound: !!titleField, bodyEditorFound: !!bodyEditor });
+      if (promoBatchRunId) {
+        batchFailureReported = true;
+        promoBatchActive = false;
+        await sendPromoBatchMessage('promoBatchItemFailed', { reason: 'editor-fields-not-found' });
+      }
       showStatus('확장 프로그램이 제목 또는 본문 편집 영역을 찾지 못했습니다. 게시하지 않았습니다.', true);
       return;
     }
@@ -405,6 +560,11 @@
       const inserted = setEditorHtml(bodyEditor, draft.html);
       if (!inserted) {
         trace('editor-insert-failed', {});
+        if (promoBatchRunId) {
+          batchFailureReported = true;
+          promoBatchActive = false;
+          await sendPromoBatchMessage('promoBatchItemFailed', { reason: 'editor-insert-failed' });
+        }
         showStatus('SOOP 편집기가 내용을 입력받지 못했습니다. 편집 모드를 기본으로 바꾼 뒤 다시 시도해주세요. 게시하지 않았습니다.', true);
         return;
       }
@@ -424,13 +584,33 @@
         bodyTextLength: insertedText.length,
       });
       if (!titleMatches || !bodyMatches) {
+        if (promoBatchRunId) {
+          batchFailureReported = true;
+          promoBatchActive = false;
+          await sendPromoBatchMessage('promoBatchItemFailed', { reason: 'editor-fill-verification-failed' });
+        }
         showStatus('SOOP 편집기에 본문이 정상 반영되지 않았습니다. HTML 코드가 글자로 보이거나 게시 버튼에서 빈 내용 안내가 나오면 게시하지 말고 기본 편집 모드에서 다시 시도해주세요. 게시하지 않았습니다.', true);
         return;
       }
-      showStatus('제목과 본문을 편집기에 입력했습니다. 게시 전에 본문이 유지되는지와 이미지 2장을 확인해주세요. 자동 게시·임시저장은 하지 않았습니다.');
+      if (promoBatchRunId && draft.testOnly === true) {
+        const testResult = await sendPromoBatchMessage('promoBatchTestReady');
+        promoBatchActive = false;
+        showStatus(testResult && testResult.ok
+          ? '테스트 입력을 마쳤습니다. 게시·완료 처리는 하지 않았습니다. 입력된 내용을 확인해주세요.'
+          : '입력 테스트 상태를 저장하지 못했습니다. 게시하지 않았습니다.', !(testResult && testResult.ok));
+      } else if (promoBatchRunId && draft.autoPublish === true) {
+        await runPromoBatchPublish(titleField, bodyEditor, draft);
+      } else {
+        showStatus('제목과 본문을 편집기에 입력했습니다. 게시 전에 본문이 유지되는지와 이미지 2장을 확인해주세요. 자동 게시·임시저장은 하지 않았습니다.');
+      }
     } catch (error) {
       trace('editor-fill-threw', { error: String(error && error.message || error) });
       console.error('SOOP 작성란 자동 입력 실패:', error);
+      if (promoBatchRunId && !batchFailureReported) {
+        batchFailureReported = true;
+        promoBatchActive = false;
+        await sendPromoBatchMessage('promoBatchItemFailed', { reason: 'editor-fill-threw' });
+      }
       showStatus('입력 중 문제가 발생했습니다. 작성 내용을 확인해주세요. 게시하지 않았습니다.', true);
     }
   }).catch(function (error) {

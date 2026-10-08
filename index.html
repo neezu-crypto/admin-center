@@ -860,6 +860,25 @@
       <button id="streamerPromoLinksRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <button id="streamerPromoClearCompletedBtn" class="perm-refresh-btn" type="button" style="margin-left:6px;">전체 체크 해제</button>
       <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
+      <div id="streamerPromoBatchControls" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; padding:10px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
+        <strong style="font-size:12px;">순차 자동 게시</strong>
+        <label style="display:flex; align-items:center; gap:5px; font-size:12px;">반복
+          <input id="streamerPromoBatchCount" type="number" min="1" max="10" value="1" inputmode="numeric" aria-label="반복 게시 횟수" style="width:62px; padding:6px; border:1px solid rgba(20,20,22,0.16); border-radius:7px;">
+          건
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; font-size:12px;">게시 확인 후 대기
+          <input id="streamerPromoBatchDelay" type="number" min="30" max="600" value="30" inputmode="numeric" aria-label="사이클당 대기 시간" style="width:70px; padding:6px; border:1px solid rgba(20,20,22,0.16); border-radius:7px;">
+          초
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; font-size:12px;">
+          <input id="streamerPromoBatchTestOnly" type="checkbox">
+          테스트(입력만, 게시 안 함)
+        </label>
+        <button id="streamerPromoBatchStartBtn" class="perm-refresh-btn" type="button">자동 게시 시작</button>
+        <button id="streamerPromoBatchStopBtn" class="perm-refresh-btn" type="button" disabled>중단 (Esc)</button>
+        <span id="streamerPromoBatchStatus" class="hint" style="margin:0; flex:1 1 220px;" role="status" aria-live="polite">자동 게시 대기 중 · 완료 표시되지 않은 항목만 대상</span>
+      </div>
+      <p class="hint" style="margin:6px 0 0;">실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 10건, 간격은 30초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
       <div class="promo-stats-panel">
@@ -1495,6 +1514,14 @@
   const streamerPromoLinksStatusEl = document.getElementById('streamerPromoLinksStatus');
   const streamerPromoRecentListEl = document.getElementById('streamerPromoRecentList');
   const streamerPromoLinksListEl = document.getElementById('streamerPromoLinksList');
+  const streamerPromoBatchCountEl = document.getElementById('streamerPromoBatchCount');
+  const streamerPromoBatchDelayEl = document.getElementById('streamerPromoBatchDelay');
+  const streamerPromoBatchTestOnlyEl = document.getElementById('streamerPromoBatchTestOnly');
+  const streamerPromoBatchStartBtn = document.getElementById('streamerPromoBatchStartBtn');
+  const streamerPromoBatchStopBtn = document.getElementById('streamerPromoBatchStopBtn');
+  const streamerPromoBatchStatusEl = document.getElementById('streamerPromoBatchStatus');
+  const promoBatchPendingCommands = new Map();
+  let promoBatchIsActive = false;
   const publicPromoStatsDaysEl = document.getElementById('publicPromoStatsDays');
   const publicPromoStatsRefreshBtn = document.getElementById('publicPromoStatsRefreshBtn');
   const publicPromoStatsStatusEl = document.getElementById('publicPromoStatsStatus');
@@ -3289,6 +3316,162 @@
   }
 
   publicPromoStatsRefreshBtn.addEventListener('click', refreshPublicPromoPageStats);
+
+  function promoBatchRequest(action, payload) {
+    return new Promise(function (resolve, reject) {
+      const requestId = 'promo-batch-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      const timeout = setTimeout(function () {
+        promoBatchPendingCommands.delete(requestId);
+        reject(new Error('확장 프로그램 응답 시간이 초과되었습니다. 확장 프로그램과 관리자 센터를 새로고침해주세요.'));
+      }, 15000);
+      promoBatchPendingCommands.set(requestId, function (result) {
+        clearTimeout(timeout);
+        promoBatchPendingCommands.delete(requestId);
+        if (result && result.ok) resolve(result);
+        else reject(new Error(result && result.message || result && result.reason || '확장 프로그램 요청에 실패했습니다.'));
+      });
+      window.postMessage(Object.assign({
+        __soopPromoBatchRequest: true,
+        requestId: requestId,
+        action: action,
+      }, payload || {}), location.origin);
+    });
+  }
+
+  function renderPromoBatchStatus(state) {
+    const status = String(state && state.status || 'idle');
+    const index = Math.max(0, Number(state && state.currentIndex) || 0);
+    const total = Math.max(0, Number(state && state.total) || 0);
+    const completed = Math.max(0, Number(state && state.completedCount) || 0);
+    const nickname = String(state && state.currentNickname || '').trim();
+    const delaySeconds = Math.max(0, Math.round((Number(state && state.delayMs) || 0) / 1000));
+    const labels = {
+      starting: '자동 게시 준비 중…',
+      preparing: nickname ? (index + 1) + '/' + total + ' · ' + nickname + ' 글쓰기 화면을 여는 중…' : '글쓰기 화면을 여는 중…',
+      filling: nickname ? (index + 1) + '/' + total + ' · ' + nickname + ' 제목·본문 입력 확인 중…' : '제목·본문 입력 확인 중…',
+      countdown: nickname ? (index + 1) + '/' + total + ' · ' + nickname + ' 게시 전 대기 중 (Esc로 중단)' : '게시 전 대기 중 (Esc로 중단)',
+      publishing: nickname ? (index + 1) + '/' + total + ' · ' + nickname + ' 게시 요청 중…' : '게시 요청 중…',
+      verifying: nickname ? (index + 1) + '/' + total + ' · ' + nickname + ' 게시글 확인 중…' : '게시글 확인 중…',
+      waiting: completed + '/' + total + '건 완료 · 다음 게시까지 ' + delaySeconds + '초 대기 중',
+      'stopping-after-current': '현재 게시 결과를 확인한 뒤 다음 사이클은 중단합니다.',
+      cancelling: '중단 요청을 전달했습니다…',
+      cancelled: '자동 게시를 중단했습니다. 완료 확인된 ' + completed + '건은 유지됩니다.',
+      failed: '오류로 자동 게시를 중단했습니다. ' + String(state && state.message || '현재 게시글을 확인해주세요.'),
+      complete: total + '건의 게시와 완료 확인을 마쳤습니다.',
+      'test-ready': '테스트 입력이 완료됐습니다. 게시하지 않았습니다. SOOP 글쓰기 탭에서 입력을 확인하세요.',
+      idle: '자동 게시 대기 중 · 완료 표시되지 않은 항목만 대상',
+    };
+    const terminal = ['idle', 'cancelled', 'failed', 'complete', 'test-ready'].includes(status);
+    promoBatchIsActive = !terminal;
+    streamerPromoBatchStatusEl.textContent = labels[status] || String(state && state.message || '자동 게시 상태 확인 중…');
+    streamerPromoBatchStartBtn.disabled = promoBatchIsActive || state.unresolvedPublish === true;
+    streamerPromoBatchStopBtn.disabled = !promoBatchIsActive;
+    streamerPromoBatchCountEl.disabled = promoBatchIsActive;
+    streamerPromoBatchDelayEl.disabled = promoBatchIsActive;
+    streamerPromoBatchTestOnlyEl.disabled = promoBatchIsActive;
+  }
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data) return;
+    if (data.__soopPromoBatchResponse === true && typeof data.requestId === 'string') {
+      const reply = promoBatchPendingCommands.get(data.requestId);
+      if (reply) reply(data);
+      return;
+    }
+    if (data.__soopPromoBatchStatus === true) renderPromoBatchStatus(data.state || {});
+  });
+
+  async function startStreamerPromoBatch() {
+    if (promoBatchIsActive) return;
+    const testOnly = streamerPromoBatchTestOnlyEl.checked;
+    const repeatCount = Math.max(1, Math.min(10, Math.trunc(Number(streamerPromoBatchCountEl.value) || 1)));
+    const delaySeconds = Math.max(30, Math.min(600, Math.trunc(Number(streamerPromoBatchDelayEl.value) || 30)));
+    streamerPromoBatchCountEl.value = String(testOnly ? 1 : repeatCount);
+    streamerPromoBatchDelayEl.value = String(delaySeconds);
+    streamerPromoBatchStartBtn.disabled = true;
+    streamerPromoBatchStatusEl.textContent = '최신 목록과 완료 상태를 확인하는 중…';
+    try {
+      const refreshed = await listStreamerPromoLinksFn();
+      const freshStreamers = Array.isArray(refreshed.data && refreshed.data.streamers) ? refreshed.data.streamers : [];
+      renderStreamerPromoLinksList(freshStreamers, refreshed.data.recentOpened || null);
+      const eligible = freshStreamers.filter(function (item) {
+        if (!item || item.promotedCompleted === true || !String(item.nickname || '').trim() ||
+            !String(item.key || '').trim() || !String(item.soopId || '').trim() || !String(item.writeUrl || '').trim()) return false;
+        try {
+          const url = new URL(item.writeUrl);
+          return url.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(url.hostname) &&
+            /^\/station\/[A-Za-z0-9]+\/post\/write\/\d+\/?$/.test(url.pathname);
+        } catch (_) { return false; }
+      }).sort(function (a, b) {
+        return String(a.nickname || a.soopId).localeCompare(String(b.nickname || b.soopId), 'ko') ||
+          String(a.soopId || '').localeCompare(String(b.soopId || ''));
+      });
+      const selected = eligible.slice(0, testOnly ? 1 : repeatCount).map(function (item) {
+        const nickname = String(item.nickname).trim();
+        return {
+          promoKey: String(item.key),
+          nickname: nickname,
+          soopId: String(item.soopId),
+          writeUrl: String(item.writeUrl),
+          title: buildStreamerPromoTitle(nickname),
+          body: buildStreamerPromoBody(nickname),
+          html: buildStreamerPromoHtml(nickname),
+        };
+      });
+      if (!selected.length) throw new Error('미완료 상태이고 유효한 글쓰기 링크가 등록된 항목이 없습니다.');
+      const targetNames = selected.slice(0, 5).map(function (item) { return '· ' + item.nickname; }).join('\n');
+      const moreNames = selected.length > 5 ? '\n외 ' + (selected.length - 5) + '명' : '';
+      const actionLabel = testOnly ? '테스트 입력' : '공개 게시';
+      const prompt = actionLabel + '을 시작할까요?\n\n대상 ' + selected.length + '명' +
+        (testOnly ? ' (글쓰기 화면 입력만, 게시하지 않음)' : ' · 게시 확인 후 다음 대상으로 이동') +
+        '\n사이클당 대기: ' + delaySeconds + '초\n\n' + targetNames + moreNames +
+        (testOnly ? '' : '\n\nSOOP에 실제 공개 게시됩니다. 자동화 중 Esc 또는 중단 버튼으로 이후 작업을 멈출 수 있습니다.');
+      if (!window.confirm(prompt)) {
+        renderPromoBatchStatus({ status: 'idle' });
+        return;
+      }
+      const response = await promoBatchRequest('start', {
+        items: selected,
+        repeatCount: selected.length,
+        delayMs: delaySeconds * 1000,
+        testOnly: testOnly,
+      });
+      renderPromoBatchStatus(response.state || { status: 'starting' });
+    } catch (error) {
+      streamerPromoBatchStatusEl.textContent = error && error.message || '자동 게시를 시작하지 못했습니다.';
+      streamerPromoBatchStartBtn.disabled = false;
+      console.warn('[SOOP 홍보 진단] 자동 게시 시작 실패:', error);
+    }
+  }
+
+  async function stopStreamerPromoBatch() {
+    if (!promoBatchIsActive) return;
+    streamerPromoBatchStopBtn.disabled = true;
+    streamerPromoBatchStatusEl.textContent = '중단 요청을 전달하는 중…';
+    try {
+      const response = await promoBatchRequest('stop');
+      renderPromoBatchStatus(response.state || { status: 'cancelled' });
+    } catch (error) {
+      streamerPromoBatchStatusEl.textContent = error && error.message || '중단 요청을 전달하지 못했습니다.';
+      streamerPromoBatchStopBtn.disabled = false;
+    }
+  }
+
+  streamerPromoBatchStartBtn.addEventListener('click', startStreamerPromoBatch);
+  streamerPromoBatchStopBtn.addEventListener('click', stopStreamerPromoBatch);
+  streamerPromoBatchTestOnlyEl.addEventListener('change', function () {
+    if (streamerPromoBatchTestOnlyEl.checked) streamerPromoBatchCountEl.value = '1';
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && promoBatchIsActive) {
+      event.preventDefault();
+      stopStreamerPromoBatch();
+    }
+  }, true);
+  promoBatchRequest('status').then(function (response) {
+    renderPromoBatchStatus(response.state || {});
+  }).catch(function () {});
 
   function renderStreamerPromoLinksList(streamers, recentOpened) {
     if (!streamers.length) {

@@ -142,12 +142,56 @@
   window.addEventListener('message', function (event) {
     const data = event.data;
     if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__soopPromoBatchRequest !== true || typeof data.requestId !== 'string') return;
+    if (extensionContextUnavailable || !hasValidExtensionContext()) {
+      extensionContextUnavailable = true;
+      window.postMessage({
+        __soopPromoBatchResponse: true,
+        requestId: data.requestId,
+        ok: false,
+        message: '확장 프로그램이 갱신되었습니다. 관리자 센터 탭을 새로고침해주세요.',
+      }, location.origin);
+      return;
+    }
+    const action = String(data.action || '');
+    const request = { type: 'promoBatchControl', action: action };
+    if (action === 'start') {
+      request.items = Array.isArray(data.items) ? data.items : [];
+      request.repeatCount = Number(data.repeatCount) || 0;
+      request.delayMs = Number(data.delayMs) || 0;
+      request.testOnly = data.testOnly === true;
+    }
+    chrome.runtime.sendMessage(request).then(function (result) {
+      window.postMessage({
+        __soopPromoBatchResponse: true,
+        requestId: data.requestId,
+        ok: !!(result && result.ok),
+        message: String(result && result.message || result && result.reason || ''),
+        state: result && result.state || null,
+      }, location.origin);
+    }).catch(function (error) {
+      window.postMessage({
+        __soopPromoBatchResponse: true,
+        requestId: data.requestId,
+        ok: false,
+        message: '확장 프로그램 요청을 처리하지 못했습니다: ' + String(error && error.message || error).slice(0, 100),
+      }, location.origin);
+    });
+  });
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
         data.__onyuGameGiftNotificationResult !== true || typeof data.requestId !== 'string') return;
     const reply = onyuGiftNotificationReplies.get(data.requestId);
     if (reply) reply({ ok: data.ok === true, reason: String(data.reason || ''), targetNickname: String(data.targetNickname || '') });
   });
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message && message.type === 'promoBatchStatusUpdate') {
+      window.postMessage({ __soopPromoBatchStatus: true, state: message.state || {} }, location.origin);
+      return false;
+    }
     if (message && message.type === 'onyuGiftBackgroundMonitorStatus') {
       window.postMessage({
         __onyuGiftBackgroundMonitorStatus: true,
