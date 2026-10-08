@@ -2024,7 +2024,9 @@
     const jobs = [];
     try {
       if (sessionId === 'identity') {
-        jobs.push(refreshVerificationOverview(), refreshOnyuAccessRequests());
+        // 일반 시청자 접근 신청은 종료됐다. 온이유 이용권 신청은 위에서
+        // 시작한 실시간 구독이 목록을 채우므로 인증 현황만 초기 조회한다.
+        jobs.push(refreshVerificationOverview());
       } else if (sessionId === 'monitoring') {
         jobs.push(
           refreshStatsOverview('day'), refreshVisitorAnalytics(), refreshGalleryStats(),
