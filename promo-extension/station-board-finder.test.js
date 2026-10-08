@@ -51,6 +51,19 @@ test('중복 확인은 관리자 센터 전체 홍보 목록을 조회하고 실
   assert.match(finderSource, /홍보 후보 제외 목록에 등록된 스트리머입니다/);
 });
 
+test('프로필 목록 조회는 브리지가 없는 관리자 탭을 건너뛰고 다른 센터 탭을 시도한다', () => {
+  const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
+  const lookupBranch = workerSource.slice(
+    workerSource.indexOf("if (message.type === 'checkPromoListDuplicate')"),
+    workerSource.indexOf("if (message.type === 'setStreamerPromoExclusion')"),
+  );
+  assert.match(workerSource, /async function findAdminTabs\(\)/);
+  assert.match(lookupBranch, /findAdminTabs\(\)\.then\(async \(adminTabs\)/);
+  assert.match(lookupBranch, /for \(const adminTab of adminTabs\)/);
+  assert.match(lookupBranch, /promo-duplicate-lookup-tab-skipped/);
+  assert.match(lookupBranch, /promo-duplicate-lookup-completed/);
+});
+
 test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워커 로그로 전달한다', () => {
   const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
   const profileSource = fs.readFileSync(path.join(__dirname, 'profile-promo-hover.js'), 'utf8');
@@ -59,13 +72,13 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.45');
+  assert.equal(manifest.version, '0.9.46');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
   assert.match(workerSource, /openUnconfirmedStationInNewTab/);
   assert.match(profileSource, /browser-command-received/);
-  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.26'/);
+  assert.match(profileSource, /DIAGNOSTIC_VERSION = '0\.9\.46'/);
   assert.match(profileSource, /shortcut-station-open-requested/);
   assert.match(profileSource, /type: 'openUnconfirmedStationInNewTab'/);
 });

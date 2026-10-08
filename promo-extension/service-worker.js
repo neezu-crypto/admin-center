@@ -1168,24 +1168,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, reason: 'invalid-request' });
       return false;
     }
-    findAdminTab().then((adminTab) => {
-      if (!adminTab) {
+    findAdminTabs().then(async (adminTabs) => {
+      if (!adminTabs.length) {
         trace(requestId, 'promo-duplicate-lookup-unavailable', { reason: 'admin-center-not-open', stationId: stationId });
         sendResponse({ ok: false, reason: 'admin-center-not-open' });
         return;
       }
-      trace(requestId, 'promo-duplicate-lookup-forwarded', { stationId: stationId, adminTabId: adminTab.id });
-      chrome.tabs.sendMessage(adminTab.id, {
-        type: 'lookupStreamerPromoDuplicate', requestId: requestId, stationId: stationId, nickname: nickname,
-      }).then((result) => {
-        trace(requestId, result && result.ok ? 'promo-duplicate-lookup-completed' : 'promo-duplicate-lookup-failed', {
-          found: !!(result && result.found), reason: String(result && result.reason || ''),
-        });
-        sendResponse(result || { ok: false, reason: 'empty-admin-response' });
-      }).catch((error) => {
-        trace(requestId, 'promo-duplicate-lookup-unavailable', { reason: 'admin-bridge-unavailable', error: String(error && error.message || error) });
-        sendResponse({ ok: false, reason: 'admin-bridge-unavailable' });
+      let lastError = null;
+      for (const adminTab of adminTabs) {
+        trace(requestId, 'promo-duplicate-lookup-forwarded', { stationId: stationId, adminTabId: adminTab.id });
+        try {
+          const result = await chrome.tabs.sendMessage(adminTab.id, {
+            type: 'lookupStreamerPromoDuplicate', requestId: requestId, stationId: stationId, nickname: nickname,
+          });
+          trace(requestId, result && result.ok ? 'promo-duplicate-lookup-completed' : 'promo-duplicate-lookup-failed', {
+            found: !!(result && result.found), reason: String(result && result.reason || ''), adminTabId: adminTab.id,
+          });
+          sendResponse(result || { ok: false, reason: 'empty-admin-response' });
+          return;
+        } catch (error) {
+          lastError = error;
+          trace(requestId, 'promo-duplicate-lookup-tab-skipped', {
+            adminTabId: adminTab.id,
+            error: String(error && error.message || error),
+          });
+        }
+      }
+      trace(requestId, 'promo-duplicate-lookup-unavailable', {
+        reason: 'admin-bridge-unavailable', stationId: stationId, adminTabCount: adminTabs.length,
+        error: String(lastError && lastError.message || lastError || ''),
       });
+      sendResponse({ ok: false, reason: 'admin-bridge-unavailable' });
     }).catch((error) => {
       trace(requestId, 'promo-duplicate-lookup-unavailable', { reason: 'admin-tab-search-failed', error: String(error && error.message || error) });
       sendResponse({ ok: false, reason: 'admin-tab-search-failed' });
@@ -1505,8 +1518,12 @@ async function findAdminTab(preferredTabId) {
       if (tab.url && tab.url.startsWith(ADMIN_PAGE_PREFIX)) return tab;
     } catch (error) { /* The original admin tab may have been closed. */ }
   }
-  const tabs = await chrome.tabs.query({ url: [ADMIN_PAGE_PREFIX + '*'] });
+  const tabs = await findAdminTabs();
   return tabs[0] || null;
+}
+
+async function findAdminTabs() {
+  return chrome.tabs.query({ url: [ADMIN_PAGE_PREFIX + '*'] });
 }
 
 function normalizeText(value) {
