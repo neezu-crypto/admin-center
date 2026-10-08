@@ -863,7 +863,7 @@
       <div id="streamerPromoBatchControls" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; padding:10px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
         <strong style="font-size:12px;">순차 자동 게시</strong>
         <label style="display:flex; align-items:center; gap:5px; font-size:12px;">반복
-          <input id="streamerPromoBatchCount" type="number" min="1" max="10" value="1" inputmode="numeric" aria-label="반복 게시 횟수" style="width:62px; padding:6px; border:1px solid rgba(20,20,22,0.16); border-radius:7px;">
+          <input id="streamerPromoBatchCount" type="number" min="1" max="100" value="1" inputmode="numeric" aria-label="반복 게시 횟수" style="width:72px; padding:6px; border:1px solid rgba(20,20,22,0.16); border-radius:7px;">
           건
         </label>
         <label style="display:flex; align-items:center; gap:5px; font-size:12px;">게시 확인 후 대기
@@ -884,7 +884,7 @@
         <p id="streamerPromoPendingHint" class="hint" style="margin:5px 0 8px;">게시하지 않은 것이 확실한 기록만 해제하세요. 실제 게시 확인이 늦어진 기록을 해제하면 중복 게시될 수 있습니다.</p>
         <div id="streamerPromoPendingList"></div>
       </div>
-      <p class="hint" style="margin:6px 0 0;">실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 10건, 간격은 10초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
+      <p class="hint" style="margin:6px 0 0;">실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 100건, 간격은 10초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
       <div class="promo-stats-panel">
@@ -3478,7 +3478,7 @@
   async function startStreamerPromoBatch() {
     if (promoBatchIsActive) return;
     const testOnly = streamerPromoBatchTestOnlyEl.checked;
-    const repeatCount = Math.max(1, Math.min(10, Math.trunc(Number(streamerPromoBatchCountEl.value) || 1)));
+    const repeatCount = Math.max(1, Math.min(100, Math.trunc(Number(streamerPromoBatchCountEl.value) || 1)));
     const delaySeconds = Math.max(10, Math.min(600, Math.trunc(Number(streamerPromoBatchDelayEl.value) || 30)));
     streamerPromoBatchCountEl.value = String(testOnly ? 1 : repeatCount);
     streamerPromoBatchDelayEl.value = String(delaySeconds);
