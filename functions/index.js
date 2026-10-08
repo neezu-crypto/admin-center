@@ -1507,6 +1507,48 @@ const notifyStockVerifyRequest = onValueCreated('/streamerVerificationRequests/{
   const label = '새 인증 신청 (' + sourceLabel + ')';
   await sendDiscordNotification('🔔 **' + label + '**\n' + formatRequestSummary(data) + '\n' + deepLink('section-verification'));
 });
+const notifyStreamerVerificationAutoApproval = onValueUpdated('/streamerVerificationNoteClaims/{noteNo}', async (event) => {
+  const before = event.data.before.val() || {};
+  const claim = event.data.after.val() || {};
+  const notification = claim.discordNotification;
+  if (before.status === 'approved' || claim.status !== 'approved' ||
+      !notification || notification.type !== 'streamer-verification-auto-approved') return null;
+
+  const clean = (value, maxLength) => String(value || '').replace(/[\r\n`*_@]/g, ' ').trim().slice(0, maxLength);
+  const sourceLabel = notification.service === 'betting-market'
+    ? '배팅시장'
+    : STREAMER_VERIFY_SOURCE_LABELS[notification.source] || '주식시장';
+  const nickname = clean(notification.nickname, 60) || '(닉네임 없음)';
+  const soopId = /^[a-z0-9]{2,20}$/i.test(String(notification.soopId || ''))
+    ? String(notification.soopId).toLowerCase()
+    : '';
+  const deliveryRef = getDatabase().ref('streamerVerificationNoteClaims/' + event.params.noteNo + '/discordNotificationDelivery');
+  const deliveryToken = String(event.id || 'event') + ':' + Date.now();
+  const deliveryClaim = await deliveryRef.transaction((current) => {
+    const now = Date.now();
+    if (current && current.status === 'sent') return;
+    if (current && current.status === 'processing' && now - Number(current.startedAt || now) < 2 * 60 * 1000) return;
+    return { status: 'processing', token: deliveryToken, startedAt: now };
+  }, undefined, false);
+  if (!deliveryClaim.committed) return null;
+
+  const result = await sendDiscordNotification(
+    '✅ **스트리머 인증 쪽지 자동승인 완료**\n' +
+    '신청 서비스: ' + sourceLabel + '\n' +
+    '스트리머: ' + nickname + (soopId ? ' (@' + soopId + ')' : '') + '\n' +
+    '신청 유형: ' + (notification.isSwitch === true ? '계정 전환' : '최초 인증') + '\n' +
+    deepLink('section-verification')
+  );
+  await deliveryRef.transaction((current) => {
+    if (!current || current.token !== deliveryToken) return;
+    return result.sent
+      ? { status: 'sent', sentAt: Date.now() }
+      : { status: 'failed', reason: result.reason || 'unknown', failedAt: Date.now() };
+  }, undefined, false);
+  if (!result.sent) console.warn('스트리머 인증 자동승인 디스코드 알림 전송 실패:', result.reason);
+  await getDatabase().ref('streamerVerificationNoteClaims/' + event.params.noteNo + '/discordNotification').remove();
+  return null;
+});
 const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)', 'section-purchase-approval');
 const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)', 'section-purchase-approval');
 const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)', 'section-purchase-approval');
@@ -3895,6 +3937,7 @@ module.exports = {
   notifyNicknameReport,
   notifyBettingVerifyRequest,
   notifyStockVerifyRequest,
+  notifyStreamerVerificationAutoApproval,
   notifyChestPurchaseRequest,
   notifyBannerRequest,
   notifyChartBannerRequest,
