@@ -70,7 +70,7 @@ async function ensureFreshOnyuGiftMonitorSession() {
   return session;
 }
 
-function getFirebaseUidFromIdToken(idToken) {
+function readFirebaseIdTokenClaims(idToken) {
   const parts = String(idToken || '').split('.');
   if (parts.length !== 3 || !parts[1]) throw new Error('monitor-id-token-invalid');
   const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -81,10 +81,11 @@ function getFirebaseUidFromIdToken(idToken) {
   } catch (_) {
     throw new Error('monitor-id-token-invalid');
   }
+  if (!claims || typeof claims !== 'object') throw new Error('monitor-id-token-invalid');
   const subject = String(claims.sub || '');
   const userId = String(claims.user_id || '');
   if (subject && userId && subject !== userId) throw new Error('monitor-id-token-uid-mismatch');
-  return userId || subject || String(claims.uid || '');
+  return claims;
 }
 
 async function exchangeOnyuGiftMonitorCustomToken(customToken, adminUid) {
@@ -99,8 +100,16 @@ async function exchangeOnyuGiftMonitorCustomToken(customToken, adminUid) {
   }
   // signInWithCustomToken returns idToken/refreshToken/expiresIn, not localId.
   // Firebase's signed ID token carries the authenticated UID in sub/user_id.
-  const monitorUid = String(result.localId || getFirebaseUidFromIdToken(result.idToken));
+  const claims = readFirebaseIdTokenClaims(result.idToken);
+  const tokenUid = String(claims.user_id || claims.sub || claims.uid || '');
+  const monitorUid = String(result.localId || tokenUid);
+  if (result.localId && tokenUid && String(result.localId) !== tokenUid) {
+    throw new Error('monitor-id-token-uid-mismatch');
+  }
   if (!monitorUid) throw new Error('monitor-token-exchange-uid-missing');
+  if (claims.onyuGiftMonitor !== true || String(claims.onyuGiftAdminUid || '') !== String(adminUid || '')) {
+    throw new Error('monitor-id-token-claims-invalid');
+  }
   const session = {
     monitorUid,
     adminUid: String(adminUid || ''),

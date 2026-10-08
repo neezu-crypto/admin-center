@@ -2477,8 +2477,9 @@ const onyuCreateGiftBackgroundMonitorSession = onCall(async (request) => {
       if (!createError || createError.code !== 'auth/uid-already-exists') throw createError;
     }
   }
-  await auth.setCustomUserClaims(monitorUid, { onyuGiftMonitor: true, onyuGiftAdminUid: adminUid });
-  return { customToken: await auth.createCustomToken(monitorUid) };
+  const monitorClaims = { onyuGiftMonitor: true, onyuGiftAdminUid: adminUid };
+  await auth.setCustomUserClaims(monitorUid, monitorClaims);
+  return { customToken: await auth.createCustomToken(monitorUid, monitorClaims) };
 });
 
 function onyuGiftHasEligibleBackgroundRequest(requests, now) {
