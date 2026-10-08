@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "SOOP 홍보글·게시판 찾기",
-  "version": "0.9.31",
-  "description": "SOOP 방송국에서 홍보 후보 게시판과 글쓰기 링크를 찾고, 스트리머 인증 쪽지를 확인합니다.",
+  "version": "0.9.32",
+  "description": "SOOP 방송국에서 홍보 후보 게시판과 글쓰기 링크를 찾고, 스트리머 인증 및 온이유 후원 알림을 확인합니다.",
   "permissions": ["storage", "clipboardWrite"],
   "host_permissions": [
     "https://neezu-crypto.github.io/admin-center/*",
-    "https://sooplive.com/station/*",
-    "https://www.sooplive.com/station/*",
+    "https://sooplive.com/*",
+    "https://www.sooplive.com/*",
     "https://note.sooplive.com/app/*"
   ],
   "background": {
@@ -29,6 +29,14 @@
         "https://www.sooplive.com/*"
       ],
       "js": ["profile-promo-hover.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://sooplive.com/*",
+        "https://www.sooplive.com/*"
+      ],
+      "js": ["onyu-game-gift-notifications.js"],
       "run_at": "document_idle"
     },
     {

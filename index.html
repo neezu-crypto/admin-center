@@ -679,7 +679,8 @@
       <button id="onyuAccessRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <div id="onyuAccessList"></div>
       <h3 class="subhead" style="margin-top:20px;">온이유 이용권 구매·선물 신청</h3>
-      <p class="hint">신청자는 관리자 방송국에 별풍선 50개를 후원합니다. 본인 구매는 일반 로그인 계정 또는 인증 스트리머 계정에, 선물은 선택된 인증 스트리머에게 지급됩니다. 실제 후원 내역과 신청 유형을 확인한 뒤 승인해 주세요.</p>
+      <p class="hint">신청자는 관리자 방송국에 별풍선 50개를 후원합니다. 관리자 SOOP 탭과 알림함이 열려 있으면 발신자 SOOP 아이디·후원 수량·신청 시각이 하나의 신청과 일치할 때 자동 승인합니다. 시각이 모호하거나 여러 신청과 일치하면 수동 검수해 주세요. 알림 항목은 열지 않습니다.</p>
+      <div id="onyuGiftAutoWatchStatus" class="hint" role="status" aria-live="polite" style="margin:0 0 10px;"></div>
       <button id="onyuGiftRefreshBtn" class="perm-refresh-btn" type="button">구매·선물 신청 새로고침</button>
       <div id="onyuGiftList"></div>
     </div>
@@ -1349,6 +1350,7 @@
   const onyuRevokeViewerAccessFn = httpsCallable(functions, 'onyuRevokeViewerAccess');
   const onyuListStreamerGameGiftsFn = httpsCallable(functions, 'onyuListStreamerGameGifts');
   const onyuReviewStreamerGameGiftFn = httpsCallable(functions, 'onyuReviewStreamerGameGift');
+  const onyuConfirmStreamerGameGiftFromNotificationFn = httpsCallable(functions, 'onyuConfirmStreamerGameGiftFromNotification');
   const onyuAdminListPlayerReviewsFn = httpsCallable(functions, 'onyuAdminListPlayerReviews');
   const onyuAdminSetPlayerReviewVisibilityFn = httpsCallable(functions, 'onyuAdminSetPlayerReviewVisibility');
   const onyuAdminDeletePlayerReviewFn = httpsCallable(functions, 'onyuAdminDeletePlayerReview');
@@ -1844,6 +1846,7 @@
       bettingVerificationRequestSignature = null;
       stockNoteRequests = [];
       bettingNoteRequests = [];
+      postOnyuGameGiftNotificationWatch([]);
     }
     if (sessionId === 'review') {
       reviewSubscriptionsStarted = false;
@@ -1934,6 +1937,7 @@
       if (jobs.length) await Promise.allSettled(jobs);
       state.loaded = true;
       state.lastLoadedAt = Date.now();
+      if (sessionId === 'identity') startOnyuGiftQueuePolling();
     } catch (e) {
       console.error('세션 데이터 로드 실패:', sessionId, e);
       state.error = e;
@@ -2127,21 +2131,91 @@
   onyuAccessRefreshBtn.addEventListener('click', refreshOnyuAccessRequests);
 
   let onyuGiftRequests = [];
-  async function refreshOnyuGiftRequests() {
-    onyuGiftListEl.innerHTML = '<div class="empty-state">구매·선물 신청을 불러오는 중...</div>';
-    onyuGiftRefreshBtn.disabled = true;
+  let onyuGiftQueuePollTimer = null;
+  function postOnyuGameGiftNotificationWatch(requests) {
+    const eligible = (requests || []).filter(function (request) {
+      return request && request.status === 'pending' && /^[a-z0-9]{2,20}$/i.test(String(request.donorSoopId || '')) &&
+        Number(request.balloons) === 50 && Number(request.donationCompletedAt) > 0 &&
+        Number(request.requestedAt) > Date.now() - 24 * 60 * 60 * 1000;
+    });
+    const waitingForDonor = (requests || []).filter(function (request) {
+      return request && request.status === 'pending' && /^[a-z0-9]{2,20}$/i.test(String(request.donorSoopId || '')) && !Number(request.donationCompletedAt);
+    }).length;
+    window.postMessage({
+      __onyuGameGiftNotificationWatch: true,
+      active: eligible.length > 0,
+      expiresAt: eligible.length ? Date.now() + 3 * 60 * 1000 : 0,
+    }, location.origin);
+    const statusEl = document.getElementById('onyuGiftAutoWatchStatus');
+    if (statusEl) statusEl.textContent = eligible.length
+      ? '자동 확인 대기 중: ' + eligible.length + '건 · SOOP 알림함을 최대 10초 간격으로 확인합니다. 관리자 센터의 신원·권한 화면과 SOOP 로그인 탭을 열어 두세요.'
+      : waitingForDonor
+        ? '후원 완료 확인 대기: ' + waitingForDonor + '건 · 신청자가 온이유 페이지에서 ‘후원 완료 · 자동 확인 시작’을 눌러야 알림 확인을 시작합니다.'
+        : '자동 확인 대기 신청이 없습니다. 후원 알림은 열지 않고, 일치하지 않는 신청은 수동 검수로 남습니다.';
+  }
+  function startOnyuGiftQueuePolling() {
+    if (onyuGiftQueuePollTimer) return;
+    onyuGiftQueuePollTimer = setInterval(function () {
+      if (role !== 'admin' || activeSessionId !== 'identity' || !sessionState.identity.loaded) return;
+      refreshOnyuGiftRequests(true);
+    }, 15000);
+  }
+  async function refreshOnyuGiftRequests(silent) {
+    if (!silent) onyuGiftListEl.innerHTML = '<div class="empty-state">구매·선물 신청을 불러오는 중...</div>';
+    if (!silent) onyuGiftRefreshBtn.disabled = true;
     try {
       const result = await onyuListStreamerGameGiftsFn();
       onyuGiftRequests = result.data && Array.isArray(result.data.requests) ? result.data.requests : [];
+      postOnyuGameGiftNotificationWatch(onyuGiftRequests);
       renderOnyuGiftRequests();
     } catch (error) {
       console.error('온 이유 이용권 구매·선물 신청 조회 실패:', error);
-      onyuGiftListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다. ' + escapeHtml(error && error.message || '') + '</div>';
+      if (!silent) onyuGiftListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다. ' + escapeHtml(error && error.message || '') + '</div>';
     } finally {
-      onyuGiftRefreshBtn.disabled = false;
+      if (!silent) onyuGiftRefreshBtn.disabled = false;
     }
   }
-  onyuGiftRefreshBtn.addEventListener('click', refreshOnyuGiftRequests);
+  onyuGiftRefreshBtn.addEventListener('click', function () { refreshOnyuGiftRequests(false); });
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__onyuGameGiftNotificationCandidate !== true || typeof data.requestId !== 'string') return;
+    const reply = function (payload) {
+      window.postMessage(Object.assign({ __onyuGameGiftNotificationResult: true, requestId: data.requestId }, payload), location.origin);
+    };
+    const senderSoopId = String(data.senderSoopId || '').trim().toLowerCase();
+    const balloons = Number(data.balloons);
+    const observedAt = Number(data.observedAt);
+    const eventAtMin = Number(data.eventAtMin);
+    const eventAtMax = Number(data.eventAtMax);
+    const candidateFingerprint = String(data.candidateFingerprint || '').toLowerCase();
+    if (!/^[a-z0-9]{2,20}$/.test(senderSoopId) || balloons !== 50 ||
+        !Number.isFinite(observedAt) || !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) ||
+        !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) {
+      reply({ ok: false, reason: 'invalid-notification-candidate' });
+      return;
+    }
+    onyuConfirmStreamerGameGiftFromNotificationFn({
+      senderSoopId: senderSoopId,
+      balloons: balloons,
+      observedAt: observedAt,
+      eventAtMin: eventAtMin,
+      eventAtMax: eventAtMax,
+      exactTimestamp: data.exactTimestamp === true,
+      candidateFingerprint: candidateFingerprint,
+    }).then(function (result) {
+      const resultData = result && result.data || {};
+      if (resultData.ok) {
+        console.info('[온이유 이용권 자동 확인]', JSON.stringify({ stage: 'donation-notification-approved', at: new Date().toISOString(), details: { balloons: balloons } }));
+        refreshOnyuGiftRequests(true);
+      }
+      reply({ ok: resultData.ok === true, reason: String(resultData.reason || ''), targetNickname: String(resultData.targetNickname || ''), activationStatus: String(resultData.activationStatus || '') });
+    }).catch(function (error) {
+      console.warn('SOOP 후원 알림 자동 승인 실패:', error);
+      reply({ ok: false, reason: String(error && error.code || 'server-error') });
+    });
+  });
 
   function renderOnyuGiftRequests() {
     onyuGiftListEl.innerHTML = '';
@@ -2156,7 +2230,10 @@
         ? request.activationStatus === 'awaiting-streamer-verification' ? '스트리머 인증 후 자동 지급 대기'
           : request.activationStatus === 'identity-mismatch' ? '인증 정보 불일치 확인 필요'
             : request.activationStatus === 'blocked-existing-entitlement' ? '기존 이용권 보유 확인 필요' : '이용권 지급 완료'
-        : request.status === 'rejected' ? '거절됨' : '후원 확인 대기';
+        : request.status === 'rejected' ? '거절됨'
+          : request.status === 'processing' ? '승인 처리 중'
+            : request.donorSoopId && request.donationCompletedAt ? '후원 확인 대기 · 자동 확인 대상'
+              : request.donorSoopId ? '후원 완료 신호 대기' : '후원 확인 대기 · 수동 확인';
       const isSelfPurchase = request.purchaseType === 'self';
       const isViewerPurchase = request.purchaseType === 'self-viewer';
       const requestTypeLabel = isViewerPurchase ? '일반 로그인 계정 본인 구매' : isSelfPurchase ? '인증 스트리머 본인 구매' : '스트리머 선물';
@@ -2170,7 +2247,9 @@
         '<span>신청 유형: ' + requestTypeLabel + '</span>' +
         '<span>' + recipientLabel + ' · 대상 UID: ' + escapeHtml(request.targetUid || '') + '</span>' +
         (request.activationStatus === 'awaiting-streamer-verification' ? '<span>후원 확인 완료. 해당 SOOP 아이디로 스트리머 인증이 승인되면 자동으로 이용권을 연결합니다.</span>' : '') +
-        '<span>신청자 SOOP 닉네임: ' + escapeHtml(request.donorNickname || '(미입력)') + ' · 별풍선 ' + Number(request.balloons || 50) + '개</span>' +
+        '<span>신청자 SOOP: ' + escapeHtml(request.donorNickname || '(미입력)') + (request.donorSoopId ? ' (@' + escapeHtml(request.donorSoopId) + ')' : '') + ' · 별풍선 ' + Number(request.balloons || 50) + '개</span>' +
+        (request.donationCompletedAt ? '<span>후원 완료 확인 접수 · ' + new Date(request.donationCompletedAt).toLocaleString('ko-KR') + '</span>' : '') +
+        (request.verificationSource === 'soop-donation-notification' ? '<span>SOOP 알림 자동 확인 · 발신자 @' + escapeHtml(request.verificationSenderSoopId || '') + ' · ' + (request.verifiedAt ? new Date(request.verifiedAt).toLocaleString('ko-KR') : '') + '</span>' : '') +
         '<span>신청자 UID: ' + escapeHtml(request.requesterUid || '') + (requestedAt ? ' · ' + requestedAt : '') + '</span></div>' +
         '<div class="verif-actions"></div>';
       if (request.status === 'pending') {

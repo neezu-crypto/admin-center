@@ -7,6 +7,7 @@ const PROMO_PENDING_TTL_MS = 2 * 60 * 60 * 1000;
 const COMPLETION_RETRY_MS = 5000;
 const CONTENT_CONFIRMATION_STABILITY_MS = 500;
 const diagnosticCheckLogKeys = new Set();
+const ONYU_GIFT_WATCH_KEY = 'soopOnyuGameGiftNotificationWatch';
 
 chrome.commands.onCommand.addListener((command) => {
   if (command !== 'find-unconfirmed-profile') return;
@@ -75,6 +76,81 @@ function isAllowedAdminSender(sender) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
+
+  if (message.type === 'watchOnyuGameGiftNotifications') {
+    if (!isAllowedAdminSender(sender)) return false;
+    const active = message.active === true;
+    const expiresAt = active
+      ? Math.max(Date.now(), Math.min(Number(message.expiresAt) || 0, Date.now() + 3 * 60 * 1000))
+      : 0;
+    const updateTabs = () => chrome.tabs.query({ url: ['https://sooplive.com/*', 'https://www.sooplive.com/*'] })
+      .then((tabs) => {
+        const validTabs = tabs.filter((tab) => Number.isInteger(tab.id));
+        const selected = active ? validTabs.find((tab) => tab.active) || validTabs[0] : null;
+        const watch = active && selected ? { active: true, expiresAt, tabId: selected.id } : null;
+        const saved = watch ? chrome.storage.local.set({ [ONYU_GIFT_WATCH_KEY]: watch }) : chrome.storage.local.remove(ONYU_GIFT_WATCH_KEY);
+        return saved.then(() => {
+          return Promise.all(validTabs.map((tab) => chrome.tabs.sendMessage(tab.id, {
+            type: 'setOnyuGameGiftNotificationWatch',
+            active: !!(watch && tab.id === selected.id),
+            expiresAt: watch && tab.id === selected.id ? expiresAt : 0,
+          }).catch(() => null))).then(() => ({ tabs: validTabs, selected }));
+        });
+      });
+    updateTabs().then((result) => {
+      const selectedTabId = result.selected && result.selected.id;
+      trace('', 'onyu-gift-notification-watch-updated', { active: !!selectedTabId, soopTabCount: result.tabs.length, selectedTabId: selectedTabId || null, expiresAt: selectedTabId ? expiresAt : 0 });
+      sendResponse({ ok: true, soopTabCount: selectedTabId ? 1 : 0 });
+    }).catch((error) => {
+      trace('', 'onyu-gift-notification-watch-update-failed', { error: String(error && error.message || error).slice(0, 120) });
+      sendResponse({ ok: false, reason: 'soop-tab-search-failed' });
+    });
+    return true;
+  }
+
+  if (message.type === 'getOnyuGameGiftNotificationWatch') {
+    chrome.storage.local.get(ONYU_GIFT_WATCH_KEY).then((state) => {
+      const watch = state[ONYU_GIFT_WATCH_KEY] || {};
+      const active = watch.active === true && Number(watch.expiresAt) > Date.now() &&
+        Number.isInteger(sender.tab && sender.tab.id) && sender.tab.id === watch.tabId;
+      sendResponse({ ok: true, active, expiresAt: active ? Number(watch.expiresAt) : 0 });
+    }).catch(() => sendResponse({ ok: false, active: false }));
+    return true;
+  }
+
+  if (message.type === 'confirmOnyuGameGiftNotification') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
+    const senderSoopId = String(message.senderSoopId || '').trim().toLowerCase();
+    const balloons = Number(message.balloons);
+    const observedAt = Number(message.observedAt);
+    const eventAtMin = Number(message.eventAtMin);
+    const eventAtMax = Number(message.eventAtMax);
+    const candidateFingerprint = String(message.candidateFingerprint || '').toLowerCase();
+    const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl &&
+      sourceUrl.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(sourceUrl.hostname);
+    if (!isSoopSender || !/^[a-z0-9]{2,20}$/.test(senderSoopId) || balloons !== 50 ||
+        !Number.isFinite(observedAt) || !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) ||
+        !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) {
+      sendResponse({ ok: false, reason: 'invalid-notification-candidate' });
+      return false;
+    }
+    findAdminTab().then((adminTab) => {
+      if (!adminTab) {
+        sendResponse({ ok: false, reason: 'admin-center-not-open' });
+        return;
+      }
+      chrome.tabs.sendMessage(adminTab.id, {
+        type: 'confirmOnyuGameGiftNotification', senderSoopId, balloons,
+        observedAt, eventAtMin, eventAtMax,
+        exactTimestamp: message.exactTimestamp === true,
+        candidateFingerprint,
+      }).then(sendResponse).catch((error) => {
+        sendResponse({ ok: false, reason: 'admin-bridge-unavailable', message: String(error && error.message || error).slice(0, 120) });
+      });
+    }).catch((error) => sendResponse({ ok: false, reason: 'admin-tab-search-failed', message: String(error && error.message || error) }));
+    return true;
+  }
 
   if (message.type === 'watchStreamerVerificationInbox') {
     if (!isAllowedAdminSender(sender)) return false;

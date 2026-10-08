@@ -2390,6 +2390,49 @@ const onyuGetViewerAccess = onCall(async (request) => {
 // 로그인 유저가 관리자 방송국에 후원해 본인(인증 스트리머) 이용권을 구매하거나
 // 인증 스트리머에게 선물하는 신청 흐름. 별풍선 50개, 지급은 관리자 검수 후다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
+const ONYU_STREAMER_GIFT_TARGET_LOCK_PATH = 'onyuVn/streamerGameGiftTargetLocks';
+
+async function reserveOnyuStreamerGiftTarget(db, soopId, requestId, requesterUid, now) {
+  const lockRef = db.ref(ONYU_STREAMER_GIFT_TARGET_LOCK_PATH + '/' + soopId);
+  const current = (await lockRef.get()).val();
+  if (current && current.status === 'pending') {
+    const priorId = String(current.requestId || '');
+    const priorSnap = priorId ? await db.ref('onyuVn/streamerGameGiftRequests/' + priorId).get() : null;
+    const prior = priorSnap && priorSnap.val();
+    const abandoned = !prior || prior.status === 'rejected';
+    if (!abandoned || Number(current.reservationExpiresAt) > now) {
+      throw new HttpsError('already-exists', '같은 스트리머의 구매·선물 신청이 이미 처리 중이거나 완료됐습니다.');
+    }
+    await lockRef.transaction((value) => {
+      if (value && value.requestId === priorId && Number(value.reservationExpiresAt) <= now) return null;
+      return;
+    }, undefined, false);
+  } else if (current && current.status === 'approved') {
+    throw new HttpsError('already-exists', '같은 스트리머의 구매·선물 신청이 이미 처리 중이거나 완료됐습니다.');
+  }
+  const result = await lockRef.transaction((value) => {
+    if (value && value.status !== 'rejected') return;
+    return { requestId, requesterUid, status: 'pending', reservedAt: now, reservationExpiresAt: now + 2 * 60 * 1000 };
+  }, undefined, false);
+  if (!result.committed) throw new HttpsError('already-exists', '같은 스트리머의 구매·선물 신청이 이미 처리 중이거나 완료됐습니다.');
+  return lockRef;
+}
+
+async function updateOnyuStreamerGiftTargetLock(db, gift, requestId, status) {
+  if (!gift || (gift.purchaseType || 'gift') !== 'gift') return;
+  const soopId = normalizeSoopId(gift.targetSoopId);
+  if (!soopId) return;
+  const lockRef = db.ref(ONYU_STREAMER_GIFT_TARGET_LOCK_PATH + '/' + soopId);
+  if (status === 'rejected') {
+    await lockRef.transaction((value) => value && value.requestId === requestId ? null : undefined, undefined, false);
+    return;
+  }
+  await lockRef.transaction((value) => {
+    if (!value || value.requestId !== requestId) return;
+    return Object.assign({}, value, { status: 'approved', approvedAt: Date.now(), reservationExpiresAt: null });
+  }, undefined, false);
+}
+
 const onyuListStreamerGiftTargets = onCall(async (request) => {
   const uid = requireAuth(request);
   const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
@@ -2458,7 +2501,9 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
   const targetNicknameInput = String(request.data && request.data.targetNickname || '').trim();
   const targetSoopIdInput = normalizeSoopId(request.data && request.data.targetSoopId);
   const donorNickname = String(request.data && request.data.donorNickname || '').trim();
+  const donorSoopId = normalizeSoopId(request.data && request.data.donorSoopId);
   if (!donorNickname || donorNickname.length > 30) throw new HttpsError('invalid-argument', '후원자 SOOP 닉네임을 1~30자로 입력해 주세요.');
+  if (!donorSoopId) throw new HttpsError('invalid-argument', '후원자 SOOP 아이디를 영문 소문자/숫자 2~20자로 입력해 주세요.');
   let targetUid;
   let targetNickname;
   let targetSoopId;
@@ -2506,18 +2551,21 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
   const pendingRequestsSnap = await db.ref('onyuVn/streamerGameGiftRequests').get();
   const pendingDuplicate = Object.values(pendingRequestsSnap.val() || {}).some((pending) => {
     if (!pending) return false;
-    if (purchaseType === 'gift') return pending.purchaseType === 'gift' && pending.targetSoopId === targetSoopId && ['pending', 'approved'].includes(pending.status);
-    return pending.status === 'pending' && pending.targetUid === targetUid;
+    if (purchaseType === 'gift') return pending.purchaseType === 'gift' && normalizeSoopId(pending.targetSoopId) === targetSoopId && ['pending', 'processing', 'approved'].includes(pending.status);
+    return ['pending', 'processing'].includes(pending.status) && pending.targetUid === targetUid;
   });
   if (pendingDuplicate) throw new HttpsError('already-exists', '같은 계정의 구매·선물 신청이 이미 후원 확인 대기 중입니다.');
   const now = Date.now();
   const requestRef = db.ref('onyuVn/streamerGameGiftRequests').push();
+  let targetLockRef = null;
+  if (purchaseType === 'gift') targetLockRef = await reserveOnyuStreamerGiftTarget(db, targetSoopId, requestRef.key, uid, now);
   const giftRequest = {
     requestId: requestRef.key,
     requesterUid: uid,
     purchaseType,
     provider: provider === 'google.com' || user.googleLinked === true ? 'google' : 'kakao',
     donorNickname,
+    donorSoopId,
     targetUid: targetUid || null,
     targetNickname,
     targetSoopId,
@@ -2526,7 +2574,15 @@ const onyuSubmitStreamerGameGift = onCall(async (request) => {
     requestedAt: now,
     updatedAt: now,
   };
-  await requestRef.set(giftRequest);
+  try {
+    await requestRef.set(giftRequest);
+    if (targetLockRef) await targetLockRef.update({ reservationExpiresAt: null });
+  } catch (error) {
+    if (targetLockRef) {
+      await targetLockRef.transaction((value) => value && value.requestId === requestRef.key ? null : undefined, undefined, false).catch(() => null);
+    }
+    throw error;
+  }
   const eventName = purchaseType === 'self-viewer' ? 'viewer_game_license_purchase_requested' : purchaseType === 'self' ? 'streamer_game_license_purchase_requested' : 'streamer_game_gift_requested';
   await recordOnyuServerEvent(request, eventName, { targetUid });
   return { ok: true, requestId: requestRef.key, balloons: ONYU_STREAMER_GIFT_BALLOONS };
@@ -2541,18 +2597,59 @@ const onyuListStreamerGameGifts = onCall(async (request) => {
   return { requests };
 });
 
-const onyuReviewStreamerGameGift = onCall(async (request) => {
-  const adminUid = await requireAdmin(request);
+const onyuGetMyStreamerGameGiftRequestStatus = onCall(async (request) => {
+  const uid = requireAuth(request);
   const requestId = String(request.data && request.data.requestId || '').trim();
-  const decision = String(request.data && request.data.decision || '').trim();
-  if (!requestId || requestId.length > 200) throw new HttpsError('invalid-argument', '선물 신청을 선택해 주세요.');
-  if (!['approve', 'reject'].includes(decision)) throw new HttpsError('invalid-argument', '처리 유형이 올바르지 않습니다.');
+  if (!requestId || requestId.length > 200 || /[.#$\[\]/]/.test(requestId)) throw new HttpsError('invalid-argument', '신청 정보가 올바르지 않습니다.');
+  const snap = await getDatabase().ref('onyuVn/streamerGameGiftRequests/' + requestId).get();
+  const gift = snap.val();
+  if (!gift || gift.requesterUid !== uid) return { ok: true, found: false };
+  return {
+    ok: true,
+    found: true,
+    status: String(gift.status || 'pending'),
+    activationStatus: String(gift.activationStatus || ''),
+    purchaseType: String(gift.purchaseType || 'gift'),
+    targetNickname: String(gift.targetNickname || ''),
+    balloons: Number(gift.balloons) || ONYU_STREAMER_GIFT_BALLOONS,
+    donationCompletedAt: Number(gift.donationCompletedAt) || 0,
+    updatedAt: Number(gift.updatedAt || gift.reviewedAt || gift.requestedAt) || 0,
+  };
+});
+
+const onyuMarkStreamerGameGiftDonationComplete = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const requestId = String(request.data && request.data.requestId || '').trim();
+  if (!requestId || requestId.length > 200 || /[.#$\[\]/]/.test(requestId)) throw new HttpsError('invalid-argument', '신청 정보가 올바르지 않습니다.');
+  const giftRef = getDatabase().ref('onyuVn/streamerGameGiftRequests/' + requestId);
+  const now = Date.now();
+  const result = await giftRef.transaction((current) => {
+    if (!current || current.requesterUid !== uid || current.status !== 'pending') return;
+    if (Number(current.donationCompletedAt) > 0) return;
+    return Object.assign({}, current, { donationCompletedAt: now, updatedAt: now });
+  }, undefined, false);
+  if (!result.committed) {
+    const current = (await giftRef.get()).val();
+    if (!current || current.requesterUid !== uid) throw new HttpsError('not-found', '신청을 찾을 수 없습니다.');
+    if (current.status !== 'pending' || !Number(current.donationCompletedAt)) {
+      throw new HttpsError('failed-precondition', '대기 중인 신청이 아니거나 후원 완료를 접수할 수 없습니다.');
+    }
+  }
+  return { ok: true, donationCompletedAt: Number(result.snapshot && result.snapshot.val() && result.snapshot.val().donationCompletedAt) || now };
+});
+
+async function processOnyuStreamerGameGiftReview(request, adminUid, requestId, decision, verificationMetadata) {
   const db = getDatabase();
   const giftRef = db.ref('onyuVn/streamerGameGiftRequests/' + requestId);
-  const giftSnap = await giftRef.get();
-  const gift = giftSnap.val() || {};
-  if (!gift.requestId || gift.status !== 'pending') throw new HttpsError('failed-precondition', '대기 중인 선물 신청이 아닙니다.');
   const now = Date.now();
+  const claimToken = require('node:crypto').randomBytes(16).toString('hex');
+  const claim = await giftRef.transaction((current) => {
+    if (!current || current.status !== 'pending') return;
+    return Object.assign({}, current, { status: 'processing', processingToken: claimToken, processingStartedAt: now });
+  }, undefined, false);
+  if (!claim.committed) throw new HttpsError('failed-precondition', '대기 중인 선물 신청이 아닙니다. 다른 관리자가 이미 처리 중일 수 있습니다.');
+  const gift = claim.snapshot.val() || {};
+  try {
   const purchaseType = gift.purchaseType || 'gift';
   if (decision === 'approve') {
     const isViewerPurchase = purchaseType === 'self-viewer';
@@ -2576,7 +2673,10 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
           await giftRef.update({
             status: 'approved', activationStatus: 'awaiting-streamer-verification',
             reviewedAt: now, reviewedBy: adminUid, updatedAt: now,
+            processingToken: null, processingStartedAt: null,
+            ...(verificationMetadata || {}),
           });
+          await updateOnyuStreamerGiftTargetLock(db, gift, requestId, 'approved');
           // 인증 승인이 거의 동시에 진행됐더라도 놓치지 않도록, 대기 상태 기록
           // 직후 원장을 다시 읽어 인증 완료분을 즉시 연결한다.
           const latestVerifiedSnap = await db.ref('streamerVerifications').orderByChild('soopId').equalTo(soopId).limitToFirst(1).get();
@@ -2629,12 +2729,101 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
     reviewedAt: now,
     reviewedBy: adminUid,
     updatedAt: now,
+    processingToken: null,
+    processingStartedAt: null,
+    ...(verificationMetadata || {}),
   });
+  await updateOnyuStreamerGiftTargetLock(db, gift, requestId, decision === 'approve' ? 'approved' : 'rejected');
   const requestLabel = purchaseType === 'self-viewer' ? '일반 유저 게임 이용권 본인 구매' : purchaseType === 'self' ? '스트리머 게임 이용권 직접 구매' : '스트리머 게임 선물';
   await logToAdminAuditLog(db, request, '온 이유 ' + requestLabel + ' ' + (decision === 'approve' ? '승인' : '거절'), gift.targetNickname + ' · ' + requestId);
   const eventPrefix = purchaseType === 'self-viewer' ? 'viewer_game_license_purchase_' : purchaseType === 'self' ? 'streamer_game_license_purchase_' : 'streamer_game_gift_';
   await recordOnyuServerEvent(request, eventPrefix + (decision === 'approve' ? 'approved' : 'rejected'), { targetUid: gift.targetUid });
   return { ok: true, status: decision === 'approve' ? 'approved' : 'rejected', targetUid: gift.targetUid };
+  } catch (error) {
+    await giftRef.transaction((current) => {
+      if (!current || current.status !== 'processing' || current.processingToken !== claimToken) return;
+      const restored = Object.assign({}, current, { status: 'pending', processingToken: null, processingStartedAt: null });
+      return restored;
+    }, undefined, false).catch(() => null);
+    throw error;
+  }
+}
+
+const onyuReviewStreamerGameGift = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const requestId = String(request.data && request.data.requestId || '').trim();
+  const decision = String(request.data && request.data.decision || '').trim();
+  if (!requestId || requestId.length > 200 || /[.#$\[\]/]/.test(requestId)) throw new HttpsError('invalid-argument', '선물 신청을 선택해 주세요.');
+  if (!['approve', 'reject'].includes(decision)) throw new HttpsError('invalid-argument', '처리 유형이 올바르지 않습니다.');
+  return processOnyuStreamerGameGiftReview(request, adminUid, requestId, decision, null);
+});
+
+const onyuConfirmStreamerGameGiftFromNotification = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const senderSoopId = normalizeSoopId(request.data && request.data.senderSoopId);
+  const balloons = Number(request.data && request.data.balloons);
+  const observedAt = Number(request.data && request.data.observedAt);
+  const eventAtMin = Number(request.data && request.data.eventAtMin);
+  const eventAtMax = Number(request.data && request.data.eventAtMax);
+  const candidateFingerprint = String(request.data && request.data.candidateFingerprint || '').toLowerCase();
+  const exactTimestamp = request.data && request.data.exactTimestamp === true;
+  const now = Date.now();
+  if (!senderSoopId || balloons !== ONYU_STREAMER_GIFT_BALLOONS ||
+      !Number.isFinite(observedAt) || observedAt < now - 2 * 60 * 1000 || observedAt > now + 30000 ||
+      !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) || eventAtMin > eventAtMax ||
+      eventAtMin < observedAt - 24 * 60 * 60 * 1000 || eventAtMax > observedAt + 30000 ||
+      !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) {
+    throw new HttpsError('invalid-argument', '후원 알림 정보가 올바르지 않습니다.');
+  }
+  const db = getDatabase();
+  const eventKey = require('node:crypto').createHash('sha256')
+    .update(senderSoopId + '|' + balloons + '|' + candidateFingerprint).digest('hex').slice(0, 40);
+  const eventRef = db.ref('onyuVn/streamerGameGiftDonationEvents/' + eventKey);
+  const claimToken = require('node:crypto').randomBytes(16).toString('hex');
+  const eventClaim = await eventRef.transaction((current) => {
+    if (current && (current.status !== 'processing' || now - Number(current.startedAt || now) < 2 * 60 * 1000)) return;
+    return { status: 'processing', startedAt: now, claimToken, balloons };
+  }, undefined, false);
+  if (!eventClaim.committed) return { ok: false, reason: 'notification-already-processed' };
+  try {
+    const requestSnap = await db.ref('onyuVn/streamerGameGiftRequests').get();
+    const requests = requestSnap.val() || {};
+    const candidates = Object.entries(requests).filter(([requestId, gift]) => {
+      if (!gift || gift.status !== 'pending' || normalizeSoopId(gift.donorSoopId) !== senderSoopId ||
+          Number(gift.balloons) !== balloons) return false;
+      const requestedAt = Number(gift.requestedAt) || 0;
+      const donationCompletedAt = Number(gift.donationCompletedAt) || 0;
+      if (!requestedAt || requestedAt > observedAt || observedAt - requestedAt > 24 * 60 * 60 * 1000) return false;
+      if (!donationCompletedAt || donationCompletedAt < requestedAt || donationCompletedAt > observedAt + 30000 ||
+          observedAt - donationCompletedAt > 20 * 60 * 1000) return false;
+      // Exact DOM timestamps must fall after the application and close to the
+      // requester's explicit completion signal. Relative labels are a range;
+      // require overlap with that short window and a single matching request.
+      // Rows outside the window or ambiguous matches stay in manual review.
+      if (exactTimestamp) return eventAtMin === eventAtMax && requestedAt <= eventAtMin &&
+        eventAtMin >= donationCompletedAt - 5 * 60 * 1000 && eventAtMin <= donationCompletedAt + 2 * 60 * 1000;
+      return requestedAt <= eventAtMax && eventAtMin <= donationCompletedAt + 2 * 60 * 1000 &&
+        eventAtMax >= donationCompletedAt - 5 * 60 * 1000;
+    });
+    if (candidates.length !== 1) {
+      await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false);
+      return { ok: false, reason: candidates.length ? 'multiple-matching-requests' : 'no-matching-pending-request' };
+    }
+    const [requestId, gift] = candidates[0];
+    const verifiedAt = Date.now();
+    const result = await processOnyuStreamerGameGiftReview(request, adminUid, requestId, 'approve', {
+      verificationSource: 'soop-donation-notification',
+      verificationSenderSoopId: senderSoopId,
+      verificationEventKey: eventKey,
+      verifiedAt,
+    });
+    await eventRef.update({ status: 'approved', requestId, claimToken: null, approvedAt: Date.now() });
+    return Object.assign({}, result, { targetNickname: String(gift.targetNickname || ''), verificationSource: 'soop-donation-notification' });
+  } catch (error) {
+    await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false).catch(() => null);
+    if (error instanceof HttpsError && error.code === 'failed-precondition') return { ok: false, reason: 'request-no-longer-pending' };
+    throw error;
+  }
 });
 
 // 게임 시작 직전에 호출하는 최종 서버 판정. 관리자는 설정에서 선택한 모드로
@@ -3394,8 +3583,11 @@ module.exports = {
   onyuGetViewerAccess,
   onyuListStreamerGiftTargets,
   onyuSubmitStreamerGameGift,
+  onyuMarkStreamerGameGiftDonationComplete,
+  onyuGetMyStreamerGameGiftRequestStatus,
   onyuListStreamerGameGifts,
   onyuReviewStreamerGameGift,
+  onyuConfirmStreamerGameGiftFromNotification,
   onyuStartSession,
   onyuListViewerAccessRequests,
   onyuApproveViewerAccess,

@@ -5,6 +5,7 @@
   const candidateAddReplies = new Map();
   const promoExclusionReplies = new Map();
   const verificationNoteReplies = new Map();
+  const onyuGiftNotificationReplies = new Map();
   let extensionContextUnavailable = false;
 
   function trace(attemptId, stage, details) {
@@ -74,7 +75,62 @@
     }
   });
 
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data || data.__onyuGameGiftNotificationWatch !== true) return;
+    if (extensionContextUnavailable || !hasValidExtensionContext()) {
+      trace('', 'onyu-gift-watch-skipped-context-unavailable', { active: data.active === true });
+      extensionContextUnavailable = true;
+      return;
+    }
+    chrome.runtime.sendMessage({
+      type: 'watchOnyuGameGiftNotifications',
+      active: data.active === true,
+      expiresAt: Number(data.expiresAt) || 0,
+    }).then(function (result) {
+      trace('', 'onyu-gift-watch-requested', { active: data.active === true, soopTabCount: Number(result && result.soopTabCount) || 0 });
+    }).catch(function (error) {
+      const invalidated = /Extension context invalidated/i.test(String(error && error.message || error));
+      if (invalidated) extensionContextUnavailable = true;
+      trace('', invalidated ? 'onyu-gift-watch-skipped-context-unavailable' : 'onyu-gift-watch-request-failed', {
+        active: data.active === true, error: String(error && error.message || error).slice(0, 120),
+      });
+    });
+  });
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__onyuGameGiftNotificationResult !== true || typeof data.requestId !== 'string') return;
+    const reply = onyuGiftNotificationReplies.get(data.requestId);
+    if (reply) reply({ ok: data.ok === true, reason: String(data.reason || ''), targetNickname: String(data.targetNickname || '') });
+  });
+
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message && message.type === 'confirmOnyuGameGiftNotification') {
+      const requestId = createAttemptId();
+      const timeout = setTimeout(function () {
+        onyuGiftNotificationReplies.delete(requestId);
+        sendResponse({ ok: false, reason: 'admin-center-timeout' });
+      }, 25000);
+      onyuGiftNotificationReplies.set(requestId, function (result) {
+        clearTimeout(timeout);
+        onyuGiftNotificationReplies.delete(requestId);
+        sendResponse(result || { ok: false, reason: 'empty-response' });
+      });
+      window.postMessage({
+        __onyuGameGiftNotificationCandidate: true,
+        requestId: requestId,
+        senderSoopId: message.senderSoopId,
+        balloons: message.balloons,
+        observedAt: message.observedAt,
+        eventAtMin: message.eventAtMin,
+        eventAtMax: message.eventAtMax,
+        exactTimestamp: message.exactTimestamp === true,
+        candidateFingerprint: message.candidateFingerprint,
+      }, location.origin);
+      return true;
+    }
     if (message && message.type === 'confirmStreamerVerificationNote' &&
         typeof message.senderId === 'string' && typeof message.code === 'string' && typeof message.noteNo === 'string') {
       const requestId = createAttemptId();
