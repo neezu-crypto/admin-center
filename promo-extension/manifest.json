@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SOOP 홍보글·게시판 찾기",
-  "version": "0.9.43",
+  "version": "0.9.44",
   "description": "SOOP 방송국에서 홍보글을 순차 입력·게시하고 게시 여부를 확인하며, 스트리머 인증 및 온이유 후원 알림을 확인합니다.",
   "permissions": ["storage", "clipboardWrite", "alarms"],
   "host_permissions": [

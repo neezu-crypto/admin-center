@@ -690,10 +690,11 @@ async function withCurrentPromoBatch(runId, tabId) {
 }
 
 async function advancePromoBatchAfterSuccess(pending, articleId) {
-  if (!pending || !pending.batchRunId) return;
+  if (!pending || !pending.batchRunId) return [];
   const saved = await chrome.storage.local.get(PROMO_BATCH_KEY);
   const state = saved[PROMO_BATCH_KEY];
-  if (!state || state.runId !== pending.batchRunId || state.currentIndex !== pending.batchIndex) return;
+  if (!state || state.runId !== pending.batchRunId || state.currentIndex !== pending.batchIndex) return [];
+  const taskTabIds = Number.isInteger(state.currentTabId) ? [state.currentTabId] : [];
   await chrome.alarms.clear(PROMO_BATCH_TIMEOUT_ALARM);
   state.completedCount = (Number(state.completedCount) || 0) + 1;
   state.currentTabId = null;
@@ -704,19 +705,20 @@ async function advancePromoBatchAfterSuccess(pending, articleId) {
     state.status = 'cancelled';
     state.message = '현재 게시를 확인했습니다. 이후 사이클은 중단했습니다.';
     await notifyPromoBatchState(state);
-    return;
+    return taskTabIds;
   }
   state.nextIndex = state.currentIndex + 1;
   if (state.nextIndex >= state.items.length) {
     state.status = 'complete';
     state.message = '';
     await notifyPromoBatchState(state);
-    return;
+    return taskTabIds;
   }
   state.status = 'waiting';
   state.message = '';
   await notifyPromoBatchState(state);
   await chrome.alarms.create(PROMO_BATCH_NEXT_ALARM, { when: Date.now() + state.delayMs });
+  return taskTabIds;
 }
 
 async function failPromoBatchItem(runId, tabId, reason) {
@@ -1303,7 +1305,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'confirmPromoPost') {
-    confirmPromoPost(message, sender).then(sendResponse).catch((error) => {
+    confirmPromoPost(message, sender).then((result) => {
+      const closeTabIds = Array.isArray(result && result.closeTabIds) ? result.closeTabIds : [];
+      if (result && Object.prototype.hasOwnProperty.call(result, 'closeTabIds')) delete result.closeTabIds;
+      sendResponse(result);
+      if (closeTabIds.length) {
+        // Let the content script receive the successful confirmation before its tab closes.
+        setTimeout(() => {
+          Promise.all(closeTabIds.map((tabId) => chrome.tabs.remove(tabId).catch(() => null)))
+            .then(() => trace(message.attemptId, 'promo-batch-success-tabs-closed', { tabIds: closeTabIds }));
+        }, 300);
+      }
+    }).catch((error) => {
       trace(message.attemptId, 'post-confirmation-threw', { error: String(error && error.message || error) });
       console.error('홍보 게시 성공 확인 실패:', error);
       sendResponse({ ok: false, reason: 'confirmation-error', attemptId: message.attemptId || '' });
@@ -1616,8 +1629,14 @@ async function confirmPromoPost(message, sender) {
     }
     await chrome.storage.local.remove(matchingPendingKeys);
     trace(pending.attemptId, 'completion-flow-succeeded', { articleId: match[2] });
-    await advancePromoBatchAfterSuccess(pending, match[2]);
-    return { ok: true, completed: true, articleId: match[2], attemptId: pending.attemptId || '' };
+    const taskTabIds = await advancePromoBatchAfterSuccess(pending, match[2]);
+    const closeTabIds = pending.batchRunId ? taskTabIds.slice() : [];
+    if (pending.batchRunId && sender.tab &&
+        (taskTabIds.includes(tabId) || taskTabIds.includes(sender.tab.openerTabId))) {
+      closeTabIds.push(tabId);
+    }
+    const uniqueCloseTabIds = Array.from(new Set(closeTabIds));
+    return { ok: true, completed: true, articleId: match[2], attemptId: pending.attemptId || '', closeTabIds: uniqueCloseTabIds };
   } catch (error) {
     pending.completionRequested = false;
     await chrome.storage.local.set({ [pendingKey]: pending });

@@ -59,7 +59,7 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.43');
+  assert.equal(manifest.version, '0.9.44');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
@@ -91,6 +91,10 @@ test('순차 홍보 자동화는 미완료 대상·횟수·대기시간을 제�
   assert.match(workerSource, /testOnly && rawItems\.length !== 1/);
   assert.match(workerSource, /if \(testOnly\) trace\(state\.runId, 'promo-batch-test-started'/);
   assert.match(workerSource, /advancePromoBatchAfterSuccess\(pending, match\[2\]\)/);
+  assert.match(workerSource, /promo-batch-success-tabs-closed/);
+  assert.match(workerSource, /taskTabIds\.includes\(sender\.tab\.openerTabId\)/);
+  assert.match(workerSource, /Array\.from\(new Set\(closeTabIds\)\)/);
+  assert.match(workerSource, /chrome\.tabs\.remove\(tabId\)\.catch\(\(\) => null\)/);
   assert.match(writerSource, /function findUniquePublishButton\(\)/);
   assert.match(writerSource, /sendPromoBatchMessage\('promoBatchTestReady'\)/);
   assert.match(writerSource, /setTimeout\(resolve, 8000\)/);
