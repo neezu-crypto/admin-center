@@ -59,7 +59,7 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.44');
+  assert.equal(manifest.version, '0.9.45');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
@@ -95,6 +95,14 @@ test('순차 홍보 자동화는 미완료 대상·횟수·대기시간을 제�
   assert.match(workerSource, /taskTabIds\.includes\(sender\.tab\.openerTabId\)/);
   assert.match(workerSource, /Array\.from\(new Set\(closeTabIds\)\)/);
   assert.match(workerSource, /chrome\.tabs\.remove\(tabId\)\.catch\(\(\) => null\)/);
+  assert.match(adminSource, /streamerPromoPendingManageBtn/);
+  assert.match(adminSource, /promoBatchRequest\('pending-list'\)/);
+  assert.match(adminSource, /promoBatchRequest\('pending-clear'/);
+  assert.match(workerSource, /action === 'pending-list'/);
+  assert.match(workerSource, /action === 'pending-clear'/);
+  assert.match(workerSource, /pending\.attemptId === pendingAttemptId/);
+  assert.match(workerSource, /batch\.publishDispatched === true/);
+  assert.match(bridgeSource, /action === 'pending-clear'/);
   assert.match(writerSource, /function findUniquePublishButton\(\)/);
   assert.match(writerSource, /sendPromoBatchMessage\('promoBatchTestReady'\)/);
   assert.match(writerSource, /setTimeout\(resolve, 8000\)/);

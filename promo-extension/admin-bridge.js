@@ -161,6 +161,7 @@
       request.delayMs = Number(data.delayMs) || 0;
       request.testOnly = data.testOnly === true;
     }
+    if (action === 'pending-clear') request.pendingAttemptId = String(data.pendingAttemptId || '');
     chrome.runtime.sendMessage(request).then(function (result) {
       window.postMessage({
         __soopPromoBatchResponse: true,
@@ -168,6 +169,8 @@
         ok: !!(result && result.ok),
         message: String(result && result.message || result && result.reason || ''),
         state: result && result.state || null,
+        pendingPosts: result && Array.isArray(result.pendingPosts) ? result.pendingPosts : [],
+        clearAllowed: !!(result && result.clearAllowed),
       }, location.origin);
     }).catch(function (error) {
       window.postMessage({

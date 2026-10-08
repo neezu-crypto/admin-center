@@ -829,6 +829,57 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'promoBatchControl') {
     if (!isAllowedAdminSender(sender)) return false;
     const action = String(message.action || '');
+    if (action === 'pending-list') {
+      chrome.storage.local.get(null).then((allData) => {
+        const batch = allData[PROMO_BATCH_KEY];
+        const clearAllowed = !isActivePromoBatch(batch) &&
+          !(batch && batch.status === 'failed' && batch.publishDispatched === true);
+        const now = Date.now();
+        const pendingPosts = Object.entries(allData)
+          .filter(([key, pending]) => key.startsWith(PENDING_POST_PREFIX) && pending &&
+            now - Number(pending.createdAt || 0) <= PROMO_PENDING_TTL_MS)
+          .map(([, pending]) => ({
+            attemptId: typeof pending.attemptId === 'string' ? pending.attemptId : '',
+            stationId: typeof pending.stationId === 'string' ? pending.stationId : '',
+            soopId: typeof pending.soopId === 'string' ? pending.soopId : '',
+            promoKey: typeof pending.promoKey === 'string' ? pending.promoKey : '',
+            createdAt: Number(pending.createdAt) || 0,
+            batchRunId: typeof pending.batchRunId === 'string' ? pending.batchRunId : '',
+          }))
+          .sort((a, b) => a.createdAt - b.createdAt);
+        sendResponse({ ok: true, pendingPosts, clearAllowed });
+      }).catch((error) => sendResponse({ ok: false, reason: String(error && error.message || error) }));
+      return true;
+    }
+    if (action === 'pending-clear') {
+      const pendingAttemptId = String(message.pendingAttemptId || '').slice(0, 120);
+      chrome.storage.local.get(null).then(async (allData) => {
+        const batch = allData[PROMO_BATCH_KEY];
+        if (isActivePromoBatch(batch) || (batch && batch.status === 'failed' && batch.publishDispatched === true)) {
+          sendResponse({ ok: false, reason: 'pending-clear-blocked', message: '자동 게시가 진행 중이거나 게시 결과를 확인하지 못한 작업이 있어 지금은 해제할 수 없습니다.' });
+          return;
+        }
+        const entry = Object.entries(allData).find(([key, pending]) =>
+          key.startsWith(PENDING_POST_PREFIX) && pending && pendingAttemptId && pending.attemptId === pendingAttemptId);
+        if (!entry) {
+          sendResponse({ ok: false, reason: 'pending-not-found', message: '이미 해제됐거나 만료된 게시 확인 기록입니다. 목록을 새로고침해주세요.' });
+          return;
+        }
+        const [pendingKey] = entry;
+        const tabSuffix = pendingKey.slice(PENDING_POST_PREFIX.length);
+        const keysToRemove = [pendingKey];
+        if (/^\d+$/.test(tabSuffix)) keysToRemove.push(PENDING_KEY_PREFIX + tabSuffix);
+        await chrome.storage.local.remove(keysToRemove);
+        trace(entry[1].attemptId, 'promo-pending-manually-cleared', {
+          stationId: entry[1].stationId || '',
+          promoKey: entry[1].promoKey || '',
+          soopId: entry[1].soopId || '',
+          clearedDraft: keysToRemove.length > 1,
+        });
+        sendResponse({ ok: true, message: '미완료 확인 기록과 연결된 임시 초안을 해제했습니다. 열린 SOOP 탭은 직접 확인 후 닫아주세요.' });
+      }).catch((error) => sendResponse({ ok: false, reason: String(error && error.message || error), message: '게시 확인 기록을 해제하지 못했습니다.' }));
+      return true;
+    }
     if (action === 'status') {
       chrome.storage.local.get(PROMO_BATCH_KEY).then((saved) => {
         sendResponse({ ok: true, state: publicPromoBatchState(saved[PROMO_BATCH_KEY] || null) });
