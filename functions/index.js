@@ -466,7 +466,6 @@ const getAdminSessionSummary = onCall(async (request) => {
     tasks.push(Promise.all([
       hasAnyEntry(db, 'bettingMarket/verifyRequests'),
       hasAnyEntry(db, 'streamerVerificationRequests', 'pending'),
-      hasAnyEntry(db, 'onyuVn/viewerAccessRequests', 'pending'),
     ]).then(function (values) { summary.identity = values.some(Boolean); }));
   }
   if (canReview) {
@@ -1525,17 +1524,9 @@ const notifyMessengerReport = onValueCreated('/streamerMessenger/reports/{id}', 
   await sendDiscordNotification('🔔 **새 스트리머 메신저 신고**\n신고 ID: `' + reportId + '`\n접수 시각: ' + new Date(at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) + '\n' + deepLink('section-review-queue'));
 });
 const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)', 'section-listing-request');
-const notifyOnyuViewerAccessRequest = onValueCreated('/onyuVn/viewerAccessAlerts/{id}', async (event) => {
-  const data = event.data.val() || {};
-  const nickname = String(data.nickname || '(닉네임 미입력)').replace(/[\r\n]/g, ' ').slice(0, 60);
-  const uid = String(data.uid || '(알 수 없음)').replace(/[\r\n]/g, ' ').slice(0, 120);
-  await sendDiscordNotification(
-    '🔔 **새 후원 승인 신청 (온 이유)**\n' +
-    '후원자 닉네임: ' + nickname + '\n' +
-    'uid: `' + uid + '`\n' +
-    deepLink('section-onyu-access')
-  );
-});
+// 이전 일반 시청자 접근 신청은 종료됐다. 배포된 옛 writer가 남아 있더라도
+// 더는 게임 권한과 무관한 Discord 알림을 발생시키지 않도록 호환 trigger만 유지한다.
+const notifyOnyuViewerAccessRequest = onValueCreated('/onyuVn/viewerAccessAlerts/{id}', async () => null);
 const notifyOnyuStreamerGameGiftRequest = onValueCreated('/onyuVn/streamerGameGiftRequests/{requestId}', async (event) => {
   const data = event.data.val() || {};
   const target = String(data.targetNickname || '(닉네임 없음)').replace(/[\r\n`]/g, ' ').slice(0, 60);
@@ -2369,47 +2360,11 @@ async function getOnyuAccessState(uid, request) {
   return { role: 'viewer', accessMode: 'viewer', accessStatus: hasGameEntitlement ? 'approved' : 'purchase-required', canStartGame: authenticatedViewer && hasGameEntitlement, authenticated: authenticatedViewer, loginMethod, isAdmin, adminMode: false };
 }
 
-// 일반 시청자가 후원 후 관리자 승인을 기다리는 신청을 생성한다. 익명 세션은 신청할
-// 수 없고, 스트리머 인증 유저는 별도 승인 없이 이미 통과 상태로 반환한다.
+// 이전 일반 시청자 접근 신청은 구매·선물 이용권 흐름으로 대체됐다. 예전 정적 페이지가
+// 남아 있어도 무효한 접근 신청을 새로 만들지 않고 올바른 경로를 안내한다.
 const onyuRequestViewerAccess = onCall(async (request) => {
-  const uid = requireAuth(request);
-  const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
-  if (provider === 'anonymous') throw new HttpsError('failed-precondition', 'Google 또는 카카오 로그인이 필요합니다.');
-  const nickname = String(request.data && request.data.nickname || '').trim();
-  if (!nickname || nickname.length > 30) throw new HttpsError('invalid-argument', 'SOOP 후원자 닉네임을 입력해 주세요.');
-  const current = await getOnyuAccessState(uid, request);
-  if (current.role === 'streamer' || (current.authenticated && current.accessStatus === 'approved')) return Object.assign({ ok: true }, current);
-  if (!current.authenticated) throw new HttpsError('failed-precondition', 'Google 또는 카카오 로그인이 필요합니다.');
-
-  const db = getDatabase();
-  const requestRef = db.ref('onyuVn/viewerAccessRequests/' + uid);
-  const existingSnap = await requestRef.get();
-  const existing = existingSnap.val() || {};
-  const now = Date.now();
-  const next = {
-    uid,
-    nickname,
-    provider: onyuProviderLabel(request),
-    status: 'pending',
-    requestedAt: existing.requestedAt || now,
-    updatedAt: now,
-  };
-  await requestRef.set(next);
-  // 같은 uid가 재신청할 때도 디스코드 알림이 누락되지 않도록, 현재 상태 노드와
-  // 별도의 일회성 알림 큐를 만든다. 알림 큐 기록 실패가 후원 신청 자체를 막지는 않는다.
-  try {
-    await db.ref('onyuVn/viewerAccessAlerts').push().set({
-      uid,
-      nickname,
-      provider: onyuProviderLabel(request),
-      status: 'pending',
-      requestedAt: now,
-    });
-  } catch (e) {
-    console.error('온 이유 후원 신청 알림 큐 기록 실패:', e);
-  }
-  await recordOnyuServerEvent(request, 'viewer_access_requested');
-  return { ok: true, role: 'viewer', accessStatus: 'pending', canStartGame: false, requestId: uid };
+  requireAuth(request);
+  throw new HttpsError('failed-precondition', '이전 접근 신청은 종료됐습니다. 온이유 게임 이용권 구매·선물 신청을 이용해 주세요.');
 });
 
 const onyuGetViewerAccess = onCall(async (request) => {
@@ -2821,6 +2776,193 @@ const onyuListStreamerGameGifts = onCall(async (request) => {
   const requests = Object.keys(data).map((id) => Object.assign({ requestId: id }, data[id]))
     .sort((a, b) => (b.updatedAt || b.requestedAt || 0) - (a.updatedAt || a.requestedAt || 0));
   return { requests };
+});
+
+const ONYU_GIFT_PROCESSING_STALE_MS = 10 * 60 * 1000;
+
+// Abandoned claims can be released only after a conservative timeout. Re-approving
+// the same request remains idempotent because the entitlement writer checks requestId.
+const onyuRecoverStuckStreamerGameGift = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const requestId = String(request.data && request.data.requestId || '').trim();
+  if (!requestId || requestId.length > 200 || /[.#$\[\]/]/.test(requestId)) {
+    throw new HttpsError('invalid-argument', '복구할 이용권 신청을 선택해 주세요.');
+  }
+  const db = getDatabase();
+  const giftRef = db.ref('onyuVn/streamerGameGiftRequests/' + requestId);
+  const now = Date.now();
+  const staleBefore = now - ONYU_GIFT_PROCESSING_STALE_MS;
+  const result = await giftRef.transaction((current) => {
+    if (!current || current.status !== 'processing') return;
+    const startedAt = Number(current.processingStartedAt || current.updatedAt || current.requestedAt) || 0;
+    if (!startedAt || startedAt > staleBefore) return;
+    return Object.assign({}, current, {
+      status: 'pending', processingToken: null, processingStartedAt: null,
+      updatedAt: now, recoveryCount: (Number(current.recoveryCount) || 0) + 1,
+      lastRecoveredAt: now, lastRecoveredBy: adminUid,
+    });
+  }, undefined, false);
+  if (!result.committed) {
+    const current = (await giftRef.get()).val();
+    if (!current) throw new HttpsError('not-found', '이용권 신청을 찾을 수 없습니다.');
+    throw new HttpsError('failed-precondition', current.status !== 'processing'
+      ? '이미 다른 상태로 변경된 신청입니다.'
+      : '처리 시작 후 10분이 지나지 않아 아직 복구할 수 없습니다.');
+  }
+  const recovered = result.snapshot.val() || {};
+  let auditLogged = true;
+  try {
+    await logToAdminAuditLog(db, request, '온이유 멈춘 이용권 신청 복구',
+      String(recovered.targetNickname || recovered.targetSoopId || recovered.targetUid || '') + ' · ' + requestId + ' · 복구 ' + recovered.recoveryCount + '회');
+  } catch (error) {
+    auditLogged = false;
+    console.error('온이유 멈춘 이용권 신청 복구 감사 로그 실패:', error);
+  }
+  return { ok: true, requestId, status: 'pending', recoveryCount: recovered.recoveryCount, auditLogged };
+});
+
+function safeOnyuEntitlementRecord(value) {
+  if (!value || typeof value !== 'object') return null;
+  return {
+    status: String(value.status || ''),
+    grantedAt: Number(value.grantedAt) || 0,
+    grantedBy: String(value.grantedBy || ''),
+    requestId: String(value.requestId || ''),
+    giftRequestId: String(value.giftRequestId || ''),
+    purchaseType: String(value.purchaseType || ''),
+    revokedAt: Number(value.revokedAt) || 0,
+    revokedBy: String(value.revokedBy || ''),
+    revocationReason: String(value.revocationReason || ''),
+  };
+}
+
+function safeOnyuGiftRequestRecord(requestId, value) {
+  return {
+    requestId,
+    requesterUid: String(value.requesterUid || ''),
+    targetUid: String(value.targetUid || ''),
+    purchaseType: String(value.purchaseType || 'gift'),
+    status: String(value.status || 'pending'),
+    activationStatus: String(value.activationStatus || ''),
+    donorNickname: String(value.donorNickname || ''),
+    donorSoopId: String(value.donorSoopId || ''),
+    targetNickname: String(value.targetNickname || ''),
+    targetSoopId: String(value.targetSoopId || ''),
+    requestedAt: Number(value.requestedAt) || 0,
+    donationCompletedAt: Number(value.donationCompletedAt) || 0,
+    reviewedAt: Number(value.reviewedAt) || 0,
+    reviewedBy: String(value.reviewedBy || ''),
+    verificationSource: String(value.verificationSource || ''),
+  };
+}
+
+const onyuAdminLookupEntitlement = onCall(async (request) => {
+  await requireAdmin(request);
+  const lookupType = String(request.data && request.data.lookupType || '');
+  const query = String(request.data && request.data.query || '').trim();
+  if (!['uid', 'soopId'].includes(lookupType) || !query || query.length > 128) {
+    throw new HttpsError('invalid-argument', '조회 유형과 검색어를 확인해 주세요.');
+  }
+  const lookupSoopId = lookupType === 'soopId' ? normalizeSoopId(query) : '';
+  if (lookupType === 'soopId' && !lookupSoopId) throw new HttpsError('invalid-argument', 'SOOP 아이디는 영문·숫자 2~20자로 입력해 주세요.');
+  if (lookupType === 'uid' && /[.#$\[\]/]/.test(query)) throw new HttpsError('invalid-argument', 'Firebase UID 형식이 올바르지 않습니다.');
+
+  const db = getDatabase();
+  const [verificationSnap, giftSnap] = await Promise.all([
+    db.ref('streamerVerifications').get(),
+    db.ref('onyuVn/streamerGameGiftRequests').get(),
+  ]);
+  const verificationRows = Object.values(verificationSnap.val() || {}).filter((row) => row && typeof row === 'object');
+  const giftRows = Object.entries(giftSnap.val() || {}).map(([id, value]) => safeOnyuGiftRequestRecord(id, value || {}));
+  const matchedVerifications = lookupType === 'uid'
+    ? verificationRows.filter((row) => String(row.uid || '') === query)
+    : verificationRows.filter((row) => normalizeSoopId(row.soopId) === lookupSoopId);
+  const uidSet = new Set(lookupType === 'uid' ? [query] : []);
+  matchedVerifications.forEach((row) => { if (row.uid) uidSet.add(String(row.uid)); });
+  const uids = Array.from(uidSet).slice(0, 20);
+  const profiles = await Promise.all(uids.map(async (uid) => {
+    const verification = matchedVerifications.find((row) => String(row.uid || '') === uid) || null;
+    const [userSnap, viewerSnap, streamerSnap] = await Promise.all([
+      db.ref('users/' + uid).get(),
+      db.ref('onyuVn/gameEntitlements/' + uid).get(),
+      db.ref('onyuVn/streamerGameEntitlements/' + uid).get(),
+    ]);
+    const user = userSnap.val() || {};
+    const soopId = normalizeSoopId(verification && verification.soopId || user.soopId || user.streamerId);
+    const requests = giftRows.filter((gift) => gift.requesterUid === uid || gift.targetUid === uid ||
+      (soopId && normalizeSoopId(gift.targetSoopId) === soopId));
+    return {
+      uid,
+      nickname: String(verification && verification.nickname || user.nickname || user.displayName || '').slice(0, 80),
+      soopId,
+      streamerVerified: !!verification || user.streamerVerified === true,
+      viewerEntitlement: safeOnyuEntitlementRecord(viewerSnap.val()),
+      streamerEntitlement: safeOnyuEntitlementRecord(streamerSnap.val()),
+      requests: requests.sort((a, b) => b.requestedAt - a.requestedAt).slice(0, 50),
+      requestsTruncated: requests.length > 50,
+    };
+  }));
+  const matchedUidSet = new Set(uids);
+  const unlinkedRequests = lookupSoopId
+    ? giftRows.filter((gift) => normalizeSoopId(gift.targetSoopId) === lookupSoopId && !gift.targetUid && !matchedUidSet.size)
+      .sort((a, b) => b.requestedAt - a.requestedAt).slice(0, 50)
+    : [];
+  return {
+    lookupType,
+    query: lookupType === 'soopId' ? lookupSoopId : query,
+    profiles,
+    unlinkedRequests,
+    truncated: matchedVerifications.length > uids.length || profiles.some((profile) => profile.requestsTruncated) || unlinkedRequests.length === 50,
+  };
+});
+
+const onyuAdminRevokeEntitlement = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const uid = String(request.data && request.data.uid || '').trim();
+  const entitlementType = String(request.data && request.data.entitlementType || '');
+  const reason = String(request.data && request.data.reason || '').replace(/[\0\r\n]/g, ' ').trim();
+  if (!uid || uid.length > 128 || /[.#$\[\]/]/.test(uid) || !['viewer', 'streamer'].includes(entitlementType)) {
+    throw new HttpsError('invalid-argument', '대상 계정 또는 이용권 유형이 올바르지 않습니다.');
+  }
+  if (!reason || reason.length > 200) throw new HttpsError('invalid-argument', '회수 사유를 1~200자로 입력해 주세요.');
+  const db = getDatabase();
+  const entitlementPath = entitlementType === 'viewer' ? 'onyuVn/gameEntitlements/' : 'onyuVn/streamerGameEntitlements/';
+  const entitlementRef = db.ref(entitlementPath + uid);
+  const now = Date.now();
+  const result = await entitlementRef.transaction((current) => {
+    if (!current || current.status !== 'active') return;
+    return Object.assign({}, current, {
+      status: 'revoked', revokedAt: now, revokedBy: adminUid,
+      revocationReason: reason, updatedAt: now,
+    });
+  }, undefined, false);
+  if (!result.committed) {
+    const current = (await entitlementRef.get()).val();
+    if (!current) throw new HttpsError('not-found', '활성 이용권을 찾을 수 없습니다.');
+    throw new HttpsError('failed-precondition', '이용권이 이미 회수됐거나 활성 상태가 아닙니다.');
+  }
+  const entitlement = result.snapshot.val() || {};
+  const requestId = String(entitlement.giftRequestId || entitlement.requestId || '');
+  let requestHistoryUpdated = true;
+  if (requestId) {
+    try {
+      await db.ref('onyuVn/streamerGameGiftRequests/' + requestId).update({
+        activationStatus: 'revoked', entitlementRevokedAt: now, entitlementRevokedBy: adminUid, updatedAt: now,
+      });
+    } catch (error) {
+      requestHistoryUpdated = false;
+      console.error('온이유 이용권 회수 신청 이력 갱신 실패:', error);
+    }
+  }
+  let auditLogged = true;
+  try {
+    await logToAdminAuditLog(db, request, '온이유 ' + (entitlementType === 'viewer' ? '일반' : '스트리머') + ' 이용권 회수',
+      uid + (requestId ? ' · 신청 ' + requestId : '') + ' · 사유: ' + reason);
+  } catch (error) {
+    auditLogged = false;
+    console.error('온이유 이용권 회수 감사 로그 실패:', error);
+  }
+  return { ok: true, uid, entitlementType, status: 'revoked', revokedAt: now, requestHistoryUpdated, auditLogged };
 });
 
 const onyuGetMyStreamerGameGiftRequestStatus = onCall(async (request) => {
@@ -3352,32 +3494,9 @@ const onyuListViewerAccessRequests = onCall(async (request) => {
 });
 
 async function updateOnyuViewerAccess(request, status) {
-  const adminUid = await requireAdmin(request);
-  const uid = String(request.data && request.data.uid || '').trim();
-  if (!uid || uid.length > 200) throw new HttpsError('invalid-argument', '대상 uid가 필요합니다.');
-  const db = getDatabase();
-  const reqRef = db.ref('onyuVn/viewerAccessRequests/' + uid);
-  const reqSnap = await reqRef.get();
-  const req = reqSnap.val() || {};
-  if (!req.uid) throw new HttpsError('not-found', '해당 접근 승인 신청을 찾을 수 없습니다.');
-  const now = Date.now();
-  const adminName = (request.auth.token && (request.auth.token.name || request.auth.token.email)) || adminUid;
-  const updates = {};
-  updates['onyuVn/viewerAccess/' + uid] = {
-    status,
-    approvedAt: status === 'approved' ? now : null,
-    rejectedAt: status === 'rejected' ? now : null,
-    revokedAt: status === 'revoked' ? now : null,
-    reviewedAt: now,
-    reviewedBy: adminUid,
-  };
-  updates['onyuVn/viewerAccessRequests/' + uid + '/status'] = status;
-  updates['onyuVn/viewerAccessRequests/' + uid + '/reviewedAt'] = now;
-  updates['onyuVn/viewerAccessRequests/' + uid + '/reviewedBy'] = adminUid;
-  await db.ref().update(updates);
-  await logToAdminAuditLog(db, request, 'onyu-vn 접근 ' + (status === 'approved' ? '승인' : status === 'rejected' ? '무시' : '회수'), uid + ' · ' + adminName);
-  await recordOnyuServerEvent(request, 'viewer_access_' + status, { targetUid: uid });
-  return { ok: true, uid, status };
+  await requireAdmin(request);
+  void status;
+  throw new HttpsError('failed-precondition', '이전 접근 신청 처리는 종료됐습니다. 이용권 관리 화면에서 구매·선물 신청을 검수해 주세요.');
 }
 
 const onyuApproveViewerAccess = onCall((request) => updateOnyuViewerAccess(request, 'approved'));
@@ -3815,6 +3934,9 @@ module.exports = {
   onyuMarkStreamerGameGiftDonationComplete,
   onyuGetMyStreamerGameGiftRequestStatus,
   onyuListStreamerGameGifts,
+  onyuRecoverStuckStreamerGameGift,
+  onyuAdminLookupEntitlement,
+  onyuAdminRevokeEntitlement,
   onyuReviewStreamerGameGift,
   onyuConfirmStreamerGameGiftFromNotification,
   onyuCreateGiftBackgroundMonitorSession,

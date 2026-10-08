@@ -672,17 +672,25 @@
     </div>
 
     <div class="card" id="section-onyu-access">
-      <h2>온 이유 기존 일반 시청자 접근 신청</h2>
-      <p class="hint">
-        기존 접근 신청 기록입니다. 이 목록의 승인 정보는 현재 게임 시작 권한에 반영되지 않습니다. 아래 구매·선물 신청을 승인하면 신청 유형에 따라 본인 일반 계정 또는 인증 스트리머 계정에 이용권이 부여됩니다.
-      </p>
-      <button id="onyuAccessRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
-      <div id="onyuAccessList"></div>
-      <h3 class="subhead" style="margin-top:20px;">온이유 이용권 구매·선물 신청</h3>
+      <h2>온이유 이용권 관리</h2>
+      <p class="hint">이전 일반 시청자 접근 신청은 종료됐으며 게임 이용 권한을 부여하지 않습니다. 현재는 아래 이용권 구매·선물 신청을 통해 권한을 처리합니다.</p>
+      <h3 class="subhead" style="margin-top:20px;">이용권 구매·선물 신청</h3>
       <p class="hint">신청자는 관리자 방송국에 별풍선 50개를 후원합니다. 관리자 SOOP 탭과 알림함이 열려 있으면 발신자 SOOP 아이디·후원 수량·신청 시각이 하나의 신청과 일치할 때 자동 승인합니다. 시각이 모호하거나 여러 신청과 일치하면 수동 검수해 주세요. 알림 항목은 열지 않습니다.</p>
       <div id="onyuGiftAutoWatchStatus" class="hint" role="status" aria-live="polite" style="margin:0 0 10px;"></div>
       <button id="onyuGiftRefreshBtn" class="perm-refresh-btn" type="button">구매·선물 신청 새로고침</button>
       <div id="onyuGiftList"></div>
+      <h3 class="subhead" style="margin-top:22px;">이용권 조회·회수</h3>
+      <p class="hint">Firebase UID 또는 SOOP 아이디로 인증 연결, 이용권 상태, 관련 신청을 조회합니다. 회수는 활성 이용권만 가능하며 사유를 감사 로그에 기록합니다.</p>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+        <select id="onyuEntitlementLookupType" class="perm-select" aria-label="조회 기준">
+          <option value="uid">Firebase UID</option>
+          <option value="soopId">SOOP 아이디</option>
+        </select>
+        <input id="onyuEntitlementLookupInput" type="text" maxlength="128" placeholder="UID 또는 SOOP 아이디" autocomplete="off" style="flex:1; min-width:220px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:7px 10px; border-radius:12px; font-size:12.5px;">
+        <button id="onyuEntitlementLookupBtn" class="perm-refresh-btn" type="button">조회</button>
+      </div>
+      <div id="onyuEntitlementLookupStatus" class="hint" role="status" aria-live="polite" style="margin:0 0 8px;"></div>
+      <div id="onyuEntitlementLookupResults"></div>
     </div>
 
     <div class="card" id="section-permission-delegation">
@@ -1344,12 +1352,11 @@
   const judgeMarketFn = httpsCallable(functions, 'judgeMarket');
   const cancelPendingJudgmentFn = httpsCallable(functions, 'cancelPendingJudgment');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
-  const onyuListViewerAccessRequestsFn = httpsCallable(functions, 'onyuListViewerAccessRequests');
-  const onyuApproveViewerAccessFn = httpsCallable(functions, 'onyuApproveViewerAccess');
-  const onyuRejectViewerAccessFn = httpsCallable(functions, 'onyuRejectViewerAccess');
-  const onyuRevokeViewerAccessFn = httpsCallable(functions, 'onyuRevokeViewerAccess');
   const onyuListStreamerGameGiftsFn = httpsCallable(functions, 'onyuListStreamerGameGifts');
   const onyuReviewStreamerGameGiftFn = httpsCallable(functions, 'onyuReviewStreamerGameGift');
+  const onyuRecoverStuckStreamerGameGiftFn = httpsCallable(functions, 'onyuRecoverStuckStreamerGameGift');
+  const onyuAdminLookupEntitlementFn = httpsCallable(functions, 'onyuAdminLookupEntitlement');
+  const onyuAdminRevokeEntitlementFn = httpsCallable(functions, 'onyuAdminRevokeEntitlement');
   const onyuCreateGiftBackgroundMonitorSessionFn = httpsCallable(functions, 'onyuCreateGiftBackgroundMonitorSession');
   const onyuAdminListPlayerReviewsFn = httpsCallable(functions, 'onyuAdminListPlayerReviews');
   const onyuAdminSetPlayerReviewVisibilityFn = httpsCallable(functions, 'onyuAdminSetPlayerReviewVisibility');
@@ -1461,10 +1468,13 @@
   const verificationRefreshBtn = document.getElementById('verificationRefreshBtn');
   const verificationPendingListEl = document.getElementById('verificationPendingList');
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
-  const onyuAccessRefreshBtn = document.getElementById('onyuAccessRefreshBtn');
-  const onyuAccessListEl = document.getElementById('onyuAccessList');
   const onyuGiftRefreshBtn = document.getElementById('onyuGiftRefreshBtn');
   const onyuGiftListEl = document.getElementById('onyuGiftList');
+  const onyuEntitlementLookupTypeEl = document.getElementById('onyuEntitlementLookupType');
+  const onyuEntitlementLookupInputEl = document.getElementById('onyuEntitlementLookupInput');
+  const onyuEntitlementLookupBtn = document.getElementById('onyuEntitlementLookupBtn');
+  const onyuEntitlementLookupStatusEl = document.getElementById('onyuEntitlementLookupStatus');
+  const onyuEntitlementLookupResultsEl = document.getElementById('onyuEntitlementLookupResults');
   const onyuReviewsRefreshBtn = document.getElementById('onyuReviewsRefreshBtn');
   const onyuReviewsStatusEl = document.getElementById('onyuReviewsStatus');
   const onyuReviewsListEl = document.getElementById('onyuReviewsList');
@@ -2183,24 +2193,9 @@
     });
   });
 
-  let onyuAccessRequests = [];
-  async function refreshOnyuAccessRequests() {
-    onyuAccessListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
-    try {
-      const result = await onyuListViewerAccessRequestsFn();
-      // 무시(rejected) 처리된 신청은 검수 큐에서 제거한다. 승인된 항목은
-      // 필요할 때 접근 회수를 할 수 있도록 목록에 남겨둔다.
-      onyuAccessRequests = (result.data.requests || []).filter(function (request) { return request.status !== 'rejected'; });
-      renderOnyuAccessRequests();
-    } catch (e) {
-      console.error('온 이유 접근 승인 목록 조회 실패:', e);
-      onyuAccessListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
-    }
-  }
-  onyuAccessRefreshBtn.addEventListener('click', refreshOnyuAccessRequests);
-
   let onyuGiftRequests = [];
   let onyuGiftRequestUnsubscribe = null;
+  let onyuGiftStaleTimer = null;
   function postOnyuGameGiftNotificationWatch(requests) {
     const eligible = (requests || []).filter(function (request) {
       return request && request.status === 'pending' && /^[a-z0-9]{2,20}$/i.test(String(request.donorSoopId || '')) &&
@@ -2308,20 +2303,26 @@
   onyuGiftRefreshBtn.addEventListener('click', function () { refreshOnyuGiftRequests(false); });
 
   function renderOnyuGiftRequests() {
+    if (onyuGiftStaleTimer) {
+      clearTimeout(onyuGiftStaleTimer);
+      onyuGiftStaleTimer = null;
+    }
     onyuGiftListEl.innerHTML = '';
     if (!onyuGiftRequests.length) {
       onyuGiftListEl.innerHTML = '<div class="empty-state">구매·선물 신청이 없습니다.</div>';
       return;
     }
+    let nextStaleAt = Infinity;
     onyuGiftRequests.forEach(function (request) {
       const row = document.createElement('div');
       row.className = 'verif-row';
       const statusLabel = request.status === 'approved'
-        ? request.activationStatus === 'awaiting-streamer-verification' ? '스트리머 인증 후 자동 지급 대기'
+        ? request.activationStatus === 'revoked' ? '이용권 회수됨'
+          : request.activationStatus === 'awaiting-streamer-verification' ? '스트리머 인증 후 자동 지급 대기'
           : request.activationStatus === 'identity-mismatch' ? '인증 정보 불일치 확인 필요'
             : request.activationStatus === 'blocked-existing-entitlement' ? '기존 이용권 보유 확인 필요' : '이용권 지급 완료'
         : request.status === 'rejected' ? '거절됨'
-          : request.status === 'processing' ? '승인 처리 중'
+          : request.status === 'processing' ? isOnyuGiftRequestStale(request) ? '처리 중 멈춤 의심 · 복구 가능' : '승인 처리 중'
             : request.donorSoopId && request.donationCompletedAt ? '후원 확인 대기 · 자동 확인 대상'
               : request.donorSoopId ? '후원 완료 신호 대기' : '후원 확인 대기 · 수동 확인';
       const isSelfPurchase = request.purchaseType === 'self';
@@ -2363,10 +2364,152 @@
           });
           actions.appendChild(button);
         });
+      } else if (request.status === 'processing' && isOnyuGiftRequestStale(request)) {
+        const recoverButton = document.createElement('button');
+        recoverButton.type = 'button';
+        recoverButton.className = 'approve';
+        recoverButton.textContent = '멈춘 처리 복구';
+        recoverButton.addEventListener('click', async function () {
+          if (!window.confirm('10분 이상 처리 상태가 바뀌지 않았습니다. 잠금을 풀어 대기 상태로 복구할까요? 이미 이용권이 지급된 경우 같은 신청으로 재처리해 중복 지급을 막습니다.')) return;
+          recoverButton.disabled = true;
+          try {
+            const result = await onyuRecoverStuckStreamerGameGiftFn({ requestId: request.requestId });
+            await refreshOnyuGiftRequests();
+            if (result.data && result.data.auditLogged === false) window.alert('신청은 복구됐지만 감사 로그 기록에 실패했습니다. 감사 로그를 별도로 확인해 주세요.');
+          } catch (error) {
+            console.error('온이유 멈춘 신청 복구 실패:', error);
+            window.alert('복구하지 못했습니다. ' + (error && error.message ? error.message : '잠시 후 다시 시도해 주세요.'));
+            recoverButton.disabled = false;
+          }
+        });
+        row.querySelector('.verif-actions').appendChild(recoverButton);
+      } else if (request.status === 'processing') {
+        const startedAt = Number(request.processingStartedAt || request.updatedAt || request.requestedAt) || 0;
+        if (startedAt > 0) nextStaleAt = Math.min(nextStaleAt, startedAt + 10 * 60 * 1000);
       }
       onyuGiftListEl.appendChild(row);
     });
+    if (Number.isFinite(nextStaleAt)) {
+      onyuGiftStaleTimer = setTimeout(renderOnyuGiftRequests, Math.max(250, nextStaleAt - Date.now() + 100));
+    }
   }
+
+  function isOnyuGiftRequestStale(request) {
+    if (!request || request.status !== 'processing') return false;
+    const startedAt = Number(request.processingStartedAt || request.updatedAt || request.requestedAt) || 0;
+    return startedAt > 0 && Date.now() - startedAt >= 10 * 60 * 1000;
+  }
+
+  function renderOnyuEntitlementLookupResults(data) {
+    onyuEntitlementLookupResultsEl.innerHTML = '';
+    const profiles = Array.isArray(data && data.profiles) ? data.profiles : [];
+    const looseRequests = Array.isArray(data && data.unlinkedRequests) ? data.unlinkedRequests : [];
+    if (!profiles.length && !looseRequests.length) {
+      onyuEntitlementLookupResultsEl.innerHTML = '<div class="empty-state">일치하는 인증 계정, 이용권 또는 신청을 찾지 못했습니다.</div>';
+      return;
+    }
+    profiles.forEach(function (profile) {
+      const card = document.createElement('div');
+      card.className = 'verif-row';
+      const info = document.createElement('div');
+      info.className = 'verif-info';
+      const title = document.createElement('b');
+      title.textContent = (profile.nickname || '인증 계정') + (profile.soopId ? ' · @' + profile.soopId : '');
+      info.appendChild(title);
+      const uidLine = document.createElement('span');
+      uidLine.textContent = 'Firebase UID: ' + profile.uid + (profile.streamerVerified ? ' · 인증 스트리머' : '');
+      info.appendChild(uidLine);
+      const actions = document.createElement('div');
+      actions.className = 'verif-actions';
+      [['viewer', '일반 이용권', profile.viewerEntitlement], ['streamer', '스트리머 이용권', profile.streamerEntitlement]].forEach(function (entry) {
+        const type = entry[0], label = entry[1], entitlement = entry[2];
+        const line = document.createElement('span');
+        line.textContent = label + ': ' + (entitlement ? entitlement.status + (entitlement.grantedAt ? ' · 지급 ' + new Date(entitlement.grantedAt).toLocaleString('ko-KR') : '') : '없음');
+        info.appendChild(line);
+        if (entitlement && entitlement.status === 'active') {
+          const revokeButton = document.createElement('button');
+          revokeButton.type = 'button';
+          revokeButton.className = 'reject';
+          revokeButton.textContent = label + ' 회수';
+          revokeButton.addEventListener('click', async function () {
+            const reason = window.prompt('이용권 회수 사유를 입력해 주세요. (최대 200자)');
+            if (reason === null) return;
+            if (!reason.trim()) { window.alert('회수 사유를 입력해야 합니다.'); return; }
+            if (!window.confirm(profile.nickname + ' 계정의 ' + label + '을 회수할까요? 회수 후 해당 계정은 게임을 시작할 수 없습니다.')) return;
+            revokeButton.disabled = true;
+            try {
+              const result = await onyuAdminRevokeEntitlementFn({ uid: profile.uid, entitlementType: type, reason: reason.trim() });
+              await lookupOnyuEntitlement();
+              if (result.data && (result.data.auditLogged === false || result.data.requestHistoryUpdated === false)) {
+                const warnings = [];
+                if (result.data.auditLogged === false) warnings.push('감사 로그');
+                if (result.data.requestHistoryUpdated === false) warnings.push('관련 신청 이력');
+                window.alert('이용권 회수는 완료됐지만 ' + warnings.join(' 및 ') + ' 갱신에 실패했습니다. 관리 기록을 확인해 주세요.');
+              }
+            } catch (error) {
+              console.error('온이유 이용권 회수 실패:', error);
+              window.alert('이용권을 회수하지 못했습니다. ' + (error && error.message ? error.message : '잠시 후 다시 시도해 주세요.'));
+              revokeButton.disabled = false;
+            }
+          });
+          actions.appendChild(revokeButton);
+        }
+      });
+      const requests = Array.isArray(profile.requests) ? profile.requests : [];
+      if (requests.length) {
+        const history = document.createElement('div');
+        history.className = 'hint';
+        history.textContent = '관련 신청: ' + requests.slice(0, 10).map(function (request) {
+          return (request.purchaseType || 'gift') + ' / ' + request.status + (request.activationStatus ? ' (' + request.activationStatus + ')' : '') + ' / ' + new Date(request.requestedAt || 0).toLocaleString('ko-KR');
+        }).join(' · ') + (requests.length > 10 ? ' · 외 ' + (requests.length - 10) + '건' : '');
+        info.appendChild(history);
+      }
+      card.appendChild(info);
+      card.appendChild(actions);
+      onyuEntitlementLookupResultsEl.appendChild(card);
+    });
+    looseRequests.forEach(function (request) {
+      const row = document.createElement('div');
+      row.className = 'verif-row';
+      const info = document.createElement('div');
+      info.className = 'verif-info';
+      const title = document.createElement('b');
+      title.textContent = '미연결 선물 신청 · ' + (request.targetNickname || '대상 미확인') + (request.targetSoopId ? ' (@' + request.targetSoopId + ')' : '');
+      const detail = document.createElement('span');
+      detail.textContent = '상태: ' + request.status + (request.activationStatus ? ' · ' + request.activationStatus : '') + ' · 신청자: ' + (request.donorNickname || '미입력') + (request.donorSoopId ? ' (@' + request.donorSoopId + ')' : '') + ' · ' + new Date(request.requestedAt || 0).toLocaleString('ko-KR');
+      info.appendChild(title);
+      info.appendChild(detail);
+      row.appendChild(info);
+      onyuEntitlementLookupResultsEl.appendChild(row);
+    });
+    if (data && data.truncated) {
+      const note = document.createElement('div');
+      note.className = 'hint';
+      note.textContent = '신청 이력이 많아 최신 50건만 표시합니다.';
+      onyuEntitlementLookupResultsEl.appendChild(note);
+    }
+  }
+
+  async function lookupOnyuEntitlement() {
+    const lookupType = onyuEntitlementLookupTypeEl.value;
+    const query = onyuEntitlementLookupInputEl.value.trim();
+    if (!query) { onyuEntitlementLookupStatusEl.textContent = 'UID 또는 SOOP 아이디를 입력해 주세요.'; return; }
+    onyuEntitlementLookupBtn.disabled = true;
+    onyuEntitlementLookupStatusEl.textContent = '조회 중...';
+    onyuEntitlementLookupResultsEl.innerHTML = '';
+    try {
+      const result = await onyuAdminLookupEntitlementFn({ lookupType: lookupType, query: query });
+      renderOnyuEntitlementLookupResults(result.data || {});
+      onyuEntitlementLookupStatusEl.textContent = '조회 완료';
+    } catch (error) {
+      console.error('온이유 이용권 조회 실패:', error);
+      onyuEntitlementLookupStatusEl.textContent = '조회에 실패했습니다. ' + (error && error.message ? error.message : '잠시 후 다시 시도해 주세요.');
+    } finally {
+      onyuEntitlementLookupBtn.disabled = false;
+    }
+  }
+  onyuEntitlementLookupBtn.addEventListener('click', lookupOnyuEntitlement);
+  onyuEntitlementLookupInputEl.addEventListener('keydown', function (event) { if (event.key === 'Enter') lookupOnyuEntitlement(); });
 
   let onyuPlayerReviewCursor = null;
   let onyuPlayerReviewHasMore = false;
@@ -2471,48 +2614,6 @@
       row.querySelectorAll('button').forEach(function (item) { item.disabled = false; });
     }
   });
-
-  function renderOnyuAccessRequests() {
-    if (!onyuAccessRequests.length) {
-      onyuAccessListEl.innerHTML = '<div class="empty-state">접근 승인 신청이 없습니다.</div>';
-      return;
-    }
-    onyuAccessListEl.innerHTML = '';
-    onyuAccessRequests.forEach(function (r) {
-      const row = document.createElement('div');
-      row.className = 'verif-row';
-      const statusLabel = r.status === 'approved' ? '승인됨' : r.status === 'rejected' ? '무시됨' : r.status === 'revoked' ? '회수됨' : '대기 중';
-      const time = r.updatedAt || r.requestedAt;
-      const providerLabel = r.provider === 'google' ? 'Google' : 'Kakao';
-      row.innerHTML =
-        '<div class="verif-info"><b>온 이유 · ' + providerLabel + '<span class="source-tag stockMarket">일반 시청자</span></b>' +
-        '<span>후원자 닉네임: ' + escapeHtml(r.nickname || '(미입력)') + '</span>' +
-        '<span>uid: ' + escapeHtml(r.uid) + ' · ' + statusLabel + '</span>' +
-        (time ? '<span>' + new Date(time).toLocaleString('ko-KR') + '</span>' : '') + '</div>' +
-        '<div class="verif-actions"></div>';
-      const actions = row.querySelector('.verif-actions');
-      function addAction(label, className, fn) {
-        const btn = document.createElement('button');
-        btn.type = 'button'; btn.className = className; btn.textContent = label;
-        btn.addEventListener('click', function () {
-          btn.disabled = true;
-          fn().then(refreshOnyuAccessRequests).catch(function (err) {
-            console.error('온 이유 접근 승인 처리 실패:', err);
-            window.alert('처리에 실패했습니다: ' + (err && err.message ? err.message : err));
-            btn.disabled = false;
-          });
-        });
-        actions.appendChild(btn);
-      }
-      if (r.status === 'approved') {
-        addAction('접근 회수', 'revoke', function () { return onyuRevokeViewerAccessFn({ uid: r.uid }); });
-      } else {
-        addAction('승인', 'approve', function () { return onyuApproveViewerAccessFn({ uid: r.uid }); });
-        if (r.status !== 'rejected') addAction('무시', 'reject', function () { return onyuRejectViewerAccessFn({ uid: r.uid }); });
-      }
-      onyuAccessListEl.appendChild(row);
-    });
-  }
 
   function renderPendingList() {
     if (!pendingRequests.length) {
@@ -5040,7 +5141,7 @@
   const QUICKNAV_ITEMS = [
     { id: 'section-user-search', label: '🔍 유저 검색/조회', role: 'admin', group: '신원·권한' },
     { id: 'section-verification', label: '🎙️ 인증 스트리머 관리', role: 'admin' },
-    { id: 'section-onyu-access', label: '🎮 온 이유 접근 승인', role: 'admin' },
+    { id: 'section-onyu-access', label: '🎮 온 이유 이용권 관리', role: 'admin' },
     { id: 'section-permission-delegation', label: '🗝️ 권한 위임', role: 'admin' },
     { id: 'section-stats', label: '📊 전체 통계', role: 'admin', group: '모니터링', permKey: 'viewMonitoring' },
     { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin', permKey: 'viewMonitoring' },
