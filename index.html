@@ -884,7 +884,7 @@
         <p id="streamerPromoPendingHint" class="hint" style="margin:5px 0 8px;">게시하지 않은 것이 확실한 기록만 해제하세요. 실제 게시 확인이 늦어진 기록을 해제하면 중복 게시될 수 있습니다.</p>
         <div id="streamerPromoPendingList"></div>
       </div>
-      <p class="hint" style="margin:6px 0 0;">실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 100건, 간격은 10초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
+      <p class="hint" style="margin:6px 0 0;">순차 자동 게시에서는 HTTPS SOOP 글쓰기 주소(`/station/{방송국ID}/post/write/{게시판ID}`) 형식이고 방송국 ID까지 일치하는 항목만 게시합니다. 형식이 다르거나 ID가 다른 미완료 항목은 자동으로 건너뜁니다. 실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 100건, 간격은 10초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
       <div class="promo-stats-panel">
@@ -3475,6 +3475,15 @@
     if (data.__soopPromoBatchStatus === true) renderPromoBatchStatus(data.state || {});
   });
 
+  function isValidStreamerPromoBatchLink(item) {
+    try {
+      const url = new URL(String(item && item.writeUrl || ''));
+      const pathMatch = /^\/station\/([A-Za-z0-9]+)\/post\/write\/\d+\/?$/.exec(url.pathname);
+      return url.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(url.hostname) &&
+        !!pathMatch && pathMatch[1].toLowerCase() === String(item && item.soopId || '').trim().toLowerCase();
+    } catch (_) { return false; }
+  }
+
   async function startStreamerPromoBatch() {
     if (promoBatchIsActive) return;
     const testOnly = streamerPromoBatchTestOnlyEl.checked;
@@ -3488,18 +3497,16 @@
       const refreshed = await listStreamerPromoLinksFn();
       const freshStreamers = Array.isArray(refreshed.data && refreshed.data.streamers) ? refreshed.data.streamers : [];
       renderStreamerPromoLinksList(freshStreamers, refreshed.data.recentOpened || null);
-      const eligible = freshStreamers.filter(function (item) {
+      const pendingCandidates = freshStreamers.filter(function (item) {
         if (!item || item.promotedCompleted === true || !String(item.nickname || '').trim() ||
-            !String(item.key || '').trim() || !String(item.soopId || '').trim() || !String(item.writeUrl || '').trim()) return false;
-        try {
-          const url = new URL(item.writeUrl);
-          return url.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(url.hostname) &&
-            /^\/station\/[A-Za-z0-9]+\/post\/write\/\d+\/?$/.test(url.pathname);
-        } catch (_) { return false; }
-      }).sort(function (a, b) {
+            !String(item.key || '').trim() || !String(item.soopId || '').trim()) return false;
+        return true;
+      });
+      const eligible = pendingCandidates.filter(isValidStreamerPromoBatchLink).sort(function (a, b) {
         return String(a.nickname || a.soopId).localeCompare(String(b.nickname || b.soopId), 'ko') ||
           String(a.soopId || '').localeCompare(String(b.soopId || ''));
       });
+      const skippedInvalidLinkCount = pendingCandidates.length - eligible.length;
       const selected = eligible.slice(0, testOnly ? 1 : repeatCount).map(function (item) {
         const nickname = String(item.nickname).trim();
         return {
@@ -3512,12 +3519,16 @@
           html: buildStreamerPromoHtml(nickname),
         };
       });
-      if (!selected.length) throw new Error('미완료 상태이고 유효한 글쓰기 링크가 등록된 항목이 없습니다.');
+      if (!selected.length) {
+        const detail = skippedInvalidLinkCount ? ' SOOP 글쓰기 주소 형식 또는 방송국 ID가 맞지 않아 ' + skippedInvalidLinkCount + '건을 건너뛰었습니다.' : '';
+        throw new Error('미완료 상태인 항목 중 유효한 SOOP 글쓰기 링크가 없습니다.' + detail);
+      }
       const targetNames = selected.slice(0, 5).map(function (item) { return '· ' + item.nickname; }).join('\n');
       const moreNames = selected.length > 5 ? '\n외 ' + (selected.length - 5) + '명' : '';
       const actionLabel = testOnly ? '테스트 입력' : '공개 게시';
       const prompt = actionLabel + '을 시작할까요?\n\n대상 ' + selected.length + '명' +
         (testOnly ? ' (글쓰기 화면 입력만, 게시하지 않음)' : ' · 게시 확인 후 다음 대상으로 이동') +
+        (skippedInvalidLinkCount ? '\nSOOP 링크 형식 불일치 또는 방송국 ID 불일치 ' + skippedInvalidLinkCount + '건 자동 제외' : '') +
         '\n사이클당 대기: ' + delaySeconds + '초\n\n' + targetNames + moreNames +
         (testOnly ? '' : '\n\nSOOP에 실제 공개 게시됩니다. 자동화 중 Esc 또는 중단 버튼으로 이후 작업을 멈출 수 있습니다.');
       if (!window.confirm(prompt)) {
