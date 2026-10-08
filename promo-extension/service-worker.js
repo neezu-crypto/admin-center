@@ -582,7 +582,9 @@ async function launchPromoBatchItem(runId) {
     state.status = 'preparing';
     state.message = '';
     await notifyPromoBatchState(state);
-    tab = await chrome.tabs.create({ url: 'about:blank', active: true });
+    // Prepare draft/storage before activating the writer tab. This removes the
+    // focused about:blank gap where an immediate Esc could otherwise be lost.
+    tab = await chrome.tabs.create({ url: 'about:blank', active: false });
     let latestState = (await chrome.storage.local.get(PROMO_BATCH_KEY))[PROMO_BATCH_KEY];
     if (!latestState || latestState.runId !== runId || latestState.cancelRequested || !isActivePromoBatch(latestState)) {
       await chrome.tabs.remove(tab.id).catch(() => null);
@@ -757,7 +759,7 @@ async function handlePromoBatchWriterMessage(message, sender, sendResponse) {
     const currentItem = state && state.items && state.items[state.currentIndex];
     const senderStationId = promoWriterSenderStationId(sender);
     const sameCurrentStation = !!(currentItem && senderStationId && promoBatchItemStationId(currentItem) === senderStationId);
-    if (!state || state.runId !== runId || !isActivePromoBatch(state) ||
+    if (!state || (runId && state.runId !== runId) || !isActivePromoBatch(state) ||
         (state.currentTabId !== sender.tab.id && !sameCurrentStation)) {
       return sendResponse({ ok: false, reason: 'batch-item-not-current' }), true;
     }

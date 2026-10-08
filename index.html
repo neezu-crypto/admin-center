@@ -1522,6 +1522,8 @@
   const streamerPromoBatchStatusEl = document.getElementById('streamerPromoBatchStatus');
   const promoBatchPendingCommands = new Map();
   let promoBatchIsActive = false;
+  let promoBatchStartPending = false;
+  let promoBatchCancelRequestedWhileStarting = false;
   const publicPromoStatsDaysEl = document.getElementById('publicPromoStatsDays');
   const publicPromoStatsRefreshBtn = document.getElementById('publicPromoStatsRefreshBtn');
   const publicPromoStatsStatusEl = document.getElementById('publicPromoStatsStatus');
@@ -3431,22 +3433,40 @@
         renderPromoBatchStatus({ status: 'idle' });
         return;
       }
+      promoBatchStartPending = true;
+      promoBatchCancelRequestedWhileStarting = false;
+      renderPromoBatchStatus({ status: 'starting' });
       const response = await promoBatchRequest('start', {
         items: selected,
         repeatCount: selected.length,
         delayMs: delaySeconds * 1000,
         testOnly: testOnly,
       });
+      promoBatchStartPending = false;
+      if (promoBatchCancelRequestedWhileStarting) {
+        promoBatchCancelRequestedWhileStarting = false;
+        const stopped = await promoBatchRequest('stop');
+        renderPromoBatchStatus(stopped.state || { status: 'cancelled' });
+        return;
+      }
       renderPromoBatchStatus(response.state || { status: 'starting' });
     } catch (error) {
+      promoBatchStartPending = false;
+      promoBatchCancelRequestedWhileStarting = false;
+      renderPromoBatchStatus({ status: 'idle' });
       streamerPromoBatchStatusEl.textContent = error && error.message || '자동 게시를 시작하지 못했습니다.';
-      streamerPromoBatchStartBtn.disabled = false;
       console.warn('[SOOP 홍보 진단] 자동 게시 시작 실패:', error);
     }
   }
 
   async function stopStreamerPromoBatch() {
     if (!promoBatchIsActive) return;
+    if (promoBatchStartPending) {
+      promoBatchCancelRequestedWhileStarting = true;
+      streamerPromoBatchStopBtn.disabled = true;
+      streamerPromoBatchStatusEl.textContent = '시작 요청이 확인되면 바로 중단합니다…';
+      return;
+    }
     streamerPromoBatchStopBtn.disabled = true;
     streamerPromoBatchStatusEl.textContent = '중단 요청을 전달하는 중…';
     try {

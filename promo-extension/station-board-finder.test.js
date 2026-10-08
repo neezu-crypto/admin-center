@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 const finder = require('./station-board-finder.js');
 const profileHover = require('./profile-promo-hover.js');
 
@@ -58,7 +59,7 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.37');
+  assert.equal(manifest.version, '0.9.41');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
@@ -73,13 +74,17 @@ test('순차 홍보 자동화는 미완료 대상·횟수·대기시간을 제�
   const adminSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const workerSource = fs.readFileSync(path.join(__dirname, 'service-worker.js'), 'utf8');
   const writerSource = fs.readFileSync(path.join(__dirname, 'soop-writer.js'), 'utf8');
+  const escapeSource = fs.readFileSync(path.join(__dirname, 'promo-batch-escape.js'), 'utf8');
   const bridgeSource = fs.readFileSync(path.join(__dirname, 'admin-bridge.js'), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
   assert.match(adminSource, /listStreamerPromoLinksFn\(\)/);
   assert.match(adminSource, /item\.promotedCompleted === true/);
   assert.match(adminSource, /streamerPromoBatchCount[^\n]*max="10"/);
   assert.match(adminSource, /streamerPromoBatchDelay[^\n]*min="30" max="600"/);
   assert.match(adminSource, /streamerPromoBatchTestOnly/);
   assert.match(adminSource, /event\.key === 'Escape'/);
+  assert.match(adminSource, /promoBatchCancelRequestedWhileStarting/);
+  assert.match(adminSource, /시작 요청이 확인되면 바로 중단합니다/);
   assert.match(workerSource, /PROMO_BATCH_MAX_ITEMS = 10/);
   assert.match(workerSource, /PROMO_BATCH_MIN_DELAY_MS = 30000/);
   assert.match(workerSource, /PROMO_BATCH_MAX_DELAY_MS = 10 \* 60 \* 1000/);
@@ -89,8 +94,39 @@ test('순차 홍보 자동화는 미완료 대상·횟수·대기시간을 제�
   assert.match(writerSource, /function findUniquePublishButton\(\)/);
   assert.match(writerSource, /sendPromoBatchMessage\('promoBatchTestReady'\)/);
   assert.ok(writerSource.indexOf("await sendPromoBatchMessage('promoBatchPublishDispatched')") < writerSource.indexOf('target.button.click()'));
-  assert.match(writerSource, /sendPromoBatchMessage\('cancelPromoBatchFromSoop'\)/);
+  assert.match(escapeSource, /cancelPromoBatchFromSoop/);
+  assert.match(escapeSource, /event\.key !== 'Escape'/);
+  assert.ok(manifest.content_scripts.some((script) => script.js.includes('promo-batch-escape.js') && script.run_at === 'document_start'));
+  assert.match(workerSource, /chrome\.tabs\.create\(\{ url: 'about:blank', active: false \}\)/);
+  assert.match(workerSource, /\(runId && state\.runId !== runId\)/);
   assert.match(bridgeSource, /data\.__soopPromoBatchRequest !== true/);
+});
+
+test('SOOP 글쓰기 시작 단계에서 Esc를 배치 중단으로 전달한다', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'promo-batch-escape.js'), 'utf8');
+  let keydownListener = null;
+  let capture = false;
+  const messages = [];
+  vm.runInNewContext(source, {
+    location: { pathname: '/station/fonetree/post/write/117555311' },
+    document: { addEventListener(type, listener, useCapture) {
+      if (type === 'keydown') {
+        keydownListener = listener;
+        capture = useCapture;
+      }
+    } },
+    chrome: { runtime: { sendMessage(message) {
+      messages.push(message);
+      return Promise.resolve({ ok: true });
+    } } },
+  });
+
+  assert.equal(typeof keydownListener, 'function');
+  assert.equal(capture, true);
+  keydownListener({ key: 'Escape' });
+  assert.deepEqual(messages.map((message) => ({ type: message.type, runId: message.runId })), [
+    { type: 'cancelPromoBatchFromSoop', runId: '' },
+  ]);
 });
 
 test('댓글 작성자 아바타 버튼에서 SOOP 아이디를 안전하게 읽는다', () => {

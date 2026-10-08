@@ -55,15 +55,6 @@
     }
   });
 
-  document.addEventListener('keydown', function (event) {
-    if (event.key !== 'Escape' || !promoBatchRunId || !promoBatchActive) return;
-    event.preventDefault();
-    event.stopPropagation();
-    autoPublishCancelled = true;
-    trace('promo-batch-escape-stop-requested', { isTrusted: event.isTrusted });
-    sendPromoBatchMessage('cancelPromoBatchFromSoop');
-  }, true);
-
   function isVisible(element) {
     if (!element || !element.getBoundingClientRect) return false;
     const rect = element.getBoundingClientRect();
