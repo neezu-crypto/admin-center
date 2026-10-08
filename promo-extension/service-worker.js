@@ -10,7 +10,7 @@ const PROMO_BATCH_KEY = 'soopPromoBatchRun';
 const PROMO_BATCH_NEXT_ALARM = 'soopPromoBatchNext';
 const PROMO_BATCH_TIMEOUT_ALARM = 'soopPromoBatchTimeout';
 const PROMO_BATCH_MAX_ITEMS = 10;
-const PROMO_BATCH_MIN_DELAY_MS = 30000;
+const PROMO_BATCH_MIN_DELAY_MS = 10000;
 const PROMO_BATCH_MAX_DELAY_MS = 10 * 60 * 1000;
 const PROMO_BATCH_PUBLISH_TIMEOUT_MS = 2 * 60 * 1000;
 const diagnosticCheckLogKeys = new Set();
@@ -517,7 +517,7 @@ async function startPromoBatch(message, sender) {
   const validated = validatePromoBatchItems(message.items, repeatCount, testOnly);
   if (!validated.ok) return validated;
   if (!Number.isInteger(delayMs) || delayMs < PROMO_BATCH_MIN_DELAY_MS || delayMs > PROMO_BATCH_MAX_DELAY_MS) {
-    return { ok: false, reason: 'invalid-delay', message: '사이클 대기시간은 30초~10분으로 설정해주세요.' };
+    return { ok: false, reason: 'invalid-delay', message: '사이클 대기시간은 10초~10분으로 설정해주세요.' };
   }
   const currentStorage = await chrome.storage.local.get(null);
   const currentTime = Date.now();

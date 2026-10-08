@@ -59,7 +59,7 @@ test('미확인 프로필 단축키 진단을 SOOP 페이지에서 서비스 워
   assert.match(workerSource, /\[SOOP 홍보 단축키 진단\]/);
   assert.match(profileSource, /type: 'promoShortcutDiagnostic'/);
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.version, '0.9.42');
+  assert.equal(manifest.version, '0.9.43');
   assert.equal(manifest.commands['find-unconfirmed-profile'].suggested_key.default, 'Alt+Shift+U');
   assert.match(workerSource, /chrome\.commands\.onCommand\.addListener/);
   assert.match(workerSource, /findUnconfirmedPromoProfile/);
@@ -80,13 +80,13 @@ test('순차 홍보 자동화는 미완료 대상·횟수·대기시간을 제�
   assert.match(adminSource, /listStreamerPromoLinksFn\(\)/);
   assert.match(adminSource, /item\.promotedCompleted === true/);
   assert.match(adminSource, /streamerPromoBatchCount[^\n]*max="10"/);
-  assert.match(adminSource, /streamerPromoBatchDelay[^\n]*min="30" max="600"/);
+  assert.match(adminSource, /streamerPromoBatchDelay[^\n]*min="10" max="600" value="30"/);
   assert.match(adminSource, /streamerPromoBatchTestOnly/);
   assert.match(adminSource, /event\.key === 'Escape'/);
   assert.match(adminSource, /promoBatchCancelRequestedWhileStarting/);
   assert.match(adminSource, /시작 요청이 확인되면 바로 중단합니다/);
   assert.match(workerSource, /PROMO_BATCH_MAX_ITEMS = 10/);
-  assert.match(workerSource, /PROMO_BATCH_MIN_DELAY_MS = 30000/);
+  assert.match(workerSource, /PROMO_BATCH_MIN_DELAY_MS = 10000/);
   assert.match(workerSource, /PROMO_BATCH_MAX_DELAY_MS = 10 \* 60 \* 1000/);
   assert.match(workerSource, /testOnly && rawItems\.length !== 1/);
   assert.match(workerSource, /if \(testOnly\) trace\(state\.runId, 'promo-batch-test-started'/);

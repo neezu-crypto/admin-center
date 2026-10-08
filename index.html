@@ -867,7 +867,7 @@
           건
         </label>
         <label style="display:flex; align-items:center; gap:5px; font-size:12px;">게시 확인 후 대기
-          <input id="streamerPromoBatchDelay" type="number" min="30" max="600" value="30" inputmode="numeric" aria-label="사이클당 대기 시간" style="width:70px; padding:6px; border:1px solid rgba(20,20,22,0.16); border-radius:7px;">
+          <input id="streamerPromoBatchDelay" type="number" min="10" max="600" value="30" inputmode="numeric" aria-label="사이클당 대기 시간" style="width:70px; padding:6px; border:1px solid rgba(20,20,22,0.16); border-radius:7px;">
           초
         </label>
         <label style="display:flex; align-items:center; gap:5px; font-size:12px;">
@@ -878,7 +878,7 @@
         <button id="streamerPromoBatchStopBtn" class="perm-refresh-btn" type="button" disabled>중단 (Esc)</button>
         <span id="streamerPromoBatchStatus" class="hint" style="margin:0; flex:1 1 220px;" role="status" aria-live="polite">자동 게시 대기 중 · 완료 표시되지 않은 항목만 대상</span>
       </div>
-      <p class="hint" style="margin:6px 0 0;">실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 10건, 간격은 30초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
+      <p class="hint" style="margin:6px 0 0;">실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 10건, 간격은 10초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
       <div class="promo-stats-panel">
@@ -3388,7 +3388,7 @@
     if (promoBatchIsActive) return;
     const testOnly = streamerPromoBatchTestOnlyEl.checked;
     const repeatCount = Math.max(1, Math.min(10, Math.trunc(Number(streamerPromoBatchCountEl.value) || 1)));
-    const delaySeconds = Math.max(30, Math.min(600, Math.trunc(Number(streamerPromoBatchDelayEl.value) || 30)));
+    const delaySeconds = Math.max(10, Math.min(600, Math.trunc(Number(streamerPromoBatchDelayEl.value) || 30)));
     streamerPromoBatchCountEl.value = String(testOnly ? 1 : repeatCount);
     streamerPromoBatchDelayEl.value = String(delaySeconds);
     streamerPromoBatchStartBtn.disabled = true;
