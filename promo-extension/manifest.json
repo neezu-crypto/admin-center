@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SOOP 홍보글·게시판 찾기",
-  "version": "0.9.33",
+  "version": "0.9.34",
   "description": "SOOP 방송국에서 홍보 후보 게시판과 글쓰기 링크를 찾고, 스트리머 인증 및 온이유 후원 알림을 확인합니다.",
   "permissions": ["storage", "clipboardWrite", "alarms"],
   "host_permissions": [

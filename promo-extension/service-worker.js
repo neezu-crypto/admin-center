@@ -70,6 +70,23 @@ async function ensureFreshOnyuGiftMonitorSession() {
   return session;
 }
 
+function getFirebaseUidFromIdToken(idToken) {
+  const parts = String(idToken || '').split('.');
+  if (parts.length !== 3 || !parts[1]) throw new Error('monitor-id-token-invalid');
+  const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+  const paddedPayload = payload + '='.repeat((4 - payload.length % 4) % 4);
+  let claims;
+  try {
+    claims = JSON.parse(atob(paddedPayload));
+  } catch (_) {
+    throw new Error('monitor-id-token-invalid');
+  }
+  const subject = String(claims.sub || '');
+  const userId = String(claims.user_id || '');
+  if (subject && userId && subject !== userId) throw new Error('monitor-id-token-uid-mismatch');
+  return userId || subject || String(claims.uid || '');
+}
+
 async function exchangeOnyuGiftMonitorCustomToken(customToken, adminUid) {
   const response = await fetch(ONYU_GIFT_MONITOR_AUTH_URL, {
     method: 'POST',
@@ -77,11 +94,15 @@ async function exchangeOnyuGiftMonitorCustomToken(customToken, adminUid) {
     body: JSON.stringify({ token: customToken, returnSecureToken: true }),
   });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.idToken || !result.refreshToken || !result.localId) {
+  if (!response.ok || !result.idToken || !result.refreshToken) {
     throw new Error('monitor-token-exchange-failed-' + response.status);
   }
+  // signInWithCustomToken returns idToken/refreshToken/expiresIn, not localId.
+  // Firebase's signed ID token carries the authenticated UID in sub/user_id.
+  const monitorUid = String(result.localId || getFirebaseUidFromIdToken(result.idToken));
+  if (!monitorUid) throw new Error('monitor-token-exchange-uid-missing');
   const session = {
-    monitorUid: String(result.localId),
+    monitorUid,
     adminUid: String(adminUid || ''),
     idToken: result.idToken,
     refreshToken: result.refreshToken,
