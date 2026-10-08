@@ -2,6 +2,7 @@ const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
 const { onValueCreated, onValueUpdated, onValueWritten } = require('firebase-functions/v2/database');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
@@ -2419,6 +2420,173 @@ const onyuGetViewerAccess = onCall(async (request) => {
 // 로그인 유저가 관리자 방송국에 후원해 본인(인증 스트리머) 이용권을 구매하거나
 // 인증 스트리머에게 선물하는 신청 흐름. 별풍선 50개, 지급은 관리자 검수 후다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
+const ONYU_GIFT_MONITOR_UID_PREFIX = 'onyu_gift_monitor_';
+
+function onyuGiftMonitorUid(adminUid) {
+  return ONYU_GIFT_MONITOR_UID_PREFIX + String(adminUid || '');
+}
+
+async function requireOnyuGiftMonitorAdmin(request) {
+  const uid = requireAuth(request);
+  const claims = request.auth.token || {};
+  const adminUid = String(claims.onyuGiftAdminUid || '');
+  if (claims.onyuGiftMonitor !== true || !adminUid || uid !== onyuGiftMonitorUid(adminUid) ||
+      !(await isAdminUid(adminUid))) {
+    throw new HttpsError('permission-denied', '이 이용권 모니터링 세션은 더 이상 유효하지 않습니다. 통합 관리 센터에 다시 로그인해 주세요.');
+  }
+  return adminUid;
+}
+
+function requestAsOnyuGiftAdmin(request, adminUid) {
+  if (!request.auth || request.auth.uid === adminUid) return request;
+  const token = Object.assign({}, request.auth.token || {}, {
+    uid: adminUid,
+    sub: adminUid,
+    user_id: adminUid,
+  });
+  return Object.assign({}, request, {
+    auth: Object.assign({}, request.auth, { uid: adminUid, token }),
+  });
+}
+
+async function resolveOnyuGiftReviewActor(request) {
+  const token = request.auth && request.auth.token || {};
+  if (token.onyuGiftMonitor === true) {
+    const adminUid = await requireOnyuGiftMonitorAdmin(request);
+    return { adminUid, request: requestAsOnyuGiftAdmin(request, adminUid) };
+  }
+  return { adminUid: await requireAdmin(request), request };
+}
+
+const onyuCreateGiftBackgroundMonitorSession = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  // Background access is intentionally unavailable to the temporary email fallback:
+  // its owner must have an explicit adminCenter/adminUids registration.
+  if (!(await isAdminUid(adminUid))) {
+    throw new HttpsError('failed-precondition', '관리자 UID 등록을 마친 뒤 백그라운드 모니터링을 시작할 수 있습니다.');
+  }
+  const monitorUid = onyuGiftMonitorUid(adminUid);
+  const auth = getAuth();
+  try {
+    await auth.getUser(monitorUid);
+  } catch (error) {
+    if (!error || error.code !== 'auth/user-not-found') throw error;
+    try {
+      await auth.createUser({ uid: monitorUid });
+    } catch (createError) {
+      if (!createError || createError.code !== 'auth/uid-already-exists') throw createError;
+    }
+  }
+  await auth.setCustomUserClaims(monitorUid, { onyuGiftMonitor: true, onyuGiftAdminUid: adminUid });
+  return { customToken: await auth.createCustomToken(monitorUid) };
+});
+
+function onyuGiftHasEligibleBackgroundRequest(requests, now) {
+  return Object.values(requests || {}).some((gift) => gift && gift.status === 'pending' &&
+    normalizeSoopId(gift.donorSoopId) && Number(gift.balloons) === ONYU_STREAMER_GIFT_BALLOONS &&
+    Number(gift.donationCompletedAt) > 0 && Number(gift.requestedAt) > now - 24 * 60 * 60 * 1000);
+}
+
+const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB' }, async (request, response) => {
+  const origin = String(request.get('Origin') || '');
+  const allowedOrigin = origin === 'https://neezu-crypto.github.io' || /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
+  response.set('Vary', 'Origin');
+  if (allowedOrigin) {
+    response.set('Access-Control-Allow-Origin', origin);
+    response.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    response.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  }
+  if (request.method === 'OPTIONS') {
+    response.status(allowedOrigin ? 204 : 403).send('');
+    return;
+  }
+  if (request.method !== 'GET' || !allowedOrigin) {
+    response.status(request.method === 'GET' ? 403 : 405).json({ message: '허용되지 않은 요청입니다.' });
+    return;
+  }
+  const bearer = String(request.get('Authorization') || '').match(/^Bearer\s+(.+)$/i);
+  if (!bearer) {
+    response.status(401).json({ message: '인증이 필요합니다.' });
+    return;
+  }
+
+  let decoded;
+  let accessMode;
+  let adminUid;
+  try {
+    decoded = await getAuth().verifyIdToken(bearer[1]);
+    if (decoded.onyuGiftMonitor === true) {
+      adminUid = await requireOnyuGiftMonitorAdmin({ auth: { uid: decoded.uid, token: decoded } });
+      accessMode = 'monitor';
+    } else if (await isAdminUid(decoded.uid)) {
+      adminUid = decoded.uid;
+      accessMode = 'admin';
+    } else {
+      throw new Error('admin-required');
+    }
+  } catch (_) {
+    response.status(403).json({ message: '이용권 신청 스트림 접근 권한이 없습니다.' });
+    return;
+  }
+
+  response.status(200);
+  response.set('Content-Type', 'text/event-stream; charset=utf-8');
+  response.set('Cache-Control', 'no-cache, no-transform');
+  response.set('Connection', 'keep-alive');
+  response.set('X-Accel-Buffering', 'no');
+  response.flushHeaders();
+
+  let closed = false;
+  let active = false;
+  const requestRef = getDatabase().ref('onyuVn/streamerGameGiftRequests');
+  const adminRef = getDatabase().ref('adminCenter/adminUids/' + adminUid);
+  const writeEvent = (name, data) => {
+    if (closed || response.destroyed) return;
+    response.write('event: ' + name + '\ndata: ' + JSON.stringify(data || {}) + '\n\n');
+  };
+  const sendSnapshot = (snapshot) => {
+    const value = snapshot.val() || {};
+    if (accessMode === 'monitor') {
+      active = onyuGiftHasEligibleBackgroundRequest(value, Date.now());
+      writeEvent('watch-state', { active, expiresAt: active ? Date.now() + 60000 : 0 });
+      return;
+    }
+    const requests = Object.keys(value).map((id) => Object.assign({}, value[id] || {}, { requestId: id }))
+      .sort((a, b) => (Number(b.updatedAt || b.requestedAt) || 0) - (Number(a.updatedAt || a.requestedAt) || 0));
+    writeEvent('requests', { requests });
+  };
+  const onRequestValue = (snapshot) => sendSnapshot(snapshot);
+  const onRequestError = (error) => {
+    console.error('온이유 이용권 백그라운드 실시간 구독 실패:', String(error && error.message || error).slice(0, 160));
+    writeEvent('stream-error', { reason: 'database-subscription-failed' });
+    cleanup();
+  };
+  const onAdminValue = (snapshot) => {
+    if (snapshot.val() === true) return;
+    writeEvent('auth-revoked', { reason: 'admin-access-revoked' });
+    cleanup();
+  };
+  const heartbeat = setInterval(() => {
+    if (accessMode === 'monitor') writeEvent('heartbeat', { active, expiresAt: active ? Date.now() + 60000 : 0 });
+    else writeEvent('heartbeat', { at: Date.now() });
+  }, 20000);
+  const maxDuration = setTimeout(() => {
+    writeEvent('session-expiring', {});
+    cleanup();
+  }, 55 * 60 * 1000);
+  function cleanup() {
+    if (closed) return;
+    closed = true;
+    clearInterval(heartbeat);
+    clearTimeout(maxDuration);
+    requestRef.off('value', onRequestValue);
+    adminRef.off('value', onAdminValue);
+    if (!response.destroyed) response.end();
+  }
+  response.on('close', cleanup);
+  adminRef.on('value', onAdminValue, onRequestError);
+  requestRef.on('value', onRequestValue, onRequestError);
+});
 const ONYU_STREAMER_GIFT_TARGET_LOCK_PATH = 'onyuVn/streamerGameGiftTargetLocks';
 
 async function reserveOnyuStreamerGiftTarget(db, soopId, requestId, requesterUid, now) {
@@ -2788,7 +2956,9 @@ const onyuReviewStreamerGameGift = onCall(async (request) => {
 });
 
 const onyuConfirmStreamerGameGiftFromNotification = onCall(async (request) => {
-  const adminUid = await requireAdmin(request);
+  const reviewer = await resolveOnyuGiftReviewActor(request);
+  const adminUid = reviewer.adminUid;
+  request = reviewer.request;
   const senderSoopId = normalizeSoopId(request.data && request.data.senderSoopId);
   const balloons = Number(request.data && request.data.balloons);
   const observedAt = Number(request.data && request.data.observedAt);
@@ -3618,6 +3788,8 @@ module.exports = {
   onyuListStreamerGameGifts,
   onyuReviewStreamerGameGift,
   onyuConfirmStreamerGameGiftFromNotification,
+  onyuCreateGiftBackgroundMonitorSession,
+  onyuGiftBackgroundFeed,
   onyuStartSession,
   onyuListViewerAccessRequests,
   onyuApproveViewerAccess,

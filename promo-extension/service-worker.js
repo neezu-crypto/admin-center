@@ -8,6 +8,277 @@ const COMPLETION_RETRY_MS = 5000;
 const CONTENT_CONFIRMATION_STABILITY_MS = 500;
 const diagnosticCheckLogKeys = new Set();
 const ONYU_GIFT_WATCH_KEY = 'soopOnyuGameGiftNotificationWatch';
+const ONYU_GIFT_MONITOR_SESSION_KEY = 'onyuGiftBackgroundMonitorSession';
+const ONYU_GIFT_MONITOR_ALARM = 'onyuGiftBackgroundMonitorReconnect';
+const ONYU_GIFT_MONITOR_API_KEY = 'AIzaSyAZcjQPHphENs-Bb7IfdL2qTtOMhJrRP54';
+const ONYU_GIFT_MONITOR_AUTH_URL = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=' + ONYU_GIFT_MONITOR_API_KEY;
+const ONYU_GIFT_MONITOR_REFRESH_URL = 'https://securetoken.googleapis.com/v1/token?key=' + ONYU_GIFT_MONITOR_API_KEY;
+const ONYU_GIFT_MONITOR_FEED_URL = 'https://us-central1-soop-stock-market.cloudfunctions.net/onyuGiftBackgroundFeed';
+const ONYU_GIFT_MONITOR_CONFIRM_URL = 'https://us-central1-soop-stock-market.cloudfunctions.net/onyuConfirmStreamerGameGiftFromNotification';
+let onyuGiftFeedController = null;
+let onyuGiftFeedConnecting = false;
+let onyuGiftFeedConnected = false;
+let onyuGiftFeedRunId = 0;
+let onyuGiftWatchTabQueue = Promise.resolve();
+let onyuGiftMonitorStatusTabId = null;
+
+function logOnyuGiftBackground(stage, details) {
+  trace('', 'onyu-gift-background-' + stage, details || {});
+}
+
+function reportOnyuGiftMonitorStatus(state, reason) {
+  if (!Number.isInteger(onyuGiftMonitorStatusTabId)) return;
+  chrome.tabs.sendMessage(onyuGiftMonitorStatusTabId, {
+    type: 'onyuGiftBackgroundMonitorStatus', state, reason: reason || '',
+  }).catch(() => {});
+}
+
+async function onyuGiftMonitorSession() {
+  const state = await chrome.storage.session.get(ONYU_GIFT_MONITOR_SESSION_KEY);
+  return state[ONYU_GIFT_MONITOR_SESSION_KEY] || null;
+}
+
+async function refreshOnyuGiftMonitorIdToken(session) {
+  if (!session || !session.refreshToken) throw new Error('monitor-session-missing');
+  const body = new URLSearchParams();
+  body.set('grant_type', 'refresh_token');
+  body.set('refresh_token', session.refreshToken);
+  const response = await fetch(ONYU_GIFT_MONITOR_REFRESH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.id_token || !result.refresh_token) {
+    throw new Error('monitor-token-refresh-failed-' + response.status);
+  }
+  const nextSession = Object.assign({}, session, {
+    idToken: result.id_token,
+    refreshToken: result.refresh_token,
+    idTokenExpiresAt: Date.now() + Math.max(60, Number(result.expires_in) || 3600) * 1000,
+  });
+  await chrome.storage.session.set({ [ONYU_GIFT_MONITOR_SESSION_KEY]: nextSession });
+  return nextSession;
+}
+
+async function ensureFreshOnyuGiftMonitorSession() {
+  let session = await onyuGiftMonitorSession();
+  if (!session) return null;
+  if (!session.idToken || Number(session.idTokenExpiresAt) <= Date.now() + 90000) {
+    session = await refreshOnyuGiftMonitorIdToken(session);
+  }
+  return session;
+}
+
+async function exchangeOnyuGiftMonitorCustomToken(customToken, adminUid) {
+  const response = await fetch(ONYU_GIFT_MONITOR_AUTH_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: customToken, returnSecureToken: true }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.idToken || !result.refreshToken || !result.localId) {
+    throw new Error('monitor-token-exchange-failed-' + response.status);
+  }
+  const session = {
+    monitorUid: String(result.localId),
+    adminUid: String(adminUid || ''),
+    idToken: result.idToken,
+    refreshToken: result.refreshToken,
+    idTokenExpiresAt: Date.now() + Math.max(60, Number(result.expiresIn) || 3600) * 1000,
+  };
+  await chrome.storage.session.set({ [ONYU_GIFT_MONITOR_SESSION_KEY]: session });
+  return session;
+}
+
+async function notifyOnyuGiftWatchTabs(active, expiresAt) {
+  const tabs = await chrome.tabs.query({ url: ['https://sooplive.com/*', 'https://www.sooplive.com/*'] });
+  const validTabs = tabs.filter((tab) => Number.isInteger(tab.id));
+  if (!active) {
+    await chrome.storage.local.remove(ONYU_GIFT_WATCH_KEY);
+    await Promise.all(validTabs.map((tab) => chrome.tabs.sendMessage(tab.id, {
+      type: 'setOnyuGameGiftNotificationWatch', active: false, expiresAt: 0, tabId: null,
+    }).catch(() => null)));
+    return { soopTabCount: 0, selectedTabId: null };
+  }
+
+  const saved = await chrome.storage.local.get(ONYU_GIFT_WATCH_KEY);
+  const previous = saved[ONYU_GIFT_WATCH_KEY] || {};
+  let selected = validTabs.find((tab) => tab.id === previous.tabId) ||
+    validTabs.find((tab) => tab.active) || validTabs[0] || null;
+  const watch = { active: true, expiresAt: Number(expiresAt) || Date.now() + 60000, tabId: selected ? selected.id : null };
+  await chrome.storage.local.set({ [ONYU_GIFT_WATCH_KEY]: watch });
+  await Promise.all(validTabs.map((tab) => chrome.tabs.sendMessage(tab.id, {
+    type: 'setOnyuGameGiftNotificationWatch',
+    active: !!(selected && tab.id === selected.id),
+    expiresAt: selected && tab.id === selected.id ? watch.expiresAt : 0,
+    tabId: selected && tab.id === selected.id ? selected.id : null,
+  }).catch(() => null)));
+  return { soopTabCount: selected ? 1 : 0, selectedTabId: selected ? selected.id : null };
+}
+
+async function applyOnyuGiftMonitorFeedEvent(eventName, data) {
+  if (eventName === 'auth-revoked') {
+    logOnyuGiftBackground('admin-access-revoked', {});
+    await stopOnyuGiftBackgroundMonitor(true);
+    reportOnyuGiftMonitorStatus('failed', 'admin-access-revoked');
+    return;
+  }
+  if (eventName === 'stream-error') {
+    logOnyuGiftBackground('feed-error', { reason: String(data && data.reason || '') });
+    return;
+  }
+  if (eventName !== 'watch-state' && eventName !== 'heartbeat') return;
+  const active = data && data.active === true;
+  const expiresAt = active ? Number(data.expiresAt) || Date.now() + 60000 : 0;
+  await notifyOnyuGiftWatchTabs(active, expiresAt);
+  // A Chrome extension service worker is suspendable. Touch extension storage for
+  // each server heartbeat so the live stream can remain attached while the browser runs.
+  await chrome.storage.session.set({ onyuGiftMonitorLastHeartbeatAt: Date.now() });
+}
+
+async function runOnyuGiftBackgroundFeed() {
+  if (onyuGiftFeedConnecting || onyuGiftFeedConnected) return;
+  const runId = ++onyuGiftFeedRunId;
+  onyuGiftFeedConnecting = true;
+  let controller = null;
+  try {
+    const session = await ensureFreshOnyuGiftMonitorSession();
+    if (!session) {
+      await chrome.alarms.clear(ONYU_GIFT_MONITOR_ALARM);
+      return;
+    }
+    controller = new AbortController();
+    onyuGiftFeedController = controller;
+    const response = await fetch(ONYU_GIFT_MONITOR_FEED_URL, {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + session.idToken, Accept: 'text/event-stream' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (!response.ok || !response.body) {
+      if (response.status === 401 || response.status === 403) {
+        await chrome.storage.session.remove([ONYU_GIFT_MONITOR_SESSION_KEY, 'onyuGiftMonitorLastHeartbeatAt']);
+        await notifyOnyuGiftWatchTabs(false, 0);
+        logOnyuGiftBackground('feed-auth-rejected', { status: response.status });
+        reportOnyuGiftMonitorStatus('failed', 'feed-auth-rejected');
+      } else {
+        logOnyuGiftBackground('feed-connect-failed', { status: response.status });
+        reportOnyuGiftMonitorStatus('reconnecting', 'feed-connect-failed');
+      }
+      return;
+    }
+    onyuGiftFeedConnected = true;
+    logOnyuGiftBackground('feed-connected', {});
+    reportOnyuGiftMonitorStatus('connected');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (runId === onyuGiftFeedRunId) {
+      const part = await reader.read();
+      if (part.done) break;
+      buffer += decoder.decode(part.value, { stream: true });
+      let boundary;
+      while ((boundary = buffer.search(/\r?\n\r?\n/)) >= 0) {
+        const frame = buffer.slice(0, boundary);
+        const delimiter = buffer.slice(boundary).match(/^\r?\n\r?\n/)[0];
+        buffer = buffer.slice(boundary + delimiter.length);
+        let eventName = 'message';
+        const dataLines = [];
+        frame.split(/\r?\n/).forEach((line) => {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        });
+        if (dataLines.length) {
+          try { await applyOnyuGiftMonitorFeedEvent(eventName, JSON.parse(dataLines.join('\n'))); }
+          catch (error) { logOnyuGiftBackground('feed-event-failed', { event: eventName, error: String(error && error.message || error).slice(0, 100) }); }
+        }
+      }
+    }
+    try { await reader.cancel(); } catch (_) { /* The feed may have closed already. */ }
+  } catch (error) {
+    if (!controller || !controller.signal.aborted) {
+      logOnyuGiftBackground('feed-disconnected', { error: String(error && error.message || error).slice(0, 120) });
+      reportOnyuGiftMonitorStatus('reconnecting', 'feed-disconnected');
+    }
+  } finally {
+    if (runId === onyuGiftFeedRunId) {
+      onyuGiftFeedConnected = false;
+      onyuGiftFeedConnecting = false;
+      onyuGiftFeedController = null;
+      const session = await onyuGiftMonitorSession().catch(() => null);
+      if (session) chrome.alarms.create(ONYU_GIFT_MONITOR_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
+    }
+  }
+}
+
+async function startOnyuGiftBackgroundMonitor(customToken, adminUid, statusTabId) {
+  if (typeof customToken !== 'string' || customToken.length > 5000 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(customToken)) {
+    throw new Error('invalid-monitor-token');
+  }
+  const current = await onyuGiftMonitorSession();
+  onyuGiftMonitorStatusTabId = Number.isInteger(statusTabId) ? statusTabId : null;
+  if (current && current.adminUid === String(adminUid || '') && current.refreshToken) {
+    await chrome.alarms.create(ONYU_GIFT_MONITOR_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
+    runOnyuGiftBackgroundFeed();
+    reportOnyuGiftMonitorStatus('starting');
+    return { ok: true, reused: true };
+  }
+  await stopOnyuGiftBackgroundMonitor(false);
+  const session = await exchangeOnyuGiftMonitorCustomToken(customToken, adminUid);
+  if (String(session.monitorUid).indexOf('onyu_gift_monitor_') !== 0) {
+    await stopOnyuGiftBackgroundMonitor(false);
+    throw new Error('monitor-identity-mismatch');
+  }
+  await chrome.alarms.create(ONYU_GIFT_MONITOR_ALARM, { delayInMinutes: 0.5, periodInMinutes: 0.5 });
+  logOnyuGiftBackground('session-started', {});
+  runOnyuGiftBackgroundFeed();
+  reportOnyuGiftMonitorStatus('starting');
+  return { ok: true, reused: false };
+}
+
+async function stopOnyuGiftBackgroundMonitor(clearWatch) {
+  onyuGiftFeedRunId += 1;
+  onyuGiftFeedConnected = false;
+  onyuGiftFeedConnecting = false;
+  if (onyuGiftFeedController) onyuGiftFeedController.abort();
+  onyuGiftFeedController = null;
+  await chrome.alarms.clear(ONYU_GIFT_MONITOR_ALARM).catch(() => null);
+  await chrome.storage.session.remove([ONYU_GIFT_MONITOR_SESSION_KEY, 'onyuGiftMonitorLastHeartbeatAt']).catch(() => null);
+  if (clearWatch !== false) await notifyOnyuGiftWatchTabs(false, 0).catch(() => null);
+  reportOnyuGiftMonitorStatus('stopped');
+}
+
+async function confirmOnyuGiftNotificationInBackground(message) {
+  const senderSoopId = String(message.senderSoopId || '').trim().toLowerCase();
+  const balloons = Number(message.balloons);
+  const observedAt = Number(message.observedAt);
+  const eventAtMin = Number(message.eventAtMin);
+  const eventAtMax = Number(message.eventAtMax);
+  const candidateFingerprint = String(message.candidateFingerprint || '').toLowerCase();
+  if (!/^[a-z0-9]{2,20}$/.test(senderSoopId) || balloons !== 50 ||
+      !Number.isFinite(observedAt) || !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) ||
+      !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) return { ok: false, reason: 'invalid-notification-candidate' };
+  const session = await ensureFreshOnyuGiftMonitorSession();
+  if (!session) return { ok: false, reason: 'background-monitor-not-active' };
+  const response = await fetch(ONYU_GIFT_MONITOR_CONFIRM_URL, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + session.idToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data: {
+      senderSoopId, balloons, observedAt, eventAtMin, eventAtMax,
+      exactTimestamp: message.exactTimestamp === true, candidateFingerprint,
+    } }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.error) {
+    const reason = String(result.error && (result.error.status || result.error.message) || 'callable-request-failed');
+    if (response.status === 401 || response.status === 403) {
+      await stopOnyuGiftBackgroundMonitor(true);
+    }
+    return { ok: false, reason: reason.slice(0, 100) };
+  }
+  return result.result || result.data || { ok: false, reason: 'empty-callable-response' };
+}
 
 chrome.commands.onCommand.addListener((command) => {
   if (command !== 'find-unconfirmed-profile') return;
@@ -77,6 +348,25 @@ function isAllowedAdminSender(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
 
+  if (message.type === 'startOnyuGiftBackgroundMonitor') {
+    if (!isAllowedAdminSender(sender)) return false;
+    startOnyuGiftBackgroundMonitor(message.customToken, message.adminUid, sender.tab && sender.tab.id)
+      .then(sendResponse)
+      .catch((error) => {
+        logOnyuGiftBackground('session-start-failed', { error: String(error && error.message || error).slice(0, 120) });
+        sendResponse({ ok: false, reason: String(error && error.message || 'monitor-start-failed').slice(0, 100) });
+      });
+    return true;
+  }
+
+  if (message.type === 'stopOnyuGiftBackgroundMonitor') {
+    if (!isAllowedAdminSender(sender)) return false;
+    stopOnyuGiftBackgroundMonitor(true)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, reason: String(error && error.message || 'monitor-stop-failed').slice(0, 100) }));
+    return true;
+  }
+
   if (message.type === 'watchOnyuGameGiftNotifications') {
     if (!isAllowedAdminSender(sender)) return false;
     const active = message.active === true;
@@ -94,6 +384,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             type: 'setOnyuGameGiftNotificationWatch',
             active: !!(watch && tab.id === selected.id),
             expiresAt: watch && tab.id === selected.id ? expiresAt : 0,
+            tabId: watch && tab.id === selected.id ? selected.id : null,
           }).catch(() => null))).then(() => ({ tabs: validTabs, selected }));
         });
       });
@@ -112,8 +403,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.storage.local.get(ONYU_GIFT_WATCH_KEY).then((state) => {
       const watch = state[ONYU_GIFT_WATCH_KEY] || {};
       const active = watch.active === true && Number(watch.expiresAt) > Date.now() &&
-        Number.isInteger(sender.tab && sender.tab.id) && sender.tab.id === watch.tabId;
-      sendResponse({ ok: true, active, expiresAt: active ? Number(watch.expiresAt) : 0 });
+        Number.isInteger(sender.tab && sender.tab.id) && Number.isInteger(watch.tabId) && sender.tab.id === watch.tabId;
+      sendResponse({ ok: true, active, expiresAt: active ? Number(watch.expiresAt) : 0, tabId: active ? sender.tab.id : null });
     }).catch(() => sendResponse({ ok: false, active: false }));
     return true;
   }
@@ -135,20 +426,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, reason: 'invalid-notification-candidate' });
       return false;
     }
-    findAdminTab().then((adminTab) => {
-      if (!adminTab) {
-        sendResponse({ ok: false, reason: 'admin-center-not-open' });
-        return;
-      }
-      chrome.tabs.sendMessage(adminTab.id, {
-        type: 'confirmOnyuGameGiftNotification', senderSoopId, balloons,
-        observedAt, eventAtMin, eventAtMax,
-        exactTimestamp: message.exactTimestamp === true,
-        candidateFingerprint,
-      }).then(sendResponse).catch((error) => {
-        sendResponse({ ok: false, reason: 'admin-bridge-unavailable', message: String(error && error.message || error).slice(0, 120) });
-      });
-    }).catch((error) => sendResponse({ ok: false, reason: 'admin-tab-search-failed', message: String(error && error.message || error) }));
+    confirmOnyuGiftNotificationInBackground({
+      senderSoopId, balloons, observedAt, eventAtMin, eventAtMax,
+      exactTimestamp: message.exactTimestamp === true, candidateFingerprint,
+    }).then(sendResponse).catch((error) => {
+      logOnyuGiftBackground('confirmation-failed', { error: String(error && error.message || error).slice(0, 120) });
+      sendResponse({ ok: false, reason: 'background-confirmation-failed' });
+    });
     return true;
   }
 
@@ -507,9 +791,48 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   // automatically after PROMO_PENDING_TTL_MS.
   chrome.storage.local.remove(PENDING_KEY_PREFIX + tabId)
     .catch((error) => console.warn('홍보 탭 임시 상태 정리 실패:', error));
+  onyuGiftWatchTabQueue = onyuGiftWatchTabQueue.then(async () => {
+    const state = await chrome.storage.local.get(ONYU_GIFT_WATCH_KEY);
+    const watch = state[ONYU_GIFT_WATCH_KEY] || {};
+    if (!watch.active || Number(watch.expiresAt) <= Date.now() || watch.tabId !== tabId) return;
+    const tabs = await chrome.tabs.query({ url: ['https://sooplive.com/*', 'https://www.sooplive.com/*'] });
+    const next = tabs.find((tab) => Number.isInteger(tab.id)) || null;
+    const nextWatch = Object.assign({}, watch, { tabId: next ? next.id : null });
+    await chrome.storage.local.set({ [ONYU_GIFT_WATCH_KEY]: nextWatch });
+    await Promise.all(tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => chrome.tabs.sendMessage(tab.id, {
+      type: 'setOnyuGameGiftNotificationWatch',
+      active: !!(next && next.id === tab.id),
+      expiresAt: next && next.id === tab.id ? Number(watch.expiresAt) : 0,
+      tabId: next && next.id === tab.id ? next.id : null,
+    }).catch(() => null)));
+  }).catch((error) => logOnyuGiftBackground('tab-reassign-failed', { error: String(error && error.message || error).slice(0, 100) }));
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  let url;
+  try { url = new URL(tab && tab.url || ''); } catch (_) { return; }
+  if (changeInfo.status !== 'complete' || url.protocol !== 'https:' || !['sooplive.com', 'www.sooplive.com'].includes(url.hostname)) return;
+  onyuGiftWatchTabQueue = onyuGiftWatchTabQueue.then(async () => {
+    const state = await chrome.storage.local.get(ONYU_GIFT_WATCH_KEY);
+    const watch = state[ONYU_GIFT_WATCH_KEY] || {};
+    if (!watch.active || Number(watch.expiresAt) <= Date.now() || Number.isInteger(watch.tabId)) return;
+    const nextWatch = Object.assign({}, watch, { tabId });
+    await chrome.storage.local.set({ [ONYU_GIFT_WATCH_KEY]: nextWatch });
+    await chrome.tabs.sendMessage(tabId, {
+      type: 'setOnyuGameGiftNotificationWatch', active: true,
+      expiresAt: Number(watch.expiresAt), tabId,
+    }).catch(() => null);
+    logOnyuGiftBackground('soop-tab-attached', { tabId });
+  }).catch((error) => logOnyuGiftBackground('tab-attach-failed', { error: String(error && error.message || error).slice(0, 100) }));
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (!alarm || alarm.name !== ONYU_GIFT_MONITOR_ALARM || onyuGiftFeedConnected || onyuGiftFeedConnecting) return;
+  runOnyuGiftBackgroundFeed();
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.remove(ONYU_GIFT_WATCH_KEY).catch(() => null);
   chrome.storage.local.get(null).then((allData) => {
     const sessionKeys = Object.keys(allData).filter((key) =>
       key.startsWith(PENDING_KEY_PREFIX) || key.startsWith(PENDING_POST_PREFIX));
@@ -525,6 +848,15 @@ chrome.runtime.onStartup.addListener(() => {
     trace('', 'browser-startup-no-pending-promo-state', {});
     return undefined;
   }).catch((error) => console.warn('이전 브라우저 세션의 홍보 데이터 정리 실패:', error));
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  // storage.session is cleared when the extension is reloaded or the browser restarts.
+  // Remove an orphaned DOM-scanner watch so it cannot outlive its monitor credentials.
+  onyuGiftMonitorSession().then((session) => {
+    if (session) runOnyuGiftBackgroundFeed();
+    else chrome.storage.local.remove(ONYU_GIFT_WATCH_KEY).catch(() => null);
+  }).catch(() => null);
 });
 
 async function findAdminTab(preferredTabId) {

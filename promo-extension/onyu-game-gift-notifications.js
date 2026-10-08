@@ -269,14 +269,18 @@
     }, REFRESH_MS);
   }
 
-  async function applyWatch(active, expiresAt) {
+  async function applyWatch(active, expiresAt, tabId) {
     clearTimeout(refreshTimer);
     if (!active || Number(expiresAt) <= Date.now()) {
       await chrome.storage.local.remove(WATCH_KEY);
       trace('notification-watch-stopped', {});
       return;
     }
-    await chrome.storage.local.set({ [WATCH_KEY]: { active: true, expiresAt: Number(expiresAt) } });
+    await chrome.storage.local.set({ [WATCH_KEY]: {
+      active: true,
+      expiresAt: Number(expiresAt),
+      tabId: Number.isInteger(tabId) ? tabId : null,
+    } });
     trace('notification-watch-started', { expiresAt: Number(expiresAt) });
     await scanNotifications();
     await scheduleNextScan();
@@ -284,7 +288,7 @@
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.type !== 'setOnyuGameGiftNotificationWatch') return false;
-    applyWatch(message.active === true, Number(message.expiresAt) || 0)
+    applyWatch(message.active === true, Number(message.expiresAt) || 0, Number.isInteger(message.tabId) ? message.tabId : sender.tab && sender.tab.id)
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, reason: String(error && error.message || error) }));
     return true;
@@ -292,6 +296,7 @@
 
   chrome.runtime.sendMessage({ type: 'getOnyuGameGiftNotificationWatch' }).then((watch) => {
     if (!watch || watch.active !== true) return;
-    applyWatch(true, Number(watch.expiresAt) || 0).catch((error) => trace('watch-resume-failed', { error: String(error && error.message || error).slice(0, 120) }));
+    applyWatch(true, Number(watch.expiresAt) || 0, Number.isInteger(watch.tabId) ? watch.tabId : null)
+      .catch((error) => trace('watch-resume-failed', { error: String(error && error.message || error).slice(0, 120) }));
   }).catch((error) => trace('watch-state-query-failed', { error: String(error && error.message || error).slice(0, 120) }));
 })();

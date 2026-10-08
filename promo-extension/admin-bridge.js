@@ -47,6 +47,13 @@
 
   window.addEventListener('message', function (event) {
     const data = event.data;
+    if (event.source === window && event.origin === location.origin && data && data.__soopPromoExtensionProbe === true) {
+      window.postMessage({ __soopPromoExtensionReady: true }, location.origin);
+    }
+  });
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
     if (event.source !== window || event.origin !== location.origin || !data || data.__streamerVerificationInboxWatch !== true) return;
     const active = data.active === true;
     const expiresAt = Number(data.expiresAt) || 0;
@@ -101,12 +108,55 @@
   window.addEventListener('message', function (event) {
     const data = event.data;
     if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__onyuGiftBackgroundMonitorStart !== true || typeof data.customToken !== 'string') return;
+    if (extensionContextUnavailable || !hasValidExtensionContext()) {
+      extensionContextUnavailable = true;
+      window.postMessage({ __onyuGiftBackgroundMonitorStatus: true, ok: false, reason: 'extension-context-unavailable' }, location.origin);
+      return;
+    }
+    chrome.runtime.sendMessage({
+      type: 'startOnyuGiftBackgroundMonitor',
+      customToken: data.customToken,
+      adminUid: String(data.adminUid || ''),
+    }).then(function (result) {
+      window.postMessage({
+        __onyuGiftBackgroundMonitorStatus: true,
+        ok: !!(result && result.ok),
+        state: result && result.ok ? 'starting' : 'failed',
+        reason: String(result && result.reason || ''),
+      }, location.origin);
+    }).catch(function () {
+      window.postMessage({ __onyuGiftBackgroundMonitorStatus: true, ok: false, reason: 'background-start-failed' }, location.origin);
+    });
+  });
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data || data.__onyuGiftBackgroundMonitorStop !== true) return;
+    if (extensionContextUnavailable || !hasValidExtensionContext()) return;
+    chrome.runtime.sendMessage({ type: 'stopOnyuGiftBackgroundMonitor' }).then(function (result) {
+      window.postMessage({ __onyuGiftBackgroundMonitorStatus: true, ok: !!(result && result.ok), state: 'stopped' }, location.origin);
+    }).catch(function () {});
+  });
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
         data.__onyuGameGiftNotificationResult !== true || typeof data.requestId !== 'string') return;
     const reply = onyuGiftNotificationReplies.get(data.requestId);
     if (reply) reply({ ok: data.ok === true, reason: String(data.reason || ''), targetNickname: String(data.targetNickname || '') });
   });
 
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message && message.type === 'onyuGiftBackgroundMonitorStatus') {
+      window.postMessage({
+        __onyuGiftBackgroundMonitorStatus: true,
+        ok: message.state !== 'failed',
+        state: String(message.state || ''),
+        reason: String(message.reason || ''),
+      }, location.origin);
+      return false;
+    }
     if (message && message.type === 'confirmOnyuGameGiftNotification') {
       const requestId = createAttemptId();
       const timeout = setTimeout(function () {
@@ -397,4 +447,6 @@
       if (button) button.disabled = false;
     });
   }, true);
+
+  window.postMessage({ __soopPromoExtensionReady: true }, location.origin);
 })();
