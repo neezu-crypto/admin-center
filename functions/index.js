@@ -3363,6 +3363,48 @@ function notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, 
     eventAtMax >= donationCompletedAt - 5 * 60 * 1000;
 }
 
+// Other services also collect SOOP donations on the same admin station. Their
+// requests do not all carry a donor ID or a completion signal, so a recent
+// amount/time overlap must block automatic approval instead of being guessed.
+// These source paths and fields were checked against their callable writers.
+const OTHER_GAME_DONATION_REQUEST_SOURCES = [
+  { path: 'bannerRequests', gameKey: 'soop-stock-market', requestType: 'rank-banner', amountField: 'starBalloons' },
+  { path: 'chartBannerRequests', gameKey: 'soop-stock-market', requestType: 'chart-banner', amountField: 'starBalloons' },
+  { path: 'cardBannerRequests', gameKey: 'soop-stock-market', requestType: 'card-banner', amountField: 'starBalloons' },
+  { path: 'pinRequests', gameKey: 'soop-stock-market', requestType: 'pin', amountField: 'starBalloons' },
+  { path: 'relayRoomRequests', gameKey: 'soop-stock-market', requestType: 'relay-room', amountField: 'starBalloons' },
+  { path: 'cashChargeRequests', gameKey: 'soop-stock-market', requestType: 'cash-charge', donorField: 'soopId', amountUnknown: true },
+  { path: 'unfreezeDonationRequests', gameKey: 'soop-stock-market', requestType: 'unfreeze-donation', donorField: 'soopId', fixedAmount: 50 },
+];
+const OTHER_GAME_DONATION_REQUEST_WINDOW_MS = 20 * 60 * 1000;
+
+function findOtherGameDonationRequestCandidates(sourceMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax) {
+  const candidates = [];
+  OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source) => {
+    const requests = sourceMaps[source.path] || {};
+    Object.entries(requests).forEach(([requestId, item]) => {
+      if (!item || item.status !== 'pending') return;
+      const requestedAt = Number(item.requestedAt) || 0;
+      if (!requestedAt || requestedAt > observedAt || observedAt - requestedAt > 24 * 60 * 60 * 1000 ||
+          requestedAt < eventAtMin - OTHER_GAME_DONATION_REQUEST_WINDOW_MS || requestedAt > eventAtMax) return;
+      if (source.amountField && Number(item[source.amountField]) !== balloons) return;
+      if (Number.isFinite(source.fixedAmount) && source.fixedAmount !== balloons) return;
+      const donorSoopId = source.donorField ? normalizeSoopId(item[source.donorField]) : '';
+      if (donorSoopId && donorSoopId !== senderSoopId) return;
+      candidates.push({
+        gameKey: source.gameKey,
+        requestType: source.requestType,
+        requestPath: source.path,
+        requestId,
+        requestedAt,
+        expectedBalloons: source.amountUnknown ? null : Number(source.fixedAmount || item[source.amountField]) || 0,
+        donorMatch: donorSoopId ? true : 'unknown',
+      });
+    });
+  });
+  return candidates;
+}
+
 async function writeLifeGameSponsorDonationDiagnostic(db, diagnosticCodes, eventKey, details) {
   const codes = Array.from(new Set((diagnosticCodes || []).filter((code) => /^LG-[A-F0-9]{8}$/.test(String(code || '')))));
   if (!codes.length) return;
@@ -3420,12 +3462,17 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     gameCandidates: [],
   };
   try {
-    const [onyuSnap, lifeGameSnap] = await Promise.all([
+    const [onyuSnap, lifeGameSnap, ...otherGameSnaps] = await Promise.all([
       db.ref('onyuVn/streamerGameGiftRequests').get(),
       db.ref('lifeGame/sponsorRequests').get(),
+      ...OTHER_GAME_DONATION_REQUEST_SOURCES.map((source) => db.ref(source.path).orderByChild('status').equalTo('pending').get()),
     ]);
     const onyuRequests = onyuSnap.val() || {};
     const lifeGameRequests = lifeGameSnap.val() || {};
+    const otherGameRequestMaps = {};
+    OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source, index) => {
+      otherGameRequestMaps[source.path] = otherGameSnaps[index].val() || {};
+    });
     const onyuCandidates = Object.entries(onyuRequests).filter(([, item]) =>
       notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
     const lifeGameDiagnosticCandidates = Object.entries(lifeGameRequests).filter(([, item]) => item && item.status === 'pending' &&
@@ -3446,6 +3493,9 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
       ...onyuCandidates.map(([requestId, item]) => ({ game: 'onyu-vn', requestId, item })),
       ...lifeGameCandidates.map(([requestId, item]) => ({ game: 'streamer-life-game', requestId, item })),
     ];
+    const otherDonationCandidates = findOtherGameDonationRequestCandidates(otherGameRequestMaps, senderSoopId,
+      balloons, observedAt, eventAtMin, eventAtMax);
+    eventDetails.otherDonationCandidates = otherDonationCandidates;
     eventDetails.gameCandidates = candidates.map((candidate) => ({
       game: candidate.game,
       requestId: candidate.requestId,
@@ -3457,17 +3507,19 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
       senderMatched: normalizeSoopId(item.donorSoopId) === senderSoopId,
     }));
 
-    if (candidates.length !== 1) {
-      const reason = candidates.length > 1 ? 'ambiguous-across-game-requests' : 'no-matching-pending-request';
+    if (candidates.length !== 1 || otherDonationCandidates.length > 0) {
+      const reason = candidates.length > 1 || (candidates.length === 1 && otherDonationCandidates.length > 0)
+        ? 'ambiguous-across-game-requests'
+        : 'no-matching-pending-request';
       await writeLifeGameSponsorDonationDiagnostic(db, lifeGameDiagnosticCodes, eventKey, Object.assign({}, eventDetails, {
-        outcome: candidates.length > 1 ? 'ambiguous' : 'not-matched', reason,
+        outcome: reason === 'ambiguous-across-game-requests' ? 'ambiguous' : 'not-matched', reason,
       }));
-      if (candidates.length > 1) {
+      if (reason === 'ambiguous-across-game-requests') {
         await eventRef.update({ status: 'ambiguous', completedAt: Date.now(), claimToken: null, reason });
       } else {
         await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false);
       }
-      return { ok: false, reason, eventKey, gameCandidates: eventDetails.gameCandidates };
+      return { ok: false, reason, eventKey, gameCandidates: eventDetails.gameCandidates, otherDonationCandidates };
     }
 
     const candidate = candidates[0];

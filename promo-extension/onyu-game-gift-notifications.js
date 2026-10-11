@@ -277,6 +277,7 @@
             balloons: candidate.balloons,
             eventKey: String(result.eventKey || ''),
             gameCandidates: Array.isArray(result.gameCandidates) ? result.gameCandidates : [],
+            otherDonationCandidates: Array.isArray(result.otherDonationCandidates) ? result.otherDonationCandidates : [],
           });
         }
       }
