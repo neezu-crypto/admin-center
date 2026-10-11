@@ -2140,47 +2140,75 @@ const setLifeGameBotConfig = onCall(async (request) => {
 // 검색화면·엔딩화면·멀티플레이 참가·모바일 하단배너 네 자리 전부가 이 단일
 // 노드를 구독하므로 슬롯은 1개뿐 — 이미 진행 중인 후원이 있으면(soop-stock-
 // market 배너와 동일하게) 남은 기간에 이어서 연장한다.
+async function commitLifeGameSponsorApproval(db, request, adminUid, requestId, daysNum, nickname, verificationMetadata) {
+  const requestRef = db.ref('lifeGame/sponsorRequests/' + requestId);
+  const processingToken = require('node:crypto').randomBytes(16).toString('hex');
+  const claim = await requestRef.transaction((current) => {
+    if (!current || current.status !== 'pending') return;
+    return Object.assign({}, current, { status: 'processing', processingToken, processingStartedAt: Date.now() });
+  }, undefined, false);
+  if (!claim.committed) throw new HttpsError('failed-precondition', '대기 중인 신청이 아닙니다. 이미 처리 중일 수 있습니다.');
+  const reqData = claim.snapshot.val() || {};
+  let approvalCommitted = false;
+  try {
+    const finalNickname = nickname || reqData.nickname;
+    const now = Date.now();
+    const currentSnap = await db.ref('lifeGame/currentSponsor').get();
+    const current = currentSnap.val();
+    const baseTime = current && Number(current.endAt) > now ? Number(current.endAt) : now;
+    const endAt = baseTime + daysNum * 86400000;
+    const requestUpdates = Object.assign({
+      nickname: finalNickname,
+      status: 'approved',
+      reviewedAt: now,
+      reviewedBy: adminUid,
+      processingToken: null,
+      processingStartedAt: null,
+    }, verificationMetadata || {});
+    await db.ref().update(Object.assign({
+      'lifeGame/currentSponsor': {
+        nickname: finalNickname,
+        soopId: reqData.soopId,
+        previewImg: reqData.previewImg,
+        stationLink: reqData.stationLink,
+        startAt: now,
+        endAt,
+      },
+      ['lifeGame/sponsorRequests/' + requestId]: requestUpdates,
+    }));
+    approvalCommitted = true;
+    let auditLogged = true;
+    try {
+      await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 승인', finalNickname + ' · ' + daysNum + '일');
+    } catch (auditError) {
+      auditLogged = false;
+      console.error('인생게임 후원 스트리머 승인 감사 로그 실패:', String(auditError && auditError.message || auditError).slice(0, 160));
+    }
+    return { ok: true, endAt, auditLogged };
+  } catch (error) {
+    if (!approvalCommitted) {
+      await requestRef.transaction((current) => {
+        if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
+        return Object.assign({}, current, { status: 'pending', processingToken: null, processingStartedAt: null });
+      }, undefined, false).catch(() => null);
+    }
+    throw error;
+  }
+}
+
 const lifeGameApproveSponsorRequest = onCall(async (request) => {
-  await requireAdmin(request);
+  const adminUid = await requireAdmin(request);
   const data = request.data || {};
-  const requestId = data.requestId;
-  if (!requestId) throw new HttpsError('invalid-argument', 'requestId가 필요합니다.');
+  const requestId = String(data.requestId || '').trim();
+  if (!requestId || requestId.length > 200 || /[.#$\[\]/]/.test(requestId)) throw new HttpsError('invalid-argument', 'requestId가 필요합니다.');
   const daysNum = Math.round(Number(data.days));
   if (!Number.isInteger(daysNum) || daysNum < 1) {
     throw new HttpsError('invalid-argument', '노출 기간을 올바르게 입력해주세요.');
   }
-  const nickname = (data.nickname || '').toString().trim();
-
-  const db = getDatabase();
-  const reqSnap = await db.ref('lifeGame/sponsorRequests/' + requestId).get();
-  if (!reqSnap.exists()) throw new HttpsError('not-found', '신청 내역을 찾을 수 없습니다.');
-  const reqData = reqSnap.val();
-  if (reqData.status !== 'pending') {
-    throw new HttpsError('failed-precondition', '이미 처리된 신청입니다.');
-  }
-
-  const finalNickname = nickname || reqData.nickname;
-  const now = Date.now();
-  const currentSnap = await db.ref('lifeGame/currentSponsor').get();
-  const current = currentSnap.val();
-  const baseTime = (current && current.endAt > now) ? current.endAt : now;
-  const endAt = baseTime + daysNum * 86400000;
-
-  await db.ref().update({
-    'lifeGame/currentSponsor': {
-      nickname: finalNickname,
-      soopId: reqData.soopId,
-      previewImg: reqData.previewImg,
-      stationLink: reqData.stationLink,
-      startAt: now,
-      endAt: endAt,
-    },
-    ['lifeGame/sponsorRequests/' + requestId + '/nickname']: finalNickname,
-    ['lifeGame/sponsorRequests/' + requestId + '/status']: 'approved',
-    ['lifeGame/sponsorRequests/' + requestId + '/reviewedAt']: now,
+  const nickname = String(data.nickname || '').trim();
+  return commitLifeGameSponsorApproval(getDatabase(), request, adminUid, requestId, daysNum, nickname, {
+    verificationSource: 'admin-manual',
   });
-  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 승인', finalNickname + ' · ' + daysNum + '일');
-  return { ok: true, endAt: endAt };
 });
 
 const lifeGameRejectSponsorRequest = onCall(async (request) => {
@@ -2485,6 +2513,14 @@ function onyuGiftHasEligibleBackgroundRequest(requests, now) {
     Number(gift.donationCompletedAt) > 0 && Number(gift.requestedAt) > now - 24 * 60 * 60 * 1000);
 }
 
+function lifeGameSponsorHasEligibleBackgroundRequest(requests, now) {
+  return Object.values(requests || {}).some((item) => item && item.status === 'pending' &&
+    normalizeSoopId(item.donorSoopId) && /^LG-[A-F0-9]{8}$/.test(String(item.diagnosticCode || '')) &&
+    Number(item.starBalloons) >= 10 && Number(item.starBalloons) <= 70 && Number(item.starBalloons) % 10 === 0 &&
+    Number(item.days) * 10 === Number(item.starBalloons) && Number(item.donationCompletedAt) > 0 &&
+    Number(item.requestedAt) > now - 24 * 60 * 60 * 1000);
+}
+
 const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB' }, async (request, response) => {
   const origin = String(request.get('Origin') || '');
   const allowedOrigin = origin === 'https://neezu-crypto.github.io' || /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
@@ -2564,24 +2600,42 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
 
   let closed = false;
   let active = false;
-  const requestRef = getDatabase().ref('onyuVn/streamerGameGiftRequests');
-  const adminRef = getDatabase().ref('adminCenter/adminUids/' + adminUid);
+  let activeSources = [];
+  let onyuRequests = {};
+  let lifeGameRequests = {};
+  const db = getDatabase();
+  const requestRef = db.ref('onyuVn/streamerGameGiftRequests');
+  const lifeGameRequestRef = db.ref('lifeGame/sponsorRequests');
+  const adminRef = db.ref('adminCenter/adminUids/' + adminUid);
+  const connectionId = require('node:crypto').randomBytes(12).toString('hex');
+  const monitorStatusRef = db.ref('adminCenter/donationVerificationMonitorStatus/' + adminUid + '/' + connectionId);
   const writeEvent = (name, data) => {
     if (closed || response.destroyed) return;
     response.write('event: ' + name + '\ndata: ' + JSON.stringify(data || {}) + '\n\n');
   };
-  const sendSnapshot = (snapshot) => {
-    const value = snapshot.val() || {};
+  const sendMonitorState = () => {
+    const now = Date.now();
+    activeSources = [];
+    if (onyuGiftHasEligibleBackgroundRequest(onyuRequests, now)) activeSources.push('onyu-vn');
+    if (lifeGameSponsorHasEligibleBackgroundRequest(lifeGameRequests, now)) activeSources.push('streamer-life-game');
+    active = activeSources.length > 0;
+    writeEvent('watch-state', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
+  };
+  const onRequestValue = (snapshot) => {
+    onyuRequests = snapshot.val() || {};
     if (accessMode === 'monitor') {
-      active = onyuGiftHasEligibleBackgroundRequest(value, Date.now());
-      writeEvent('watch-state', { active, expiresAt: active ? Date.now() + 60000 : 0 });
+      sendMonitorState();
       return;
     }
+    const value = onyuRequests;
     const requests = Object.keys(value).map((id) => Object.assign({}, value[id] || {}, { requestId: id }))
       .sort((a, b) => (Number(b.updatedAt || b.requestedAt) || 0) - (Number(a.updatedAt || a.requestedAt) || 0));
     writeEvent('requests', { requests });
   };
-  const onRequestValue = (snapshot) => sendSnapshot(snapshot);
+  const onLifeGameRequestValue = (snapshot) => {
+    lifeGameRequests = snapshot.val() || {};
+    if (accessMode === 'monitor') sendMonitorState();
+  };
   const onRequestError = (error) => {
     console.error('온이유 이용권 백그라운드 실시간 구독 실패:', String(error && error.message || error).slice(0, 160));
     writeEvent('stream-error', { reason: 'database-subscription-failed' });
@@ -2593,7 +2647,11 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     cleanup();
   };
   const heartbeat = setInterval(() => {
-    if (accessMode === 'monitor') writeEvent('heartbeat', { active, expiresAt: active ? Date.now() + 60000 : 0 });
+    if (accessMode === 'monitor') {
+      const now = Date.now();
+      writeEvent('heartbeat', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
+      monitorStatusRef.update({ active: true, lastHeartbeatAt: now }).catch(() => null);
+    }
     else writeEvent('heartbeat', { at: Date.now() });
   }, 20000);
   const maxDuration = setTimeout(() => {
@@ -2606,12 +2664,65 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     clearInterval(heartbeat);
     clearTimeout(maxDuration);
     requestRef.off('value', onRequestValue);
+    lifeGameRequestRef.off('value', onLifeGameRequestValue);
     adminRef.off('value', onAdminValue);
+    if (accessMode === 'monitor') monitorStatusRef.remove().catch(() => null);
     if (!response.destroyed) response.end();
   }
   response.on('close', cleanup);
+  if (accessMode === 'monitor') {
+    monitorStatusRef.set({ connectedAt: Date.now(), lastHeartbeatAt: Date.now(), active: true, connectionId }).catch(() => null);
+    lifeGameRequestRef.on('value', onLifeGameRequestValue, onRequestError);
+  }
   adminRef.on('value', onAdminValue, onRequestError);
   requestRef.on('value', onRequestValue, onRequestError);
+});
+
+const getLifeGameSponsorAutoVerificationDiagnostics = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const diagnosticCode = String(request.data && request.data.diagnosticCode || '').trim().toUpperCase();
+  if (!/^LG-[A-F0-9]{8}$/.test(diagnosticCode)) {
+    throw new HttpsError('invalid-argument', '점검 코드를 확인해주세요.');
+  }
+  const db = getDatabase();
+  const requestId = String((await db.ref('lifeGame/sponsorDiagnosticCodes/' + diagnosticCode).get()).val() || '');
+  if (!requestId) throw new HttpsError('not-found', '해당 점검 코드의 신청을 찾을 수 없습니다.');
+  const [requestSnap, diagnosticSnap, monitorSnap] = await Promise.all([
+    db.ref('lifeGame/sponsorRequests/' + requestId).get(),
+    db.ref('adminCenter/donationVerificationDiagnostics/' + diagnosticCode).limitToLast(30).get(),
+    db.ref('adminCenter/donationVerificationMonitorStatus/' + adminUid).get(),
+  ]);
+  const item = requestSnap.val() || {};
+  const diagnostics = diagnosticSnap.val() || {};
+  const monitors = monitorSnap.val() || {};
+  const now = Date.now();
+  return {
+    ok: true,
+    diagnosticCode,
+    request: {
+      requestId,
+      status: String(item.status || ''),
+      nickname: String(item.nickname || ''),
+      soopId: String(item.soopId || ''),
+      donorSoopId: String(item.donorSoopId || ''),
+      days: Number(item.days) || 0,
+      starBalloons: Number(item.starBalloons) || 0,
+      requestedAt: Number(item.requestedAt) || 0,
+      donationCompletedAt: Number(item.donationCompletedAt) || 0,
+      reviewedAt: Number(item.reviewedAt) || 0,
+      verificationSource: String(item.verificationSource || ''),
+      verificationEventKey: String(item.verificationEventKey || ''),
+      verifiedAt: Number(item.verifiedAt) || 0,
+    },
+    monitorConnections: Object.values(monitors).map((monitor) => ({
+      connected: monitor && monitor.active === true && now - Number(monitor.lastHeartbeatAt || 0) < 60000,
+      connectedAt: Number(monitor && monitor.connectedAt) || 0,
+      lastHeartbeatAt: Number(monitor && monitor.lastHeartbeatAt) || 0,
+    })),
+    events: Object.keys(diagnostics).map((eventKey) => Object.assign({ eventKey }, diagnostics[eventKey] || {}))
+      .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0)),
+    checkedAt: now,
+  };
 });
 const ONYU_STREAMER_GIFT_TARGET_LOCK_PATH = 'onyuVn/streamerGameGiftTargetLocks';
 
@@ -3234,6 +3345,169 @@ const onyuConfirmStreamerGameGiftFromNotification = onCall(async (request) => {
   } catch (error) {
     await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false).catch(() => null);
     if (error instanceof HttpsError && error.code === 'failed-precondition') return { ok: false, reason: 'request-no-longer-pending' };
+    throw error;
+  }
+});
+
+function notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp) {
+  if (!item || item.status !== 'pending' || normalizeSoopId(item.donorSoopId) !== senderSoopId ||
+      Number(item.balloons || item.starBalloons) !== balloons) return false;
+  const requestedAt = Number(item.requestedAt) || 0;
+  const donationCompletedAt = Number(item.donationCompletedAt) || 0;
+  if (!requestedAt || requestedAt > observedAt || observedAt - requestedAt > 24 * 60 * 60 * 1000) return false;
+  if (!donationCompletedAt || donationCompletedAt < requestedAt || donationCompletedAt > observedAt + 30000 ||
+      observedAt - donationCompletedAt > 20 * 60 * 1000) return false;
+  if (exactTimestamp) return eventAtMin === eventAtMax && requestedAt <= eventAtMin &&
+    eventAtMin >= donationCompletedAt - 5 * 60 * 1000 && eventAtMin <= donationCompletedAt + 2 * 60 * 1000;
+  return requestedAt <= eventAtMax && eventAtMin <= donationCompletedAt + 2 * 60 * 1000 &&
+    eventAtMax >= donationCompletedAt - 5 * 60 * 1000;
+}
+
+async function writeLifeGameSponsorDonationDiagnostic(db, diagnosticCodes, eventKey, details) {
+  const codes = Array.from(new Set((diagnosticCodes || []).filter((code) => /^LG-[A-F0-9]{8}$/.test(String(code || '')))));
+  if (!codes.length) return;
+  const now = Date.now();
+  const updates = {};
+  codes.forEach((code) => {
+    updates['adminCenter/donationVerificationDiagnostics/' + code + '/' + eventKey] = Object.assign({
+      eventKey,
+      createdAt: now,
+    }, details || {});
+  });
+  await db.ref().update(updates);
+}
+
+const confirmGameDonationFromNotification = onCall(async (request) => {
+  const reviewer = await resolveOnyuGiftReviewActor(request);
+  const adminUid = reviewer.adminUid;
+  request = reviewer.request;
+  const senderSoopId = normalizeSoopId(request.data && request.data.senderSoopId);
+  const balloons = Number(request.data && request.data.balloons);
+  const observedAt = Number(request.data && request.data.observedAt);
+  const eventAtMin = Number(request.data && request.data.eventAtMin);
+  const eventAtMax = Number(request.data && request.data.eventAtMax);
+  const candidateFingerprint = String(request.data && request.data.candidateFingerprint || '').toLowerCase();
+  const exactTimestamp = request.data && request.data.exactTimestamp === true;
+  const now = Date.now();
+  if (!senderSoopId || !Number.isInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0 ||
+      !Number.isFinite(observedAt) || observedAt < now - 2 * 60 * 1000 || observedAt > now + 30000 ||
+      !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) || eventAtMin > eventAtMax ||
+      eventAtMin < observedAt - 24 * 60 * 60 * 1000 || eventAtMax > observedAt + 30000 ||
+      !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) {
+    throw new HttpsError('invalid-argument', '후원 알림 정보가 올바르지 않습니다.');
+  }
+
+  const db = getDatabase();
+  const crypto = require('node:crypto');
+  const eventKey = crypto.createHash('sha256')
+    .update(senderSoopId + '|' + balloons + '|' + candidateFingerprint).digest('hex').slice(0, 40);
+  const eventRef = db.ref('adminCenter/donationVerificationEventClaims/' + eventKey);
+  const claimToken = crypto.randomBytes(16).toString('hex');
+  const eventClaim = await eventRef.transaction((current) => {
+    if (current && (current.status !== 'processing' || now - Number(current.startedAt || now) < 2 * 60 * 1000)) return;
+    return { status: 'processing', startedAt: now, claimToken, senderSoopId, balloons };
+  }, undefined, false);
+  if (!eventClaim.committed) return { ok: false, reason: 'notification-already-processed', eventKey };
+
+  let lifeGameDiagnosticCodes = [];
+  const eventDetails = {
+    senderSoopId,
+    balloons,
+    observedAt,
+    eventAtMin,
+    eventAtMax,
+    exactTimestamp,
+    gameCandidates: [],
+  };
+  try {
+    const [onyuSnap, lifeGameSnap] = await Promise.all([
+      db.ref('onyuVn/streamerGameGiftRequests').get(),
+      db.ref('lifeGame/sponsorRequests').get(),
+    ]);
+    const onyuRequests = onyuSnap.val() || {};
+    const lifeGameRequests = lifeGameSnap.val() || {};
+    const onyuCandidates = Object.entries(onyuRequests).filter(([, item]) =>
+      notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+    const lifeGameDiagnosticCandidates = Object.entries(lifeGameRequests).filter(([, item]) => item && item.status === 'pending' &&
+      Number(item.starBalloons) === balloons && Number(item.days) * 10 === balloons &&
+      /^LG-[A-F0-9]{8}$/.test(String(item.diagnosticCode || '')) &&
+      notificationFallsInDonationRequestWindow(Object.assign({}, item, { donorSoopId: senderSoopId }), senderSoopId,
+        balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+    const lifeGameByDonorAndAmount = Object.entries(lifeGameRequests).filter(([, item]) => item && item.status === 'pending' &&
+      normalizeSoopId(item.donorSoopId) === senderSoopId && Number(item.starBalloons) === balloons &&
+      Number(item.days) * 10 === balloons && /^LG-[A-F0-9]{8}$/.test(String(item.diagnosticCode || '')));
+    const lifeGameCandidates = lifeGameByDonorAndAmount.filter(([, item]) =>
+      notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+    lifeGameDiagnosticCodes = Array.from(new Set([
+      ...lifeGameByDonorAndAmount.map(([, item]) => String(item.diagnosticCode || '')),
+      ...lifeGameDiagnosticCandidates.map(([, item]) => String(item.diagnosticCode || '')),
+    ]));
+    const candidates = [
+      ...onyuCandidates.map(([requestId, item]) => ({ game: 'onyu-vn', requestId, item })),
+      ...lifeGameCandidates.map(([requestId, item]) => ({ game: 'streamer-life-game', requestId, item })),
+    ];
+    eventDetails.gameCandidates = candidates.map((candidate) => ({
+      game: candidate.game,
+      requestId: candidate.requestId,
+      diagnosticCode: candidate.game === 'streamer-life-game' ? String(candidate.item.diagnosticCode || '') : '',
+    }));
+    eventDetails.lifeGameDiagnosticCandidates = lifeGameDiagnosticCandidates.map(([requestId, item]) => ({
+      requestId,
+      diagnosticCode: String(item.diagnosticCode || ''),
+      senderMatched: normalizeSoopId(item.donorSoopId) === senderSoopId,
+    }));
+
+    if (candidates.length !== 1) {
+      const reason = candidates.length > 1 ? 'ambiguous-across-game-requests' : 'no-matching-pending-request';
+      await writeLifeGameSponsorDonationDiagnostic(db, lifeGameDiagnosticCodes, eventKey, Object.assign({}, eventDetails, {
+        outcome: candidates.length > 1 ? 'ambiguous' : 'not-matched', reason,
+      }));
+      if (candidates.length > 1) {
+        await eventRef.update({ status: 'ambiguous', completedAt: Date.now(), claimToken: null, reason });
+      } else {
+        await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false);
+      }
+      return { ok: false, reason, eventKey, gameCandidates: eventDetails.gameCandidates };
+    }
+
+    const candidate = candidates[0];
+    const verifiedAt = Date.now();
+    const verificationEventMetadata = {
+      verificationSource: 'soop-donation-notification',
+      verificationGame: candidate.game,
+      verificationSenderSoopId: senderSoopId,
+      verificationEventKey: eventKey,
+      verifiedAt,
+    };
+    let result;
+    if (candidate.game === 'onyu-vn') {
+      result = await processOnyuStreamerGameGiftReview(request, adminUid, candidate.requestId, 'approve', verificationEventMetadata);
+      result = Object.assign({}, result, {
+        gameKey: candidate.game,
+        targetNickname: String(candidate.item.targetNickname || ''),
+      });
+    } else {
+      result = await commitLifeGameSponsorApproval(db, request, adminUid, candidate.requestId,
+        Number(candidate.item.days), String(candidate.item.nickname || ''), verificationEventMetadata);
+      result = Object.assign({}, result, {
+        gameKey: candidate.game,
+        targetNickname: String(candidate.item.nickname || ''),
+        diagnosticCode: String(candidate.item.diagnosticCode || ''),
+      });
+    }
+    await eventRef.update({ status: 'approved', requestId: candidate.requestId, gameKey: candidate.game, claimToken: null, approvedAt: Date.now() });
+    await writeLifeGameSponsorDonationDiagnostic(db, lifeGameDiagnosticCodes, eventKey, Object.assign({}, eventDetails, {
+      outcome: 'approved', reason: '', matchedGame: candidate.game, matchedRequestId: candidate.requestId,
+    }));
+    return Object.assign({}, result, { ok: true, eventKey, verificationSource: 'soop-donation-notification' });
+  } catch (error) {
+    await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false).catch(() => null);
+    await writeLifeGameSponsorDonationDiagnostic(db, lifeGameDiagnosticCodes, eventKey, Object.assign({}, eventDetails, {
+      outcome: 'error', reason: String(error && (error.code || error.message) || 'server-error').slice(0, 120),
+    })).catch(() => null);
+    if (error instanceof HttpsError && ['failed-precondition', 'already-exists'].includes(error.code)) {
+      return { ok: false, reason: 'request-no-longer-pending', eventKey };
+    }
     throw error;
   }
 });
@@ -3898,6 +4172,7 @@ module.exports = {
   getLifeGameBotConfig,
   setLifeGameBotConfig,
   lifeGameApproveSponsorRequest,
+  getLifeGameSponsorAutoVerificationDiagnostics,
   lifeGameRejectSponsorRequest,
   getLifeGameCurrentSponsor,
   updateLifeGameCurrentSponsor,
@@ -3982,6 +4257,7 @@ module.exports = {
   onyuAdminRevokeEntitlement,
   onyuReviewStreamerGameGift,
   onyuConfirmStreamerGameGiftFromNotification,
+  confirmGameDonationFromNotification,
   onyuCreateGiftBackgroundMonitorSession,
   onyuGiftBackgroundFeed,
   onyuStartSession,

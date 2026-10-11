@@ -21,7 +21,7 @@ const ONYU_GIFT_MONITOR_API_KEY = 'AIzaSyAZcjQPHphENs-Bb7IfdL2qTtOMhJrRP54';
 const ONYU_GIFT_MONITOR_AUTH_URL = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=' + ONYU_GIFT_MONITOR_API_KEY;
 const ONYU_GIFT_MONITOR_REFRESH_URL = 'https://securetoken.googleapis.com/v1/token?key=' + ONYU_GIFT_MONITOR_API_KEY;
 const ONYU_GIFT_MONITOR_FEED_URL = 'https://us-central1-soop-stock-market.cloudfunctions.net/onyuGiftBackgroundFeed';
-const ONYU_GIFT_MONITOR_CONFIRM_URL = 'https://us-central1-soop-stock-market.cloudfunctions.net/onyuConfirmStreamerGameGiftFromNotification';
+const ONYU_GIFT_MONITOR_CONFIRM_URL = 'https://us-central1-soop-stock-market.cloudfunctions.net/confirmGameDonationFromNotification';
 let onyuGiftFeedController = null;
 let onyuGiftFeedConnecting = false;
 let onyuGiftFeedConnected = false;
@@ -295,7 +295,7 @@ async function confirmOnyuGiftNotificationInBackground(message) {
   const eventAtMin = Number(message.eventAtMin);
   const eventAtMax = Number(message.eventAtMax);
   const candidateFingerprint = String(message.candidateFingerprint || '').toLowerCase();
-  if (!/^[a-z0-9]{2,20}$/.test(senderSoopId) || balloons !== 50 ||
+  if (!/^[a-z0-9]{2,20}$/.test(senderSoopId) || !Number.isInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0 ||
       !Number.isFinite(observedAt) || !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) ||
       !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) return { ok: false, reason: 'invalid-notification-candidate' };
   const session = await ensureFreshOnyuGiftMonitorSession();
@@ -977,7 +977,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const candidateFingerprint = String(message.candidateFingerprint || '').toLowerCase();
     const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl &&
       sourceUrl.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(sourceUrl.hostname);
-    if (!isSoopSender || !/^[a-z0-9]{2,20}$/.test(senderSoopId) || balloons !== 50 ||
+    if (!isSoopSender || !/^[a-z0-9]{2,20}$/.test(senderSoopId) || !Number.isInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0 ||
         !Number.isFinite(observedAt) || !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) ||
         !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) {
       sendResponse({ ok: false, reason: 'invalid-notification-candidate' });

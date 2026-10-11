@@ -1,13 +1,14 @@
 (function () {
   const WATCH_KEY = 'soopOnyuGameGiftNotificationWatch';
   const ATTEMPT_KEY = 'soopOnyuGameGiftNotificationAttempts';
-  const REFRESH_MS = 10000;
-  const RETRY_MS = 30000;
+  const REFRESH_MS = 3000;
+  const NOTIFICATION_ROWS_WAIT_MS = 2400;
+  const RETRY_MS = 10000;
   let refreshTimer = null;
   let scanning = false;
 
   function trace(stage, details) {
-    console.info('[SOOP 온이유 이용권 자동 확인]', JSON.stringify({
+    console.info('[SOOP 게임 후원 자동 확인]', JSON.stringify({
       stage,
       at: new Date().toISOString(),
       details: details || {},
@@ -146,6 +147,27 @@
     return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
+  function waitForDonationRows() {
+    const hasRows = () => Array.from(document.querySelectorAll('a[href*="/station/"]'))
+      .some((anchor) => parseDonationCandidate(anchor));
+    if (hasRows() || typeof MutationObserver !== 'function' || !document.documentElement) return Promise.resolve();
+    return new Promise((resolve) => {
+      let settled = false;
+      let timeoutId = null;
+      const observer = new MutationObserver(() => { if (hasRows()) finish(); });
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(timeoutId);
+        resolve();
+      };
+      observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      timeoutId = setTimeout(finish, NOTIFICATION_ROWS_WAIT_MS);
+      if (hasRows()) finish();
+    });
+  }
+
   function parseDonationCandidate(anchor) {
     if (!isVisible(anchor)) return null;
     const senderSoopId = stationIdFromLink(anchor);
@@ -156,7 +178,7 @@
     const amountMatch = receiptText.match(/별풍선\s*([\d,]+)\s*개/);
     if (!amountMatch) return null;
     const balloons = Number(amountMatch[1].replace(/,/g, ''));
-    if (!Number.isSafeInteger(balloons) || balloons !== 50) return null;
+    if (!Number.isSafeInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0) return null;
     const observedAt = Date.now();
     const exactTimestamp = exactTimestampFromRow(found.element);
     const age = parseAgeRange(receiptText);
@@ -207,7 +229,7 @@
       }
       if (!hasNotificationPanelOpen(bell)) {
         bell.click();
-        await wait(1100);
+        await waitForDonationRows();
       }
 
       const attemptTimes = state[ATTEMPT_KEY] && typeof state[ATTEMPT_KEY] === 'object' ? state[ATTEMPT_KEY] : {};
@@ -240,9 +262,22 @@
           continue;
         }
         if (result && result.ok) {
-          showNotice('별풍선 후원이 확인되어 ' + (result.targetNickname || '온이유 이용권') + ' 신청이 자동 승인됐어요.');
-          trace('donation-notification-approved', { balloons: candidate.balloons });
+          const isLifeGame = result.gameKey === 'streamer-life-game';
+          showNotice('별풍선 후원이 확인되어 ' + (result.targetNickname || (isLifeGame ? '인생게임 홍보' : '온이유 이용권')) + ' 신청이 자동 승인됐어요.');
+          trace('donation-notification-approved', {
+            gameKey: String(result.gameKey || ''),
+            balloons: candidate.balloons,
+            eventKey: String(result.eventKey || ''),
+            diagnosticCode: String(result.diagnosticCode || ''),
+          });
           break;
+        }
+        if (result && result.reason === 'ambiguous-across-game-requests') {
+          trace('donation-notification-needs-manual-review', {
+            balloons: candidate.balloons,
+            eventKey: String(result.eventKey || ''),
+            gameCandidates: Array.isArray(result.gameCandidates) ? result.gameCandidates : [],
+          });
         }
       }
       trace('notification-scan-complete', { stationLinksScanned: document.querySelectorAll('a[href*="/station/"]').length, donationCandidatesSent: sent });
