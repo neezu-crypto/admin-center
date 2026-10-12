@@ -1621,15 +1621,47 @@ const notifyLifeGameReportAlert = onValueCreated('/lifeGame/galleryReports/{id}'
   const data = event.data.val() || {};
   await sendDiscordNotification('🔔 **새 갤러리 신고 (인생게임)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널에서 확인)');
 });
-// 게임 후기 신고(2026-09-08 추가) - formatRequestSummary는 이 노드의 필드명
-// (reviewUid/reporterUid)을 모르는 필드로 취급해 "(상세 정보 없음)"만 찍을
-// 수 있어서(requesterUid/uid만 인식) 직접 문구를 구성한다.
+// 게임 후기 신고 - 신고 노드는 reviewPublicId를 저장하므로 해당 공개 후기에서
+// 별점·본문·작성자 정보를 함께 읽어 Discord 알림에 표시한다.
 const notifyLifeGameReviewReportAlert = onValueCreated('/lifeGame/reviewReports/{id}', async (event) => {
   const data = event.data.val() || {};
+  const reviewPublicId = String(data.reviewPublicId || data.reviewUid || '').trim();
+  let review = null;
+  if (reviewPublicId) {
+    try {
+      const reviewSnap = await db.ref('lifeGame/reviewsPublic/' + reviewPublicId).get();
+      review = reviewSnap.val() || null;
+    } catch (error) {
+      console.error('인생게임 신고 후기 조회 실패:', reviewPublicId, error);
+    }
+  }
+  const safeText = (value, maxLength) => String(value || '')
+    .replace(/@/g, '@\u200b')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .slice(0, maxLength);
+  const reportId = safeText(event.params.id, 120) || '(알 수 없음)';
+  const safeReviewPublicId = safeText(reviewPublicId, 120) || '(알 수 없음)';
+  const nickname = safeText(review && review.nickname, 100);
+  const soopId = safeText(review && review.soopId, 40);
+  const rating = Number(review && review.rating);
+  const reviewText = safeText(review && review.text, 500);
+  const reason = safeText(data.reason, 300);
+  const reportedAt = Number(data.reportedAt);
+  const reportedAtText = Number.isFinite(reportedAt) && reportedAt > 0
+    ? new Date(reportedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
+    : '접수 시각 미상';
+  const reviewBody = review
+    ? reviewText.replace(/\r\n?/g, '\n').replace(/\n/g, '\n> ') || '(후기 본문 없음)'
+    : '(원문을 불러오지 못했습니다. 후기 ID로 관리자 화면에서 확인해주세요.)';
   await sendDiscordNotification(
-    '🔔 **새 후기 신고 (인생게임)**\n대상 후기 uid: ' + (data.reviewUid || '(알 수 없음)') +
-    (data.reason ? ' · 사유: ' + data.reason : '') +
-    '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널에서 확인)'
+    '🔔 **새 후기 신고 (인생게임)**' +
+    '\n신고 ID: `' + reportId + '` · 접수: ' + reportedAtText +
+    '\n대상 후기 ID: `' + safeReviewPublicId + '`' +
+    (nickname || soopId ? '\n작성자: ' + (nickname || '닉네임 미입력') + (soopId ? ' · SOOP ID: ' + soopId : '') : '') +
+    (Number.isFinite(rating) && rating >= 1 && rating <= 5 ? '\n별점: ' + rating + '/5' : '') +
+    '\n후기 내용:\n> ' + reviewBody +
+    '\n신고 사유: ' + (reason || '미기재') +
+    '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널 → 신고된 후기)'
   );
 });
 const notifyLifeGameSponsorRequest = onValueCreated('/lifeGame/sponsorRequests/{id}', async (event) => {
