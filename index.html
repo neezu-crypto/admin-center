@@ -863,6 +863,15 @@
       <button id="streamerPromoLinksRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <button id="streamerPromoClearCompletedBtn" class="perm-refresh-btn" type="button" style="margin-left:6px;">전체 체크 해제</button>
       <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
+      <div id="streamerPromoUnlistedCard" style="margin-top:12px; padding:12px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <strong>주식시장 미상장 스트리머</strong>
+          <span id="streamerPromoUnlistedCount" class="hint" style="margin:0;">확인 전</span>
+          <button id="streamerPromoUnlistedRefreshBtn" class="perm-refresh-btn" type="button" style="margin-left:auto;">명단 새로고침</button>
+        </div>
+        <p class="hint" style="margin:5px 0 8px;">홍보 목록의 닉네임을 주식시장 종목명과 대조합니다. 장식용 문장부호 차이는 제외하고, 미상장 명단은 한 줄에 한 명씩 표시합니다.</p>
+        <div id="streamerPromoUnlistedList" aria-live="polite" style="max-height:260px; overflow:auto; padding:0 4px; border-top:1px solid rgba(20,20,22,0.08);">홍보 목록을 새로고침해 주세요.</div>
+      </div>
       <div id="streamerPromoBatchControls" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px; padding:10px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
         <strong style="font-size:12px;">순차 자동 게시</strong>
         <label style="display:flex; align-items:center; gap:5px; font-size:12px;">반복
@@ -1520,6 +1529,9 @@
   const adultImageGeneratorStatusEl = document.getElementById('adultImageGeneratorStatus');
   const promotedContentListEl = document.getElementById('promotedContentList');
   const streamerPromoLinksRefreshBtn = document.getElementById('streamerPromoLinksRefreshBtn');
+  const streamerPromoUnlistedRefreshBtn = document.getElementById('streamerPromoUnlistedRefreshBtn');
+  const streamerPromoUnlistedCountEl = document.getElementById('streamerPromoUnlistedCount');
+  const streamerPromoUnlistedListEl = document.getElementById('streamerPromoUnlistedList');
   const streamerPromoClearCompletedBtn = document.getElementById('streamerPromoClearCompletedBtn');
   const streamerPromoLinksStatusEl = document.getElementById('streamerPromoLinksStatus');
   const streamerPromoRecentListEl = document.getElementById('streamerPromoRecentList');
@@ -3273,14 +3285,45 @@
   async function refreshStreamerPromoLinks() {
     streamerPromoLinksListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     streamerPromoLinksStatusEl.textContent = '';
+    streamerPromoUnlistedRefreshBtn.disabled = true;
+    streamerPromoUnlistedCountEl.textContent = '종목 대조 중…';
+    streamerPromoUnlistedListEl.textContent = '홍보 목록과 주식시장 종목을 대조하고 있습니다…';
     try {
       const result = await listStreamerPromoLinksFn();
       renderStreamerPromoLinksList(result.data.streamers || [], result.data.recentOpened || null);
+      renderStreamerPromoUnlistedList(result.data.unlistedStreamers || [], result.data.unlistedNicknameUnavailableCount || 0);
     } catch (e) {
       console.error('스트리머 홍보글 링크 조회 실패:', e);
       streamerPromoLinksListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
       streamerPromoLinksStatusEl.textContent = '인증 스트리머 목록을 불러오지 못했습니다.';
+      streamerPromoUnlistedCountEl.textContent = '조회 실패';
+      streamerPromoUnlistedListEl.textContent = '홍보 목록 또는 주식시장 종목을 불러오지 못했습니다. 다시 새로고침해 주세요.';
+    } finally {
+      streamerPromoUnlistedRefreshBtn.disabled = false;
     }
+  }
+
+  function renderStreamerPromoUnlistedList(streamers, nicknameUnavailableCount) {
+    const unlisted = (Array.isArray(streamers) ? streamers : []).slice().sort(function (a, b) {
+      return String(a.nickname || '').localeCompare(String(b.nickname || ''), 'ko') ||
+        String(a.soopId || '').localeCompare(String(b.soopId || ''));
+    });
+    streamerPromoUnlistedCountEl.textContent = '미상장 ' + unlisted.length.toLocaleString('ko-KR') + '명' +
+      (nicknameUnavailableCount > 0 ? ' · 닉네임 없어 대조 불가 ' + Number(nicknameUnavailableCount).toLocaleString('ko-KR') + '명' : '');
+    streamerPromoUnlistedListEl.replaceChildren();
+    if (!unlisted.length) {
+      streamerPromoUnlistedListEl.textContent = '현재 미상장 스트리머가 없습니다.';
+      streamerPromoUnlistedListEl.style.padding = '10px 4px';
+      return;
+    }
+    streamerPromoUnlistedListEl.style.padding = '0 4px';
+    unlisted.forEach(function (item) {
+      const row = document.createElement('div');
+      row.textContent = String(item.nickname || '').trim() + (item.soopId ? '  (@' + item.soopId + ')' : '');
+      row.title = row.textContent;
+      row.style.cssText = 'padding:6px 2px; border-bottom:1px solid rgba(20,20,22,0.07); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+      streamerPromoUnlistedListEl.appendChild(row);
+    });
   }
 
   async function refreshPublicPromoPageStats() {
@@ -3767,6 +3810,7 @@
   }
 
   streamerPromoLinksRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
+  streamerPromoUnlistedRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
   streamerPromoClearCompletedBtn.addEventListener('click', function () {
     if (!window.confirm('홍보 완료로 체크된 항목을 모두 해제할까요?')) return;
     streamerPromoClearCompletedBtn.disabled = true;

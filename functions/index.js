@@ -1035,16 +1035,22 @@ function collectVerifiedStreamerEntries(value) {
   return entries;
 }
 
+function normalizePromoStockMatchName(value) {
+  return String(value || '').normalize('NFC').toLocaleLowerCase('ko-KR').trim()
+    .replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, '');
+}
+
 const listStreamerPromoLinks = onCall(async (request) => {
   await requireAdmin(request);
   const db = getDatabase();
-  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap, seedSnap] = await Promise.all([
+  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap, seedSnap, stocksSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoLinks').get(),
     db.ref('adminCenter/streamerPromoRecent').get(),
     db.ref('adminCenter/streamerPromoExcluded').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
     db.ref('adminCenter/streamerPromoSeed').get(),
+    db.ref('stocks').get(),
   ]);
   const links = linksSnap.val() || {};
   let recentOpened = recentSnap.val() || null;
@@ -1096,6 +1102,16 @@ const listStreamerPromoLinks = onCall(async (request) => {
   streamers.sort(function (a, b) {
     return (a.nickname || a.soopId).localeCompare((b.nickname || b.soopId), 'ko') || a.soopId.localeCompare(b.soopId);
   });
+  const stockNames = Object.values(stocksSnap.val() || {}).map(function (stock) {
+    return normalizePromoStockMatchName(stock && stock.name);
+  }).filter(Boolean);
+  const comparableStreamers = streamers.filter(function (entry) {
+    return normalizePromoStockMatchName(entry.nickname);
+  });
+  const unlistedStreamers = comparableStreamers.filter(function (entry) {
+    const nickname = normalizePromoStockMatchName(entry.nickname);
+    return !stockNames.some(function (stockName) { return stockName.includes(nickname); });
+  });
   return {
     streamers: streamers.map(function (entry) {
       const key = entry.key || promoStorageKey(entry.id, entry.soopId);
@@ -1110,6 +1126,10 @@ const listStreamerPromoLinks = onCall(async (request) => {
         updatedAt: saved.updatedAt || null,
       };
     }),
+    unlistedStreamers: unlistedStreamers.map(function (entry) {
+      return { nickname: String(entry.nickname || '').trim(), soopId: entry.soopId || '' };
+    }),
+    unlistedNicknameUnavailableCount: streamers.length - comparableStreamers.length,
     excludedStreamers: excludedStreamers,
     recentOpened: recentOpened || null,
   };
