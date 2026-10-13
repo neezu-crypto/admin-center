@@ -453,6 +453,11 @@ async function hasAnyEntry(db, path, status) {
   }
 }
 
+function isPendingVerificationRequest(request) {
+  // 구버전 신청은 status가 없고, 계정전환 승인은 처리 후 approved 이력으로 남는다.
+  return !!request && (!request.status || request.status === 'pending');
+}
+
 const getAdminSessionSummary = onCall(async (request) => {
   await requireAdmin(request);
   const role = 'admin';
@@ -464,7 +469,12 @@ const getAdminSessionSummary = onCall(async (request) => {
   const tasks = [];
   if (role === 'admin') {
     tasks.push(Promise.all([
-      hasAnyEntry(db, 'bettingMarket/verifyRequests'),
+      db.ref('bettingMarket/verifyRequests').get().then(function (snapshot) {
+        const requests = snapshot.val() || {};
+        return Object.keys(requests).some(function (requestId) {
+          return isPendingVerificationRequest(requests[requestId]);
+        });
+      }),
       hasAnyEntry(db, 'streamerVerificationRequests', 'pending'),
     ]).then(function (values) { summary.identity = values.some(Boolean); }));
   }
@@ -565,7 +575,7 @@ const listStreamerVerificationOverview = onCall(async (request) => {
   Object.keys(bmReq).forEach(function (id) {
     // 일반 배팅시장 신청은 승인 시 삭제되지만 계정전환은 토큰 소비를 위해
     // switched 이력으로 남긴다. status 없는 구버전 레코드는 대기 중으로 본다.
-    if (bmReq[id].status && bmReq[id].status !== 'pending') return;
+    if (!isPendingVerificationRequest(bmReq[id])) return;
     pending.push(Object.assign({ id: id, source: 'bettingMarket' }, bmReq[id]));
   });
   Object.keys(smReq).forEach(function (id) {

@@ -2257,6 +2257,10 @@
     postStreamerVerificationInboxWatch(pendingRequests);
     renderPendingList();
     renderVerifiedList();
+    // 로그인 시 한 번 조회한 요약 배지는 실제 인증 목록이 갱신될 때 함께 동기화한다.
+    // 신청 승인/거절·실시간 변경 뒤에도 완료된 대기 알림이 남지 않게 한다.
+    sessionSummary.identity = pendingRequests.length > 0;
+    renderSessionLauncher();
   }
   verificationRefreshBtn.addEventListener('click', refreshVerificationOverview);
 
