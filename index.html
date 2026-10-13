@@ -1219,6 +1219,7 @@
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
   const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
   const addStreamerPromoCandidateFn = httpsCallable(functions, 'addStreamerPromoCandidate');
+  const removeStreamerPromoCandidateFn = httpsCallable(functions, 'removeStreamerPromoCandidate');
   const setStreamerPromoExclusionFn = httpsCallable(functions, 'setStreamerPromoExclusion');
   const saveStreamerPromoLinkFn = httpsCallable(functions, 'saveStreamerPromoLink');
   const markStreamerPromoLinkOpenedFn = httpsCallable(functions, 'markStreamerPromoLinkOpened');
@@ -3758,6 +3759,26 @@
         streamerPromoGeneratorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
       row.appendChild(generateBtn);
+      if (item.isManualCandidate === true) {
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'perm-refresh-btn';
+        removeBtn.textContent = '목록 삭제';
+        removeBtn.setAttribute('aria-label', (item.nickname || '수동 후보') + ' 홍보 목록 삭제');
+        removeBtn.title = '수동으로 추가한 홍보 후보만 삭제합니다.';
+        removeBtn.addEventListener('click', function () {
+          if (!window.confirm((item.nickname || '이 스트리머') + ' (@' + (item.soopId || '') + ')를 홍보 리스트에서 삭제할까요?')) return;
+          removeBtn.disabled = true;
+          removeStreamerPromoCandidateFn({ soopId: item.soopId || '' })
+            .then(function () { return refreshStreamerPromoLinks(); })
+            .catch(function (err) {
+              console.error('수동 홍보 후보 삭제 실패:', err);
+              window.alert('홍보 리스트 삭제에 실패했습니다: ' + (err && err.message ? err.message : err));
+            })
+            .finally(function () { removeBtn.disabled = false; });
+        });
+        row.appendChild(removeBtn);
+      }
       if (item.writeUrl) {
         openLink = item.promotedCompleted ? document.createElement('button') : document.createElement('a');
         if (openLink.tagName === 'A') {

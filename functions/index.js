@@ -1120,6 +1120,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
         key: key,
         nickname: entry.nickname,
         soopId: entry.soopId,
+        isManualCandidate: entry.isManualCandidate === true,
         writeUrl: typeof saved.writeUrl === 'string' && saved.writeUrl ? saved.writeUrl : (entry.writeUrl || ''),
         promotedCompleted: saved.promotedCompleted === true,
         lastOpenedAt: recentOpened && recentOpened.key === key ? recentOpened.lastOpenedAt || null : null,
@@ -1180,6 +1181,46 @@ const addStreamerPromoCandidate = onCall(async (request) => {
   });
   await logToAdminAuditLog(db, request, '스트리머 홍보 후보 추가', nickname + ' (@' + soopId + ')');
   return { ok: true, nickname: nickname, soopId: soopId, writeUrl: writeUrl };
+});
+
+const removeStreamerPromoCandidate = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data || {};
+  const requestedSoopId = normalizeSoopId(data.soopId);
+  if (!requestedSoopId) {
+    throw new HttpsError('invalid-argument', '삭제할 스트리머의 SOOP 아이디를 확인해주세요.');
+  }
+
+  const db = getDatabase();
+  const [verifiedSnap, candidatesSnap, seedSnap, recentSnap] = await Promise.all([
+    db.ref('streamerVerifications').get(),
+    db.ref('adminCenter/streamerPromoCandidates').get(),
+    db.ref('adminCenter/streamerPromoSeed').get(),
+    db.ref('adminCenter/streamerPromoRecent').get(),
+  ]);
+  const candidates = candidatesSnap.val() || {};
+  const candidateKey = Object.keys(candidates).find(function (key) {
+    const candidate = candidates[key] || {};
+    return normalizeSoopId(candidate.soopId || key) === requestedSoopId;
+  });
+  if (!candidateKey) throw new HttpsError('not-found', '수동 홍보 후보를 찾을 수 없습니다.');
+
+  const entry = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidates)
+    .find(function (item) { return item.soopId === requestedSoopId; });
+  if (!entry || entry.isManualCandidate !== true) {
+    throw new HttpsError('failed-precondition', '수동 등록 후보만 홍보 리스트에서 삭제할 수 있습니다.');
+  }
+
+  const updates = {};
+  updates['adminCenter/streamerPromoCandidates/' + candidateKey] = null;
+  updates['adminCenter/streamerPromoLinks/' + entry.key] = null;
+  const recent = recentSnap.val() || null;
+  if (recent && (recent.key === entry.key || normalizeSoopId(recent.soopId) === requestedSoopId)) {
+    updates['adminCenter/streamerPromoRecent'] = null;
+  }
+  await db.ref().update(updates);
+  await logToAdminAuditLog(db, request, '수동 스트리머 홍보 후보 삭제', (entry.nickname || requestedSoopId) + ' (@' + requestedSoopId + ')');
+  return { ok: true, removed: true, nickname: entry.nickname || '', soopId: requestedSoopId };
 });
 
 const setStreamerPromoExclusion = onCall(async (request) => {
@@ -4298,6 +4339,7 @@ module.exports = {
   migratePromotedStreamers,
   listStreamerPromoLinks,
   addStreamerPromoCandidate,
+  removeStreamerPromoCandidate,
   setStreamerPromoExclusion,
   saveStreamerPromoLink,
   markStreamerPromoLinkOpened,
