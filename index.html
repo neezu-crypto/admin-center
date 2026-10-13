@@ -569,6 +569,36 @@
   .promo-stats-metric-label { color: var(--ink-mute); }
   .promo-stats-streamer { min-width: 0; overflow-wrap: anywhere; }
   .promo-stats-clicks { flex: 0 0 auto; white-space: nowrap; }
+  #streamerPromoLinksList { margin-top: 8px; }
+  .promo-streamer-row {
+    display: grid; grid-template-columns: minmax(145px, 190px) minmax(0, 1fr); grid-template-rows: auto auto;
+    align-items: center; gap: 8px 16px; padding: 13px 0; border-bottom: 1px solid var(--sub-border);
+  }
+  .promo-streamer-row:last-child { border-bottom: 0; }
+  .promo-streamer-identity {
+    grid-column: 1; grid-row: 1 / span 2; display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 4px;
+  }
+  .promo-streamer-name { max-width: 100%; color: var(--ink); font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
+  .promo-streamer-id { color: var(--ink-soft); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+  .promo-streamer-recent { margin: 2px 0 0; background: rgba(194,91,128,.12); color: #a9446d; }
+  .promo-streamer-link-group { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .promo-streamer-link-input {
+    flex: 1 1 auto; width: 100%; min-width: 0; height: 36px; padding: 8px 10px;
+    border: 1px solid rgba(20,20,22,.14); border-radius: 10px; background: rgba(255,255,255,.72);
+    color: var(--ink); font-family: inherit; font-size: 12px; transition: border-color .16s, box-shadow .16s, background .16s;
+  }
+  .promo-streamer-link-input:focus { outline: none; border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px rgba(232,70,44,.12); }
+  .promo-streamer-link-group .perm-refresh-btn, .promo-streamer-actions .perm-refresh-btn { min-height: 34px; white-space: nowrap; }
+  .promo-streamer-actions { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+  .promo-streamer-completion { display: inline-flex; align-items: center; gap: 5px; min-height: 32px; margin: 0 2px; color: var(--ink-soft); font-size: 12px; white-space: nowrap; cursor: pointer; }
+  .promo-streamer-completion input { accent-color: var(--accent); }
+  .promo-streamer-actions .promo-streamer-remove { margin-left: auto; border-color: rgba(190,63,54,.28); color: #a83d35; }
+  .promo-streamer-actions .promo-streamer-remove:hover { border-color: #c34a40; background: #fff5f3; }
+  .promo-streamer-actions .promo-streamer-open { text-decoration: none; }
+  .promo-streamer-actions .promo-streamer-open.is-complete { color: #18794e; border-color: rgba(63,182,137,.3); }
+  .promo-streamer-link-input::placeholder { color: #9a958a; }
+  .promo-streamer-link-group .perm-refresh-btn:focus-visible,
+  .promo-streamer-actions .perm-refresh-btn:focus-visible { outline: 3px solid rgba(232,70,44,.18); outline-offset: 2px; }
   @media (max-width: 600px) {
     .promo-stats-panel { padding: 12px; }
     .promo-stats-head { align-items: stretch; }
@@ -588,6 +618,20 @@
     .promo-stats-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-content: stretch; gap: 5px 8px; width: 100%; }
     .promo-stats-metric { white-space: normal; font-variant-numeric: tabular-nums; }
     .promo-stats-metric:last-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 640px) {
+    .promo-streamer-row { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; gap: 9px; padding: 12px 0; }
+    .promo-streamer-identity { grid-column: 1; grid-row: 1; flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 4px 9px; }
+    .promo-streamer-recent { align-self: center; }
+    .promo-streamer-link-group { grid-column: 1; grid-row: 2; }
+    .promo-streamer-actions { grid-column: 1; grid-row: 3; gap: 7px; }
+    .promo-streamer-actions .promo-streamer-remove { margin-left: auto; }
+  }
+  @media (max-width: 420px) {
+    .promo-streamer-link-group { gap: 6px; }
+    .promo-streamer-link-input { font-size: 11px; padding-inline: 8px; }
+    .promo-streamer-link-group .perm-refresh-btn, .promo-streamer-actions .perm-refresh-btn { padding-inline: 9px; font-size: 11.5px; }
+    .promo-streamer-actions { gap: 6px; }
   }
   @media (max-width: 1400px) {
     .quicknav { display: none !important; }
@@ -3679,19 +3723,21 @@
     });
     orderedStreamers.forEach(function (item) {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid rgba(20,20,22,0.08);';
+      row.className = 'promo-streamer-row';
       const identity = document.createElement('div');
-      identity.style.cssText = 'min-width:170px; flex:0 0 190px;';
-      identity.innerHTML = '<strong>' + escapeHtml(item.nickname || '(닉네임 미기재)') + '</strong>' +
-        (item.soopId ? '<span class="hint" style="display:block; margin-top:2px;">@' + escapeHtml(item.soopId) + '</span>' : '') +
-        (recentOpened && recentOpened.key === item.key ? '<span class="role-badge" style="display:inline-block; margin-top:5px; background:rgba(194,91,128,0.12); color:#b74f78;">최근 열어봄</span>' : '');
+      identity.className = 'promo-streamer-identity';
+      identity.innerHTML = '<strong class="promo-streamer-name">' + escapeHtml(item.nickname || '(닉네임 미기재)') + '</strong>' +
+        (item.soopId ? '<span class="promo-streamer-id">@' + escapeHtml(item.soopId) + '</span>' : '') +
+        (recentOpened && recentOpened.key === item.key ? '<span class="role-badge promo-streamer-recent">최근 열어봄</span>' : '');
+      const linkGroup = document.createElement('div');
+      linkGroup.className = 'promo-streamer-link-group';
       const input = document.createElement('input');
       input.type = 'url';
       input.value = item.writeUrl || '';
       input.placeholder = 'https://www.sooplive.com/.../글쓰기 주소';
       input.maxLength = 500;
+      input.className = 'promo-streamer-link-input';
       input.setAttribute('aria-label', (item.nickname || '스트리머') + ' 홍보글 글쓰기 링크');
-      input.style.cssText = 'flex:1 1 320px; min-width:220px; background:#f5f1e8; border:1px solid rgba(20,20,22,0.12); color:#1c1a17; padding:8px 10px; border-radius:10px; font-size:12.5px;';
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
       saveBtn.className = 'perm-refresh-btn';
@@ -3711,7 +3757,7 @@
           .finally(function () { saveBtn.disabled = false; });
       });
       const completionLabel = document.createElement('label');
-      completionLabel.style.cssText = 'display:flex; align-items:center; gap:4px; font-size:12px; white-space:nowrap;';
+      completionLabel.className = 'promo-streamer-completion';
       const completionInput = document.createElement('input');
       completionInput.type = 'checkbox';
       completionInput.checked = item.promotedCompleted === true;
@@ -3736,10 +3782,8 @@
           window.alert('홍보 완료 상태 저장에 실패했습니다: ' + (err && err.message ? err.message : err));
         }).finally(function () { completionInput.disabled = false; });
       });
-      row.appendChild(identity);
-      row.appendChild(input);
-      row.appendChild(saveBtn);
-      row.appendChild(completionLabel);
+      const actions = document.createElement('div');
+      actions.className = 'promo-streamer-actions';
       const generateBtn = document.createElement('button');
       generateBtn.type = 'button';
       generateBtn.className = 'perm-refresh-btn';
@@ -3758,11 +3802,11 @@
         streamerPromoGeneratorEl.hidden = false;
         streamerPromoGeneratorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
-      row.appendChild(generateBtn);
+      let removeBtn = null;
       if (item.isManualCandidate === true) {
-        const removeBtn = document.createElement('button');
+        removeBtn = document.createElement('button');
         removeBtn.type = 'button';
-        removeBtn.className = 'perm-refresh-btn';
+        removeBtn.className = 'perm-refresh-btn promo-streamer-remove';
         removeBtn.textContent = '목록 삭제';
         removeBtn.setAttribute('aria-label', (item.nickname || '수동 후보') + ' 홍보 목록 삭제');
         removeBtn.title = '수동으로 추가한 홍보 후보만 삭제합니다.';
@@ -3777,7 +3821,6 @@
             })
             .finally(function () { removeBtn.disabled = false; });
         });
-        row.appendChild(removeBtn);
       }
       if (item.writeUrl) {
         openLink = item.promotedCompleted ? document.createElement('button') : document.createElement('a');
@@ -3790,9 +3833,8 @@
           openLink.disabled = true;
           openLink.title = '홍보 완료 처리된 항목입니다.';
         }
-        openLink.className = 'perm-refresh-btn';
+        openLink.className = 'perm-refresh-btn promo-streamer-open' + (item.promotedCompleted ? ' is-complete' : '');
         openLink.textContent = item.promotedCompleted ? '홍보 완료' : '글쓰기 열기';
-        openLink.style.textDecoration = 'none';
         if (openLink.tagName === 'A') {
           openLink.dataset.promoWriteLink = 'true';
           openLink.dataset.nickname = item.nickname || '';
@@ -3815,17 +3857,24 @@
             console.warn('최근 열람 시간 저장 실패:', err);
           });
           setTimeout(function () { renderStreamerPromoLinksList(streamers, recentOpened); }, 0);
-          const recentBadge = identity.querySelector('.role-badge');
+          const recentBadge = identity.querySelector('.promo-streamer-recent');
           if (!recentBadge) {
             const badge = document.createElement('span');
-            badge.className = 'role-badge';
-            badge.style.cssText = 'display:inline-block; margin-top:5px; background:rgba(194,91,128,0.12); color:#b74f78;';
+            badge.className = 'role-badge promo-streamer-recent';
             badge.textContent = '최근 열어봄';
             identity.appendChild(badge);
           }
         });
-        row.appendChild(openLink);
       }
+      linkGroup.appendChild(input);
+      linkGroup.appendChild(saveBtn);
+      if (openLink) actions.appendChild(openLink);
+      actions.appendChild(generateBtn);
+      actions.appendChild(completionLabel);
+      if (removeBtn) actions.appendChild(removeBtn);
+      row.appendChild(identity);
+      row.appendChild(linkGroup);
+      row.appendChild(actions);
       streamerPromoLinksListEl.appendChild(row);
     });
   }
