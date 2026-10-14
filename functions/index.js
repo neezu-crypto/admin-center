@@ -2245,57 +2245,75 @@ const setLifeGameBotConfig = onCall(async (request) => {
 // market 배너와 동일하게) 남은 기간에 이어서 연장한다.
 async function commitLifeGameSponsorApproval(db, request, adminUid, requestId, daysNum, nickname, verificationMetadata) {
   const requestRef = db.ref('lifeGame/sponsorRequests/' + requestId);
-  const processingToken = require('node:crypto').randomBytes(16).toString('hex');
-  const claim = await requestRef.transaction((current) => {
-    if (!current || current.status !== 'pending') return;
-    return Object.assign({}, current, { status: 'processing', processingToken, processingStartedAt: Date.now() });
-  }, undefined, false);
-  if (!claim.committed) throw new HttpsError('failed-precondition', '대기 중인 신청이 아닙니다. 이미 처리 중일 수 있습니다.');
-  const reqData = claim.snapshot.val() || {};
-  let approvalCommitted = false;
+  // RTDB transaction callbacks run immediately against the local cache. A one-shot
+  // get() does not keep that cache active, so hold a value listener through the
+  // transaction to ensure a fresh Functions instance starts from server data.
+  let releaseRequestListener = function () {};
+  let existingRequest;
   try {
-    const finalNickname = nickname || reqData.nickname;
-    const now = Date.now();
-    const currentSnap = await db.ref('lifeGame/currentSponsor').get();
-    const current = currentSnap.val();
-    const baseTime = current && Number(current.endAt) > now ? Number(current.endAt) : now;
-    const endAt = baseTime + daysNum * 86400000;
-    const requestUpdates = Object.assign({
-      nickname: finalNickname,
-      status: 'approved',
-      reviewedAt: now,
-      reviewedBy: adminUid,
-      processingToken: null,
-      processingStartedAt: null,
-    }, verificationMetadata || {});
-    await db.ref().update(Object.assign({
-      'lifeGame/currentSponsor': {
-        nickname: finalNickname,
-        soopId: reqData.soopId,
-        previewImg: reqData.previewImg,
-        stationLink: reqData.stationLink,
-        startAt: now,
-        endAt,
-      },
-      ['lifeGame/sponsorRequests/' + requestId]: requestUpdates,
-    }));
-    approvalCommitted = true;
-    let auditLogged = true;
+    existingRequest = await new Promise((resolve, reject) => {
+      const onRequestValue = (snapshot) => resolve(snapshot.val());
+      const onRequestError = (error) => reject(error);
+      releaseRequestListener = () => requestRef.off('value', onRequestValue);
+      requestRef.on('value', onRequestValue, onRequestError);
+    });
+    if (!existingRequest || existingRequest.status !== 'pending') {
+      throw new HttpsError('failed-precondition', '대기 중인 신청이 아닙니다. 이미 처리 중일 수 있습니다.');
+    }
+    const processingToken = require('node:crypto').randomBytes(16).toString('hex');
+    const claim = await requestRef.transaction((current) => {
+      if (!current || current.status !== 'pending') return;
+      return Object.assign({}, current, { status: 'processing', processingToken, processingStartedAt: Date.now() });
+    }, undefined, false);
+    if (!claim.committed) throw new HttpsError('failed-precondition', '대기 중인 신청이 아닙니다. 이미 처리 중일 수 있습니다.');
+    const reqData = claim.snapshot.val() || {};
+    let approvalCommitted = false;
     try {
-      await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 승인', finalNickname + ' · ' + daysNum + '일');
-    } catch (auditError) {
-      auditLogged = false;
-      console.error('인생게임 후원 스트리머 승인 감사 로그 실패:', String(auditError && auditError.message || auditError).slice(0, 160));
+      const finalNickname = nickname || reqData.nickname;
+      const now = Date.now();
+      const currentSnap = await db.ref('lifeGame/currentSponsor').get();
+      const current = currentSnap.val();
+      const baseTime = current && Number(current.endAt) > now ? Number(current.endAt) : now;
+      const endAt = baseTime + daysNum * 86400000;
+      const requestUpdates = Object.assign({
+        nickname: finalNickname,
+        status: 'approved',
+        reviewedAt: now,
+        reviewedBy: adminUid,
+        processingToken: null,
+        processingStartedAt: null,
+      }, verificationMetadata || {});
+      await db.ref().update(Object.assign({
+        'lifeGame/currentSponsor': {
+          nickname: finalNickname,
+          soopId: reqData.soopId,
+          previewImg: reqData.previewImg,
+          stationLink: reqData.stationLink,
+          startAt: now,
+          endAt,
+        },
+        ['lifeGame/sponsorRequests/' + requestId]: requestUpdates,
+      }));
+      approvalCommitted = true;
+      let auditLogged = true;
+      try {
+        await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 승인', finalNickname + ' · ' + daysNum + '일');
+      } catch (auditError) {
+        auditLogged = false;
+        console.error('인생게임 후원 스트리머 승인 감사 로그 실패:', String(auditError && auditError.message || auditError).slice(0, 160));
+      }
+      return { ok: true, endAt, auditLogged };
+    } catch (error) {
+      if (!approvalCommitted) {
+        await requestRef.transaction((current) => {
+          if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
+          return Object.assign({}, current, { status: 'pending', processingToken: null, processingStartedAt: null });
+        }, undefined, false).catch(() => null);
+      }
+      throw error;
     }
-    return { ok: true, endAt, auditLogged };
-  } catch (error) {
-    if (!approvalCommitted) {
-      await requestRef.transaction((current) => {
-        if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
-        return Object.assign({}, current, { status: 'pending', processingToken: null, processingStartedAt: null });
-      }, undefined, false).catch(() => null);
-    }
-    throw error;
+  } finally {
+    releaseRequestListener();
   }
 }
 
