@@ -927,6 +927,10 @@
           초
         </label>
         <label style="display:flex; align-items:center; gap:5px; font-size:12px;">
+          <input id="streamerPromoBatchRandomizeOrder" type="checkbox">
+          게시 순서 무작위
+        </label>
+        <label style="display:flex; align-items:center; gap:5px; font-size:12px;">
           <input id="streamerPromoBatchTestOnly" type="checkbox">
           테스트(입력만, 게시 안 함)
         </label>
@@ -940,7 +944,7 @@
         <p id="streamerPromoPendingHint" class="hint" style="margin:5px 0 8px;">게시하지 않은 것이 확실한 기록만 해제하세요. 실제 게시 확인이 늦어진 기록을 해제하면 중복 게시될 수 있습니다.</p>
         <div id="streamerPromoPendingList"></div>
       </div>
-      <p class="hint" style="margin:6px 0 0;">순차 자동 게시에서는 HTTPS SOOP 글쓰기 주소(`/station/{방송국ID}/post/write/{게시판ID}`) 형식이고 방송국 ID까지 일치하는 항목만 게시합니다. 형식이 다르거나 ID가 다른 미완료 항목은 자동으로 건너뜁니다. 실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 100건, 간격은 10초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
+      <p class="hint" style="margin:6px 0 0;">순차 자동 게시에서는 HTTPS SOOP 글쓰기 주소(`/station/{방송국ID}/post/write/{게시판ID}`) 형식이고 방송국 ID까지 일치하는 항목만 게시합니다. 형식이 다르거나 ID가 다른 미완료 항목은 자동으로 건너뜁니다. 실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 반복은 한 번에 최대 100건, 간격은 10초~10분으로 제한되며, 오류가 나면 다음 게시를 멈춥니다. ‘게시 순서 무작위’를 선택하면 선택된 대상의 순서만 섞고 대기시간은 설정값을 유지합니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
       <div class="promo-stats-panel">
@@ -1596,6 +1600,7 @@
   const streamerPromoLinksListEl = document.getElementById('streamerPromoLinksList');
   const streamerPromoBatchCountEl = document.getElementById('streamerPromoBatchCount');
   const streamerPromoBatchDelayEl = document.getElementById('streamerPromoBatchDelay');
+  const streamerPromoBatchRandomizeOrderEl = document.getElementById('streamerPromoBatchRandomizeOrder');
   const streamerPromoBatchTestOnlyEl = document.getElementById('streamerPromoBatchTestOnly');
   const streamerPromoBatchStartBtn = document.getElementById('streamerPromoBatchStartBtn');
   const streamerPromoBatchStopBtn = document.getElementById('streamerPromoBatchStopBtn');
@@ -3554,6 +3559,7 @@
     const completed = Math.max(0, Number(state && state.completedCount) || 0);
     const nickname = String(state && state.currentNickname || '').trim();
     const delaySeconds = Math.max(0, Math.round((Number(state && state.delayMs) || 0) / 1000));
+    const orderPrefix = state && state.randomizeOrder === true && state.testOnly !== true ? '무작위 순서 · ' : '';
     const labels = {
       starting: '자동 게시 준비 중…',
       preparing: nickname ? (index + 1) + '/' + total + ' · ' + nickname + ' 글쓰기 화면을 여는 중…' : '글쓰기 화면을 여는 중…',
@@ -3572,11 +3578,12 @@
     };
     const terminal = ['idle', 'cancelled', 'failed', 'complete', 'test-ready'].includes(status);
     promoBatchIsActive = !terminal;
-    streamerPromoBatchStatusEl.textContent = labels[status] || String(state && state.message || '자동 게시 상태 확인 중…');
+    streamerPromoBatchStatusEl.textContent = orderPrefix + (labels[status] || String(state && state.message || '자동 게시 상태 확인 중…'));
     streamerPromoBatchStartBtn.disabled = promoBatchIsActive || state.unresolvedPublish === true;
     streamerPromoBatchStopBtn.disabled = !promoBatchIsActive;
     streamerPromoBatchCountEl.disabled = promoBatchIsActive;
     streamerPromoBatchDelayEl.disabled = promoBatchIsActive;
+    streamerPromoBatchRandomizeOrderEl.disabled = promoBatchIsActive;
     streamerPromoBatchTestOnlyEl.disabled = promoBatchIsActive;
   }
 
@@ -3603,6 +3610,7 @@
   async function startStreamerPromoBatch() {
     if (promoBatchIsActive) return;
     const testOnly = streamerPromoBatchTestOnlyEl.checked;
+    const randomizeOrder = !testOnly && streamerPromoBatchRandomizeOrderEl.checked;
     const repeatCount = Math.max(1, Math.min(100, Math.trunc(Number(streamerPromoBatchCountEl.value) || 1)));
     const delaySeconds = Math.max(10, Math.min(600, Math.trunc(Number(streamerPromoBatchDelayEl.value) || 30)));
     streamerPromoBatchCountEl.value = String(testOnly ? 1 : repeatCount);
@@ -3644,6 +3652,7 @@
       const actionLabel = testOnly ? '테스트 입력' : '공개 게시';
       const prompt = actionLabel + '을 시작할까요?\n\n대상 ' + selected.length + '명' +
         (testOnly ? ' (글쓰기 화면 입력만, 게시하지 않음)' : ' · 게시 확인 후 다음 대상으로 이동') +
+        (randomizeOrder ? '\n게시 순서: 무작위 (대상 목록은 동일, 대기시간은 설정값 유지)' : '') +
         (skippedInvalidLinkCount ? '\nSOOP 링크 형식 불일치 또는 방송국 ID 불일치 ' + skippedInvalidLinkCount + '건 자동 제외' : '') +
         '\n사이클당 대기: ' + delaySeconds + '초\n\n' + targetNames + moreNames +
         (testOnly ? '' : '\n\nSOOP에 실제 공개 게시됩니다. 자동화 중 Esc 또는 중단 버튼으로 이후 작업을 멈출 수 있습니다.');
@@ -3659,6 +3668,7 @@
         repeatCount: selected.length,
         delayMs: delaySeconds * 1000,
         testOnly: testOnly,
+        randomizeOrder: randomizeOrder,
       });
       promoBatchStartPending = false;
       if (promoBatchCancelRequestedWhileStarting) {
