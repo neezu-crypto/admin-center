@@ -1315,6 +1315,15 @@
   let promoDuplicateListCache = null;
   let promoDuplicateListExpiresAt = 0;
   let promoDuplicateListRequest = null;
+  let promoDuplicateListEpoch = 0;
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data || data.__soopPromoListEntryRemoved !== true) return;
+    promoDuplicateListEpoch += 1;
+    promoDuplicateListCache = null;
+    promoDuplicateListExpiresAt = 0;
+    promoDuplicateListRequest = null;
+  });
   window.addEventListener('message', function (event) {
     const data = event.data;
     if (event.source !== window || event.origin !== location.origin || !data ||
@@ -1335,14 +1344,18 @@
     const loadPromoList = function () {
       if (promoDuplicateListCache && Date.now() < promoDuplicateListExpiresAt) return Promise.resolve(promoDuplicateListCache);
       if (promoDuplicateListRequest) return promoDuplicateListRequest;
+      const requestEpoch = promoDuplicateListEpoch;
       traceDuplicateLookup('promo-duplicate-list-fetch-started', { stationId: stationId });
       promoDuplicateListRequest = listStreamerPromoLinksFn().then(function (result) {
         const streamers = result && result.data && Array.isArray(result.data.streamers) ? result.data.streamers : [];
         const excludedStreamers = result && result.data && Array.isArray(result.data.excludedStreamers) ? result.data.excludedStreamers : [];
-        promoDuplicateListCache = { streamers: streamers, excludedStreamers: excludedStreamers };
-        promoDuplicateListExpiresAt = Date.now() + 30000;
+        const fetched = { streamers: streamers, excludedStreamers: excludedStreamers };
+        if (requestEpoch === promoDuplicateListEpoch) {
+          promoDuplicateListCache = fetched;
+          promoDuplicateListExpiresAt = Date.now() + 30000;
+        }
         traceDuplicateLookup('promo-duplicate-list-fetch-succeeded', { count: streamers.length, excludedCount: excludedStreamers.length });
-        return promoDuplicateListCache;
+        return fetched;
       }).finally(function () { promoDuplicateListRequest = null; });
       return promoDuplicateListRequest;
     };
@@ -3341,6 +3354,12 @@
       const result = await listStreamerPromoLinksFn();
       renderStreamerPromoLinksList(result.data.streamers || [], result.data.recentOpened || null);
       renderStreamerPromoUnlistedList(result.data.unlistedStreamers || [], result.data.unlistedNicknameUnavailableCount || 0);
+      const seedMigration = result.data.seedMigration || null;
+      if (seedMigration && seedMigration.alreadyCompleted !== true && Number(seedMigration.migratedCount) > 0) {
+        const legacyCount = Number(seedMigration.legacyCount) || 0;
+        streamerPromoLinksStatusEl.textContent = Number(seedMigration.migratedCount).toLocaleString('ko-KR') +
+          '건을 SOOP ID 기준 홍보 후보로 이전했습니다.' + (legacyCount ? ' cafe_* 링크 등 ' + legacyCount + '건은 기존 목록에 보존했습니다.' : '');
+      }
     } catch (e) {
       console.error('스트리머 홍보글 링크 조회 실패:', e);
       streamerPromoLinksListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다.</div>';
@@ -3807,20 +3826,28 @@
         streamerPromoGeneratorEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
       });
       let removeBtn = null;
-      if (item.isManualCandidate === true) {
+      if (item.canRemove === true || item.soopId) {
         removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.className = 'perm-refresh-btn promo-streamer-remove';
         removeBtn.textContent = '목록 삭제';
-        removeBtn.setAttribute('aria-label', (item.nickname || '수동 후보') + ' 홍보 목록 삭제');
-        removeBtn.title = '수동으로 추가한 홍보 후보만 삭제합니다.';
+        removeBtn.setAttribute('aria-label', (item.nickname || '스트리머') + ' 홍보 목록 삭제');
+        removeBtn.title = '홍보 목록에서만 제외합니다. 스트리머 인증 기록은 유지됩니다.';
         removeBtn.addEventListener('click', function () {
           if (!window.confirm((item.nickname || '이 스트리머') + ' (@' + (item.soopId || '') + ')를 홍보 리스트에서 삭제할까요?')) return;
           removeBtn.disabled = true;
           removeStreamerPromoCandidateFn({ soopId: item.soopId || '' })
-            .then(function () { return refreshStreamerPromoLinks(); })
+            .then(function (result) {
+              window.postMessage({
+                __soopPromoListEntryRemoved: true,
+                stationId: item.soopId || '',
+                nickname: item.nickname || '',
+                promoKey: result.data && result.data.promoKey || item.key || '',
+              }, location.origin);
+              return refreshStreamerPromoLinks();
+            })
             .catch(function (err) {
-              console.error('수동 홍보 후보 삭제 실패:', err);
+              console.error('홍보 목록 제외 실패:', err);
               window.alert('홍보 리스트 삭제에 실패했습니다: ' + (err && err.message ? err.message : err));
             })
             .finally(function () { removeBtn.disabled = false; });

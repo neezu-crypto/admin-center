@@ -991,6 +991,150 @@ function promoStorageKey(verificationId, soopId) {
   return normalizedId || ('verification_' + String(verificationId || '').replace(/[^A-Za-z0-9_-]/g, '_'));
 }
 
+const STREAMER_PROMO_SEED_MIGRATION_KEY = 'seedToCandidatesV1';
+
+async function migrateStreamerPromoSeedToCandidates(db, adminUid, request) {
+  const migrationRef = db.ref('adminCenter/streamerPromoSeedMigration');
+  const initialStatus = (await migrationRef.get()).val() || {};
+  if (initialStatus.completedAt) {
+    return {
+      migratedCount: Number(initialStatus.migratedCount) || 0,
+      skippedCount: Number(initialStatus.skippedCount) || 0,
+      legacyCount: Number(initialStatus.legacyCount) || 0,
+      alreadyCompleted: true,
+    };
+  }
+
+  const now = Date.now();
+  const lockOwner = String(adminUid || 'admin') + '-' + now + '-' + Math.random().toString(36).slice(2, 8);
+  const lockRef = migrationRef.child('lock');
+  const lockResult = await lockRef.transaction(function (current) {
+    if (current && Number(current.expiresAt) > now) return;
+    return { owner: lockOwner, expiresAt: now + 2 * 60 * 1000 };
+  });
+  if (!lockResult.committed) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise(function (resolve) { setTimeout(resolve, 100); });
+      const latestStatus = (await migrationRef.get()).val() || {};
+      if (latestStatus.completedAt) {
+        return {
+          migratedCount: Number(latestStatus.migratedCount) || 0,
+          skippedCount: Number(latestStatus.skippedCount) || 0,
+          legacyCount: Number(latestStatus.legacyCount) || 0,
+          alreadyCompleted: true,
+        };
+      }
+    }
+    throw new HttpsError('unavailable', '기본 홍보 목록 이전이 이미 진행 중입니다. 잠시 후 다시 불러와주세요.');
+  }
+
+  try {
+    const [seedSnap, candidatesSnap, linksSnap, recentSnap, archiveSnap, latestStatusSnap] = await Promise.all([
+      db.ref('adminCenter/streamerPromoSeed').get(),
+      db.ref('adminCenter/streamerPromoCandidates').get(),
+      db.ref('adminCenter/streamerPromoLinks').get(),
+      db.ref('adminCenter/streamerPromoRecent').get(),
+      db.ref('adminCenter/streamerPromoSeedArchive/' + STREAMER_PROMO_SEED_MIGRATION_KEY).get(),
+      migrationRef.get(),
+    ]);
+    const latestStatus = latestStatusSnap.val() || {};
+    if (latestStatus.completedAt) {
+      return {
+        migratedCount: Number(latestStatus.migratedCount) || 0,
+        skippedCount: Number(latestStatus.skippedCount) || 0,
+        legacyCount: Number(latestStatus.legacyCount) || 0,
+        alreadyCompleted: true,
+      };
+    }
+
+    const seed = seedSnap.val() || {};
+    const candidates = candidatesSnap.val() || {};
+    const links = linksSnap.val() || {};
+    const recent = recentSnap.val() || null;
+    const existingCandidateIds = new Set(Object.keys(candidates).map(function (key) {
+      const row = candidates[key] || {};
+      return normalizeSoopId(row.soopId || key);
+    }).filter(Boolean));
+    const updates = {};
+    const legacyEntries = {};
+    const migratedIds = [];
+    const migratedPromoKeys = {};
+    let skippedCount = 0;
+    let legacyCount = 0;
+    Object.keys(seed).forEach(function (key) {
+      const entry = seed[key] || {};
+      const soopId = normalizeSoopId(entry.soopId || key);
+      const nickname = String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim();
+      if (key.startsWith('cafe_')) {
+        legacyEntries[key] = entry;
+        skippedCount += 1;
+        legacyCount += 1;
+        return;
+      }
+      if (!soopId || !nickname) {
+        legacyEntries[key] = entry;
+        skippedCount += 1;
+        legacyCount += 1;
+        return;
+      }
+      const oldPromoKey = String(entry.key || key);
+      const newPromoKey = promoStorageKey('', soopId);
+      migratedPromoKeys[soopId] = { oldPromoKey: oldPromoKey, newPromoKey: newPromoKey };
+      if (existingCandidateIds.has(soopId)) {
+        skippedCount += 1;
+      } else {
+        const stamp = Date.now();
+        updates['adminCenter/streamerPromoCandidates/' + soopId] = {
+          nickname: nickname,
+          soopId: soopId,
+          writeUrl: String(entry.writeUrl || ''),
+          createdAt: stamp,
+          updatedAt: stamp,
+          createdBy: 'streamer-promo-seed-migration',
+          updatedBy: adminUid || 'streamer-promo-seed-migration',
+          migratedFromSeed: true,
+        };
+        existingCandidateIds.add(soopId);
+        migratedIds.push(soopId);
+      }
+
+      // Seed 항목 일부는 SOOP ID가 아니라 cafe_* 키로 저장됐습니다.
+      // 후보 키를 SOOP ID로 통일하더라도 기존 링크/완료 상태가 사라지지 않게
+      // canonical 키로 복사하고, 이미 canonical 레코드에 있는 값이 우선하도록 합니다.
+      if (oldPromoKey !== newPromoKey && links[oldPromoKey]) {
+        const canonicalLink = links[newPromoKey] || {};
+        updates['adminCenter/streamerPromoLinks/' + newPromoKey] = Object.assign({}, links[oldPromoKey], canonicalLink);
+      }
+    });
+
+    const normalizedRecentId = normalizeSoopId(recent && recent.soopId);
+    const recentMapping = normalizedRecentId && migratedPromoKeys[normalizedRecentId];
+    if (recentMapping && recent && recent.key !== recentMapping.newPromoKey) {
+      updates['adminCenter/streamerPromoRecent/key'] = recentMapping.newPromoKey;
+    }
+
+    if (!archiveSnap.exists() && seedSnap.exists()) {
+      updates['adminCenter/streamerPromoSeedArchive/' + STREAMER_PROMO_SEED_MIGRATION_KEY] = seed;
+    }
+    updates['adminCenter/streamerPromoSeed'] = Object.keys(legacyEntries).length ? legacyEntries : null;
+    updates['adminCenter/streamerPromoSeedMigration/completedAt'] = Date.now();
+    updates['adminCenter/streamerPromoSeedMigration/migratedCount'] = migratedIds.length;
+    updates['adminCenter/streamerPromoSeedMigration/skippedCount'] = skippedCount;
+    updates['adminCenter/streamerPromoSeedMigration/legacyCount'] = legacyCount;
+    updates['adminCenter/streamerPromoSeedMigration/legacyKeys'] = Object.keys(legacyEntries).length
+      ? Object.fromEntries(Object.keys(legacyEntries).map(function (key) { return [key, true]; }))
+      : null;
+    updates['adminCenter/streamerPromoSeedMigration/migratedBy'] = adminUid || '';
+    await db.ref().update(updates);
+    await logToAdminAuditLog(db, request, '기본 홍보 목록을 후보 목록으로 이전', migratedIds.length + '건 이전, ' + skippedCount + '건 보존/건너뜀');
+    return { migratedCount: migratedIds.length, skippedCount: skippedCount, legacyCount: legacyCount, alreadyCompleted: false };
+  } finally {
+    await lockRef.transaction(function (current) {
+      return current && current.owner === lockOwner ? null : current;
+    });
+  }
+}
+
 function getKnownPromoEntries(seedValue, verifiedValue, candidateValue) {
   const entries = Object.keys(seedValue || {}).map(function (key) {
     const entry = seedValue[key] || {};
@@ -1025,6 +1169,15 @@ function getKnownPromoEntries(seedValue, verifiedValue, candidateValue) {
   return Object.keys(byKey).map(function (key) { return byKey[key]; });
 }
 
+function isPromoEntryRemoved(entry, removedValue) {
+  const removed = removedValue || {};
+  const soopId = normalizeSoopId(entry && entry.soopId);
+  const byId = soopId ? removed[soopId] : null;
+  const byKey = entry && entry.key ? removed[entry.key] : null;
+  return byId === true || byKey === true || !!(byId && typeof byId === 'object' && byId.removedAt) ||
+    !!(byKey && typeof byKey === 'object' && byKey.removedAt);
+}
+
 function collectVerifiedStreamerEntries(value) {
   const data = value || {};
   const bySoopId = {};
@@ -1051,15 +1204,17 @@ function normalizePromoStockMatchName(value) {
 }
 
 const listStreamerPromoLinks = onCall(async (request) => {
-  await requireAdmin(request);
+  const adminUid = await requireAdmin(request);
   const db = getDatabase();
-  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap, seedSnap, stocksSnap] = await Promise.all([
+  const migration = await migrateStreamerPromoSeedToCandidates(db, adminUid, request);
+  const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap, seedSnap, removedPromoSnap, stocksSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoLinks').get(),
     db.ref('adminCenter/streamerPromoRecent').get(),
     db.ref('adminCenter/streamerPromoExcluded').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
     db.ref('adminCenter/streamerPromoSeed').get(),
+    db.ref('adminCenter/streamerPromoRemoved').get(),
     db.ref('stocks').get(),
   ]);
   const links = linksSnap.val() || {};
@@ -1090,6 +1245,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
     await db.ref().update(cleanupUpdates);
   }
   const excludedPromoIds = excludedPromoSnap.val() || {};
+  const removedPromoIds = removedPromoSnap.val() || {};
   const knownPromoEntries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
   const isExcluded = function (entry) {
     return excludedPromoIds[entry.key] === true || (entry.soopId && excludedPromoIds[entry.soopId] === true);
@@ -1107,7 +1263,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
     };
   });
   const streamers = knownPromoEntries.filter(function (entry) {
-    return !isExcluded(entry);
+    return !isExcluded(entry) && !isPromoEntryRemoved(entry, removedPromoIds);
   });
   streamers.sort(function (a, b) {
     return (a.nickname || a.soopId).localeCompare((b.nickname || b.soopId), 'ko') || a.soopId.localeCompare(b.soopId);
@@ -1131,6 +1287,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
         nickname: entry.nickname,
         soopId: entry.soopId,
         isManualCandidate: entry.isManualCandidate === true,
+        canRemove: !!normalizeSoopId(entry.soopId),
         writeUrl: typeof saved.writeUrl === 'string' && saved.writeUrl ? saved.writeUrl : (entry.writeUrl || ''),
         promotedCompleted: saved.promotedCompleted === true,
         lastOpenedAt: recentOpened && recentOpened.key === key ? recentOpened.lastOpenedAt || null : null,
@@ -1143,6 +1300,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
     unlistedNicknameUnavailableCount: streamers.length - comparableStreamers.length,
     excludedStreamers: excludedStreamers,
     recentOpened: recentOpened || null,
+    seedMigration: migration,
   };
 });
 
@@ -1164,12 +1322,15 @@ const addStreamerPromoCandidate = onCall(async (request) => {
   }
 
   const db = getDatabase();
-  const [verifiedSnap, candidatesSnap, seedSnap] = await Promise.all([
+  const [verifiedSnap, candidatesSnap, seedSnap, removedPromoSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
     db.ref('adminCenter/streamerPromoSeed').get(),
+    db.ref('adminCenter/streamerPromoRemoved').get(),
   ]);
-  const entries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
+  const removedPromoIds = removedPromoSnap.val() || {};
+  const entries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val())
+    .filter(function (entry) { return !isPromoEntryRemoved(entry, removedPromoIds); });
   const normalizedNickname = nickname.toLocaleLowerCase();
   const duplicate = entries.find(function (entry) {
     return String(entry.soopId || '').toLowerCase() === soopId ||
@@ -1180,7 +1341,8 @@ const addStreamerPromoCandidate = onCall(async (request) => {
   }
 
   const now = Date.now();
-  await db.ref('adminCenter/streamerPromoCandidates/' + soopId).set({
+  const updates = {};
+  updates['adminCenter/streamerPromoCandidates/' + soopId] = {
     nickname: nickname,
     soopId: soopId,
     writeUrl: writeUrl,
@@ -1188,49 +1350,75 @@ const addStreamerPromoCandidate = onCall(async (request) => {
     updatedAt: now,
     createdBy: adminUid,
     updatedBy: adminUid,
-  });
+  };
+  updates['adminCenter/streamerPromoRemoved/' + soopId] = null;
+  updates['adminCenter/streamerPromoExcluded/' + soopId] = null;
+  await db.ref().update(updates);
   await logToAdminAuditLog(db, request, '스트리머 홍보 후보 추가', nickname + ' (@' + soopId + ')');
   return { ok: true, nickname: nickname, soopId: soopId, writeUrl: writeUrl };
 });
 
 const removeStreamerPromoCandidate = onCall(async (request) => {
-  await requireAdmin(request);
+  const adminUid = await requireAdmin(request);
   const data = request.data || {};
   const requestedSoopId = normalizeSoopId(data.soopId);
   if (!requestedSoopId) {
-    throw new HttpsError('invalid-argument', '삭제할 스트리머의 SOOP 아이디를 확인해주세요.');
+    throw new HttpsError('invalid-argument', '홍보 목록에서 제외할 스트리머의 SOOP 아이디를 확인해주세요.');
   }
 
   const db = getDatabase();
-  const [verifiedSnap, candidatesSnap, seedSnap, recentSnap] = await Promise.all([
+  await migrateStreamerPromoSeedToCandidates(db, adminUid, request);
+  const [verifiedSnap, candidatesSnap, seedSnap, recentSnap, linksSnap, removedSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
     db.ref('adminCenter/streamerPromoCandidates').get(),
     db.ref('adminCenter/streamerPromoSeed').get(),
     db.ref('adminCenter/streamerPromoRecent').get(),
+    db.ref('adminCenter/streamerPromoLinks').get(),
+    db.ref('adminCenter/streamerPromoRemoved').get(),
   ]);
   const candidates = candidatesSnap.val() || {};
+  const removed = removedSnap.val() || {};
   const candidateKey = Object.keys(candidates).find(function (key) {
     const candidate = candidates[key] || {};
     return normalizeSoopId(candidate.soopId || key) === requestedSoopId;
   });
-  if (!candidateKey) throw new HttpsError('not-found', '수동 홍보 후보를 찾을 수 없습니다.');
-
   const entry = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidates)
     .find(function (item) { return item.soopId === requestedSoopId; });
-  if (!entry || entry.isManualCandidate !== true) {
-    throw new HttpsError('failed-precondition', '수동 등록 후보만 홍보 리스트에서 삭제할 수 있습니다.');
+  if (!entry || isPromoEntryRemoved(entry, removed)) {
+    throw new HttpsError('not-found', '홍보 목록에서 제외할 스트리머를 찾을 수 없습니다.');
   }
 
+  const now = Date.now();
+  const links = linksSnap.val() || {};
+  const savedLink = Object.assign({}, links[entry.key] || {}, links[requestedSoopId] || {});
   const updates = {};
-  updates['adminCenter/streamerPromoCandidates/' + candidateKey] = null;
+  if (candidateKey) updates['adminCenter/streamerPromoCandidates/' + candidateKey] = null;
   updates['adminCenter/streamerPromoLinks/' + entry.key] = null;
+  if (entry.key !== requestedSoopId) updates['adminCenter/streamerPromoLinks/' + requestedSoopId] = null;
+  updates['adminCenter/streamerPromoRemoved/' + requestedSoopId] = {
+    nickname: String(entry.nickname || ''),
+    soopId: requestedSoopId,
+    promoKey: String(entry.key || ''),
+    removedAt: now,
+    removedBy: adminUid,
+    previousWriteUrl: String(savedLink.writeUrl || entry.writeUrl || ''),
+    previousPromotedCompleted: savedLink.promotedCompleted === true,
+  };
+  updates['adminCenter/streamerPromoExcluded/' + requestedSoopId] = null;
+  if (entry.key && entry.key !== requestedSoopId) updates['adminCenter/streamerPromoExcluded/' + entry.key] = null;
+  const seed = seedSnap.val() || {};
+  Object.keys(seed).forEach(function (key) {
+    if (normalizeSoopId(seed[key] && (seed[key].soopId || key)) === requestedSoopId) {
+      updates['adminCenter/streamerPromoSeed/' + key] = null;
+    }
+  });
   const recent = recentSnap.val() || null;
   if (recent && (recent.key === entry.key || normalizeSoopId(recent.soopId) === requestedSoopId)) {
     updates['adminCenter/streamerPromoRecent'] = null;
   }
   await db.ref().update(updates);
-  await logToAdminAuditLog(db, request, '수동 스트리머 홍보 후보 삭제', (entry.nickname || requestedSoopId) + ' (@' + requestedSoopId + ')');
-  return { ok: true, removed: true, nickname: entry.nickname || '', soopId: requestedSoopId };
+  await logToAdminAuditLog(db, request, '홍보 목록에서 스트리머 제외', (entry.nickname || requestedSoopId) + ' (@' + requestedSoopId + ')');
+  return { ok: true, removed: true, nickname: entry.nickname || '', soopId: requestedSoopId, promoKey: entry.key || '' };
 });
 
 const setStreamerPromoExclusion = onCall(async (request) => {
@@ -1246,12 +1434,15 @@ const setStreamerPromoExclusion = onCall(async (request) => {
   const db = getDatabase();
   const exclusionRef = db.ref('adminCenter/streamerPromoExcluded/' + soopId);
   if (excluded) {
-    const [verifiedSnap, candidatesSnap, seedSnap] = await Promise.all([
+    const [verifiedSnap, candidatesSnap, seedSnap, removedSnap] = await Promise.all([
       db.ref('streamerVerifications').get(),
       db.ref('adminCenter/streamerPromoCandidates').get(),
       db.ref('adminCenter/streamerPromoSeed').get(),
+      db.ref('adminCenter/streamerPromoRemoved').get(),
     ]);
-    const known = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val());
+    const removed = removedSnap.val() || {};
+    const known = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val())
+      .filter(function (entry) { return !isPromoEntryRemoved(entry, removed); });
     const registered = known.find(function (entry) {
       return String(entry.soopId || '').toLowerCase() === soopId ||
         String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === nickname.toLocaleLowerCase();
