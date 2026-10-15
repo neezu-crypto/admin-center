@@ -2328,9 +2328,36 @@
     }).then(function (result) {
       const first = result && result.data || {};
       if (!first.ok && first.reason === 'no-matching-pending-request') {
+        const diagnosticReasons = [{ service: 'soop-stock-market', reason: String(first.diagnosticReason || 'unknown') }];
         return bmConfirmVerificationByNoteFn({ senderId: senderId, code: code, noteNo: noteNo }).then(function (bettingResult) {
-          return bettingResult && bettingResult.data || {};
+          const second = bettingResult && bettingResult.data || {};
+          if (!second.ok && second.reason === 'no-matching-pending-request') {
+            diagnosticReasons.push({ service: 'streambet-market', reason: String(second.diagnosticReason || 'unknown') });
+            console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({
+              stage: 'server-rejected',
+              at: new Date().toISOString(),
+              details: { diagnosticReasons: diagnosticReasons },
+            }));
+            return Object.assign({}, second, { diagnosticReasons: diagnosticReasons });
+          }
+          if (!second.ok) {
+            diagnosticReasons.push({ service: 'streambet-market', reason: String(second.reason || 'unknown') });
+            console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({
+              stage: 'server-rejected',
+              at: new Date().toISOString(),
+              details: { diagnosticReasons: diagnosticReasons },
+            }));
+            return Object.assign({}, second, { diagnosticReasons: diagnosticReasons });
+          }
+          return second;
         });
+      }
+      if (!first.ok) {
+        console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({
+          stage: 'server-rejected',
+          at: new Date().toISOString(),
+          details: { diagnosticReasons: [{ service: 'soop-stock-market', reason: String(first.diagnosticReason || first.reason || 'unknown') }] },
+        }));
       }
       return first;
     }).then(function (data) {
@@ -2338,7 +2365,7 @@
         console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({ stage: 'server-approved', at: new Date().toISOString(), details: { senderId: senderId, noteNo: noteNo } }));
         refreshVerificationOverview(true);
       }
-      reply({ ok: data.ok === true, reason: String(data.reason || ''), nickname: String(data.nickname || ''), isSwitch: data.isSwitch === true });
+      reply({ ok: data.ok === true, reason: String(data.reason || ''), nickname: String(data.nickname || ''), isSwitch: data.isSwitch === true, diagnosticReasons: Array.isArray(data.diagnosticReasons) ? data.diagnosticReasons : [] });
     }).catch(function (error) {
       console.error('SOOP 인증 쪽지 자동 승인 실패:', error);
       reply({ ok: false, reason: String(error && error.code || 'server-error') });
