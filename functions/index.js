@@ -1968,6 +1968,28 @@ const notifyGalleryUnlockRequest = onValueCreated('/gallery/unlockRequests/{id}'
     '\nhttps://neezu-crypto.github.io/streamer-gallery/ (관리자 패널에서 확인)'
   );
 });
+// 스트리머 고점체크 계정 구독 신청은 팬페이지 함수가 서버 전용 pending 큐에
+// 요청 ID를 기록한다. 신청 상세에서 후원자 닉네임만 가져오고 UID는 Discord로 보내지 않는다.
+const notifyFanPageViewerSubscriptionRequest = onValueCreated('/streamerFanPageViewerSubscriptionPending/{requestId}', async (event) => {
+  const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+  if (!requestId) return;
+  const requestSnapshot = await getDatabase()
+    .ref('streamerFanPageViewerSubscriptionRequests/' + requestId)
+    .get();
+  const data = requestSnapshot.val() || {};
+  const nickname = String(data.nickname || '(닉네임 없음)')
+    .replace(/[@<>\r\n`]/g, ' ')
+    .slice(0, 60);
+  const requestedAt = Number(data.requestedAt) || Date.now();
+  const requestedAtText = new Date(requestedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+  await sendDiscordNotification(
+    '🔔 **새 구독 신청 (스트리머 고점체크)**\n' +
+    '후원자 닉네임: ' + nickname + ' · 별풍선 10개 / 30일\n' +
+    '신청 시각: ' + requestedAtText + '\n' +
+    '후원 확인 후 팬페이지 관리자 통계의 구독 신청에서 승인해 주세요.\n' +
+    'https://neezu-crypto.github.io/streamer-fanpage/'
+  );
+});
 // 이미지 업로드 알림(2026-09-06 추가) — formatRequestSummary는 streamerName/
 // category 필드를 모르므로(streamerId를 이름으로 착각해 내부 id 문자열을
 // 그대로 보여줄 위험) 위 해금 신청과 동일하게 직접 문구를 구성한다. 썸네일
@@ -4595,6 +4617,7 @@ module.exports = {
   notifyGalleryImageReport,
   notifyGalleryCommentReport,
   notifyGalleryUnlockRequest,
+  notifyFanPageViewerSubscriptionRequest,
   notifyGalleryImageUpload,
   notifyVerifiedStreamerVisit,
   onyuVnLogVerifiedStreamerVisit,
