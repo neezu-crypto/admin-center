@@ -943,6 +943,17 @@
         <button id="streamerPromoPendingManageBtn" class="perm-refresh-btn" type="button">미완료 확인 관리</button>
         <span id="streamerPromoBatchStatus" class="hint" style="margin:0; flex:1 1 220px;" role="status" aria-live="polite">자동 게시 대기 중 · 완료 표시되지 않은 항목만 대상</span>
       </div>
+      <div id="streamerPromoPermissionCheckPanel" style="margin-top:10px; padding:10px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <strong style="font-size:12px;">전체 글쓰기 권한 확인</strong>
+          <button id="streamerPromoPermissionCheckStartBtn" class="perm-refresh-btn" type="button">홍보 목록 전체 확인</button>
+          <button id="streamerPromoPermissionCheckStopBtn" class="perm-refresh-btn" type="button" disabled>검사 중단</button>
+          <span id="streamerPromoPermissionCheckStatus" class="hint" style="margin:0; flex:1 1 260px;" role="status" aria-live="polite">게시하지 않고 현재 SOOP 로그인 기준으로 글쓰기 화면만 확인합니다.</span>
+        </div>
+        <div id="streamerPromoPermissionCheckSummary" class="hint" style="margin:6px 0 0;" aria-live="polite"></div>
+        <div id="streamerPromoPermissionCheckResults" hidden style="max-height:240px; overflow:auto; margin-top:6px; padding:0 4px; border-top:1px solid rgba(20,20,22,0.08);"></div>
+        <p class="hint" style="margin:6px 0 0;">목록의 모든 항목을 검사하며, 글쓰기 링크가 없는 항목은 ‘확인 불가’로 집계합니다. SOOP 페이지를 백그라운드 탭 하나에서 차례로 열고, 게시·입력·완료 표시는 하지 않습니다. 편집기가 표시되면 현재 글쓰기 가능으로 판정하지만 실제 게시 권한까지 보장하지는 않습니다.</p>
+      </div>
       <div id="streamerPromoPendingPanel" hidden style="margin-top:10px; padding:12px; border:1px solid rgba(20,20,22,0.12); border-radius:10px;">
         <strong>미완료 게시 확인 기록</strong>
         <p id="streamerPromoPendingHint" class="hint" style="margin:5px 0 8px;">게시하지 않은 것이 확실한 기록만 해제하세요. 실제 게시 확인이 늦어진 기록을 해제하면 중복 게시될 수 있습니다.</p>
@@ -1609,13 +1620,22 @@
   const streamerPromoBatchTestOnlyEl = document.getElementById('streamerPromoBatchTestOnly');
   const streamerPromoBatchStartBtn = document.getElementById('streamerPromoBatchStartBtn');
   const streamerPromoBatchStopBtn = document.getElementById('streamerPromoBatchStopBtn');
+  const streamerPromoPermissionCheckStartBtn = document.getElementById('streamerPromoPermissionCheckStartBtn');
+  const streamerPromoPermissionCheckStopBtn = document.getElementById('streamerPromoPermissionCheckStopBtn');
+  const streamerPromoPermissionCheckStatusEl = document.getElementById('streamerPromoPermissionCheckStatus');
+  const streamerPromoPermissionCheckSummaryEl = document.getElementById('streamerPromoPermissionCheckSummary');
+  const streamerPromoPermissionCheckResultsEl = document.getElementById('streamerPromoPermissionCheckResults');
   const streamerPromoPendingManageBtn = document.getElementById('streamerPromoPendingManageBtn');
   const streamerPromoPendingPanelEl = document.getElementById('streamerPromoPendingPanel');
   const streamerPromoPendingHintEl = document.getElementById('streamerPromoPendingHint');
   const streamerPromoPendingListEl = document.getElementById('streamerPromoPendingList');
   const streamerPromoBatchStatusEl = document.getElementById('streamerPromoBatchStatus');
   const promoBatchPendingCommands = new Map();
+  const promoPermissionCheckPendingCommands = new Map();
   let promoBatchIsActive = false;
+  let promoBatchUnresolvedPublish = false;
+  let promoPermissionCheckIsActive = false;
+  let promoPermissionCheckResults = [];
   let promoBatchStartPending = false;
   let promoBatchCancelRequestedWhileStarting = false;
   let promoGoalRun = null;
@@ -3480,6 +3500,152 @@
     });
   }
 
+  function promoPermissionCheckRequest(action, payload) {
+    return new Promise(function (resolve, reject) {
+      const requestId = 'promo-permission-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      const timeout = setTimeout(function () {
+        promoPermissionCheckPendingCommands.delete(requestId);
+        reject(new Error('확장 프로그램 응답 시간이 초과되었습니다. 확장 프로그램과 관리자 센터를 새로고침해주세요.'));
+      }, 15000);
+      promoPermissionCheckPendingCommands.set(requestId, function (result) {
+        clearTimeout(timeout);
+        promoPermissionCheckPendingCommands.delete(requestId);
+        if (result && result.ok) resolve(result);
+        else reject(new Error(result && result.message || result && result.reason || '글쓰기 권한 검사 요청에 실패했습니다.'));
+      });
+      window.postMessage(Object.assign({
+        __soopPromoPermissionCheckRequest: true,
+        requestId: requestId,
+        action: action,
+      }, payload || {}), location.origin);
+    });
+  }
+
+  function renderPromoPermissionCheckState(state, replaceResults) {
+    if (!state || typeof state !== 'object') return;
+    if (Array.isArray(state.results) && replaceResults === true) {
+      promoPermissionCheckResults = state.results.slice();
+    }
+    if (state.lastResult && typeof state.lastResult === 'object') {
+      const nextResult = state.lastResult;
+      promoPermissionCheckResults = promoPermissionCheckResults.filter(function (item) {
+        return Number(item.index) !== Number(nextResult.index);
+      });
+      promoPermissionCheckResults.push(nextResult);
+      promoPermissionCheckResults.sort(function (a, b) { return Number(a.index) - Number(b.index); });
+    }
+
+    const status = String(state.status || 'idle');
+    promoPermissionCheckIsActive = status === 'starting' || status === 'checking';
+    const total = Math.max(0, Number(state.total) || 0);
+    const completed = Math.max(0, Number(state.completedCount) || promoPermissionCheckResults.length);
+    const counts = state.counts || {};
+    const allowed = Math.max(0, Number(counts.allowed) || 0);
+    const denied = Math.max(0, Number(counts.denied) || 0);
+    const unknown = Math.max(0, Number(counts.unknown) || 0);
+    const current = Math.min(total, Math.max(0, Number(state.currentIndex) + 1 || 0));
+    const currentNickname = String(state.currentNickname || '').trim();
+    const labels = {
+      starting: '전체 명단 검사를 준비하고 있습니다…',
+      checking: currentNickname
+        ? '검사 중 · ' + current.toLocaleString('ko-KR') + '/' + total.toLocaleString('ko-KR') + ' · ' + currentNickname
+        : '홍보 목록 전체 글쓰기 권한을 검사하고 있습니다…',
+      complete: '전체 명단 검사를 마쳤습니다.',
+      cancelled: '글쓰기 권한 검사를 중단했습니다.',
+      failed: '검사 오류로 중단했습니다. ' + String(state.message || ''),
+      idle: '게시하지 않고 현재 SOOP 로그인 기준으로 글쓰기 화면만 확인합니다.',
+    };
+    streamerPromoPermissionCheckStatusEl.textContent = labels[status] || '글쓰기 권한 검사 상태를 확인하고 있습니다…';
+    streamerPromoPermissionCheckSummaryEl.textContent = total
+      ? '진행 ' + completed.toLocaleString('ko-KR') + '/' + total.toLocaleString('ko-KR') +
+        ' · 현재 글쓰기 가능 ' + allowed.toLocaleString('ko-KR') +
+        ' · 권한 없음 ' + denied.toLocaleString('ko-KR') +
+        ' · 확인 불가 ' + unknown.toLocaleString('ko-KR')
+      : '';
+
+    const issues = promoPermissionCheckResults.filter(function (item) {
+      return item && item.status !== 'allowed';
+    });
+    streamerPromoPermissionCheckResultsEl.replaceChildren();
+    if (!issues.length) {
+      streamerPromoPermissionCheckResultsEl.hidden = true;
+      if (status === 'complete' && total) {
+        streamerPromoPermissionCheckSummaryEl.textContent += ' · 권한 없음/확인 불가 항목이 없습니다.';
+      }
+    } else {
+      streamerPromoPermissionCheckResultsEl.hidden = false;
+      issues.forEach(function (item) {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:8px;align-items:baseline;padding:5px 2px;border-bottom:1px solid rgba(20,20,22,0.07);';
+        const label = document.createElement('strong');
+        label.style.cssText = 'flex:0 0 76px;color:' + (item.status === 'denied' ? '#b42318' : '#8a5b00') + ';';
+        label.textContent = item.status === 'denied' ? '권한 없음' : '확인 불가';
+        const name = document.createElement('span');
+        name.style.cssText = 'min-width:100px;font-weight:600;';
+        name.textContent = String(item.nickname || '(닉네임 미기재)') + (item.soopId ? '  @' + item.soopId : '');
+        const reason = document.createElement('span');
+        reason.className = 'hint';
+        reason.style.margin = '0';
+        reason.textContent = String(item.reason || '판정 근거를 찾지 못했습니다.');
+        row.append(label, name, reason);
+        streamerPromoPermissionCheckResultsEl.appendChild(row);
+      });
+    }
+    streamerPromoPermissionCheckStartBtn.disabled = promoPermissionCheckIsActive || promoBatchIsActive;
+    streamerPromoPermissionCheckStopBtn.disabled = !promoPermissionCheckIsActive;
+    streamerPromoBatchStartBtn.disabled = promoBatchIsActive || promoBatchUnresolvedPublish || promoPermissionCheckIsActive;
+  }
+
+  async function startStreamerPromoPermissionCheck() {
+    if (promoPermissionCheckIsActive) return;
+    if (promoBatchIsActive) {
+      streamerPromoPermissionCheckStatusEl.textContent = '자동 게시가 진행 중일 때는 권한 검사를 시작할 수 없습니다.';
+      return;
+    }
+    streamerPromoPermissionCheckStartBtn.disabled = true;
+    streamerPromoPermissionCheckStatusEl.textContent = '최신 홍보 명단을 불러오는 중…';
+    streamerPromoPermissionCheckSummaryEl.textContent = '';
+    try {
+      const refreshed = await listStreamerPromoLinksFn();
+      const streamers = Array.isArray(refreshed.data && refreshed.data.streamers) ? refreshed.data.streamers : [];
+      renderStreamerPromoLinksList(streamers, refreshed.data.recentOpened || null);
+      renderPromoPermissionCheckState({ status: 'idle', total: 0 }, true);
+      const targets = streamers.map(function (item) {
+        return {
+          nickname: String(item.nickname || '').trim(),
+          soopId: String(item.soopId || '').trim().toLowerCase(),
+          writeUrl: String(item.writeUrl || '').trim(),
+        };
+      });
+      if (!targets.length) throw new Error('검사할 홍보 목록이 없습니다. 목록을 먼저 새로고침해주세요.');
+      if (!window.confirm('최신 홍보 목록 ' + targets.length.toLocaleString('ko-KR') + '명 전체의 글쓰기 화면을 검사할까요?\n\n게시·입력·완료 표시는 하지 않습니다. SOOP 글쓰기 페이지를 백그라운드 탭 하나에서 순서대로 열기 때문에 목록이 많으면 시간이 걸릴 수 있습니다.')) {
+        streamerPromoPermissionCheckStatusEl.textContent = '검사를 시작하지 않았습니다.';
+        streamerPromoPermissionCheckStartBtn.disabled = false;
+        return;
+      }
+      promoPermissionCheckResults = [];
+      streamerPromoPermissionCheckStatusEl.textContent = '검사 시작 요청 중…';
+      const response = await promoPermissionCheckRequest('start', { items: targets });
+      renderPromoPermissionCheckState(response.state || { status: 'checking', total: targets.length }, true);
+    } catch (error) {
+      streamerPromoPermissionCheckStatusEl.textContent = error && error.message || '글쓰기 권한 검사를 시작하지 못했습니다.';
+      streamerPromoPermissionCheckStartBtn.disabled = promoBatchIsActive;
+      console.warn('[SOOP 홍보 진단] 글쓰기 권한 검사 시작 실패:', error);
+    }
+  }
+
+  async function stopStreamerPromoPermissionCheck() {
+    streamerPromoPermissionCheckStopBtn.disabled = true;
+    streamerPromoPermissionCheckStatusEl.textContent = '검사 중단 요청 중…';
+    try {
+      const response = await promoPermissionCheckRequest('stop');
+      renderPromoPermissionCheckState(response.state || { status: 'cancelled' }, true);
+    } catch (error) {
+      streamerPromoPermissionCheckStatusEl.textContent = error && error.message || '검사 중단 요청을 전달하지 못했습니다.';
+      streamerPromoPermissionCheckStopBtn.disabled = false;
+    }
+  }
+
   function getPromoPendingDisplayName(pending) {
     const soopId = String(pending && pending.soopId || '').toLowerCase();
     const match = streamerPromoCachedItems.find(function (item) {
@@ -3630,7 +3796,8 @@
     const terminal = ['idle', 'cancelled', 'failed', 'complete', 'test-ready'].includes(status);
     promoBatchIsActive = !terminal;
     streamerPromoBatchStatusEl.textContent = orderPrefix + (labels[status] || String(state && state.message || '자동 게시 상태 확인 중…'));
-    streamerPromoBatchStartBtn.disabled = promoBatchIsActive || state.unresolvedPublish === true;
+    promoBatchUnresolvedPublish = state.unresolvedPublish === true;
+    streamerPromoBatchStartBtn.disabled = promoBatchIsActive || promoBatchUnresolvedPublish || promoPermissionCheckIsActive;
     streamerPromoBatchStopBtn.disabled = !promoBatchIsActive;
     streamerPromoBatchCountEl.disabled = promoBatchIsActive;
     streamerPromoGoalCountEl.disabled = promoBatchIsActive;
@@ -3645,6 +3812,15 @@
     if (data.__soopPromoBatchResponse === true && typeof data.requestId === 'string') {
       const reply = promoBatchPendingCommands.get(data.requestId);
       if (reply) reply(data);
+      return;
+    }
+    if (data.__soopPromoPermissionCheckResponse === true && typeof data.requestId === 'string') {
+      const reply = promoPermissionCheckPendingCommands.get(data.requestId);
+      if (reply) reply(data);
+      return;
+    }
+    if (data.__soopPromoPermissionCheckStatus === true) {
+      renderPromoPermissionCheckState(data.state || {}, false);
       return;
     }
     if (data.__soopPromoBatchStatus === true) handlePromoBatchStatus(data.state || {});
@@ -3925,6 +4101,8 @@
 
   streamerPromoBatchStartBtn.addEventListener('click', startStreamerPromoBatch);
   streamerPromoBatchStopBtn.addEventListener('click', stopStreamerPromoBatch);
+  streamerPromoPermissionCheckStartBtn.addEventListener('click', startStreamerPromoPermissionCheck);
+  streamerPromoPermissionCheckStopBtn.addEventListener('click', stopStreamerPromoPermissionCheck);
   streamerPromoPendingManageBtn.addEventListener('click', function () {
     streamerPromoPendingPanelEl.hidden = false;
     refreshStreamerPromoPendingList().catch(function () {});
@@ -3940,6 +4118,9 @@
   }, true);
   promoBatchRequest('status').then(function (response) {
     renderPromoBatchStatus(response.state || {});
+  }).catch(function () {});
+  promoPermissionCheckRequest('status').then(function (response) {
+    renderPromoPermissionCheckState(response.state || { status: 'idle', results: [] }, true);
   }).catch(function () {});
 
   function renderStreamerPromoLinksList(streamers, recentOpened) {
