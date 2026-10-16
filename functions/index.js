@@ -1993,7 +1993,7 @@ const notifyFanPageViewerSubscriptionRequest = onValueCreated('/streamerFanPageV
   );
 });
 // 팬페이지 디자인 문의·건의가 서버에 저장되면 관리자가 확인할 수 있도록 알림을 보낸다.
-// Discord에는 제목·본문·Firebase UID를 보내지 않고 문의 유형과 대상 팬페이지만 공유한다.
+// Discord에는 문의 유형과 인증된 제출자·대상 팬페이지의 공개 신원만 보내며 제목·본문·UID는 포함하지 않는다.
 const FANPAGE_FEEDBACK_CATEGORY_LABELS = {
   design: '디자인 변경 문의',
   suggestion: '기능 건의',
@@ -2003,6 +2003,20 @@ const FANPAGE_FEEDBACK_CATEGORY_LABELS = {
 const notifyFanPageDesignFeedback = onValueCreated('/streamerFanPageDesignFeedback/{feedbackId}', async (event) => {
   const data = event.data.val() || {};
   const category = FANPAGE_FEEDBACK_CATEGORY_LABELS[data.category] || '기타';
+  const senderVerification = data.senderVerification && typeof data.senderVerification === 'object'
+    ? data.senderVerification
+    : {};
+  const senderNickname = String(senderVerification.nickname || '')
+    .replace(/[@<>\r\n`]/g, ' ')
+    .trim()
+    .slice(0, 60);
+  const senderSoopId = /^[A-Za-z0-9]{2,20}$/.test(String(senderVerification.soopId || ''))
+    ? String(senderVerification.soopId).toLowerCase()
+    : '';
+  const verifiedAt = Number(senderVerification.verifiedAt) || 0;
+  const verifiedAtText = verifiedAt
+    ? new Date(verifiedAt).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })
+    : '확인됨';
   const nickname = String(data.streamerNickname || '')
     .replace(/[@<>\r\n`]/g, ' ')
     .trim()
@@ -2013,9 +2027,13 @@ const notifyFanPageDesignFeedback = onValueCreated('/streamerFanPageDesignFeedba
   const target = nickname
     ? `대상: ${nickname}${soopId ? ` (@${soopId})` : ''} 팬페이지`
     : '대상: 사이트 전체';
+  const sender = senderNickname
+    ? `인증 제출자: ${senderNickname}${senderSoopId ? ` (@${senderSoopId})` : ''} · 인증일 ${verifiedAtText}`
+    : '인증 제출자 정보 없음';
   await sendDiscordNotification(
     '🔔 **새 팬페이지 디자인 문의 / 건의**\n' +
     '유형: ' + category + '\n' +
+    sender + '\n' +
     target + '\n' +
     '상세 내용은 팬페이지 관리자 통계에서 확인해 주세요.\n' +
     'https://neezu-crypto.github.io/streamer-fanpage/'
