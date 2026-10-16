@@ -2247,9 +2247,9 @@
       if (streamerVerificationRequestSignature === signature) return;
       const hadPreviousSnapshot = streamerVerificationRequestSignature !== null;
       streamerVerificationRequestSignature = signature;
-      // loadSessionData already makes the initial callable request. When the
-      // session is warm-cached or a later pending request changes, refresh the
-      // combined admin view immediately without periodic full-list polling.
+      // The initial overview is loaded when its session is opened. After this
+      // listener's initial snapshot, refresh the combined view on later changes
+      // without periodic full-list polling.
       if (hadPreviousSnapshot) refreshVerificationOverview(true);
     }, function (error) {
       console.error('스트리머 인증 신청 실시간 구독 실패:', error);
