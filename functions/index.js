@@ -657,7 +657,7 @@ const GAME_CATALOG = [
   { id: 'gallery', name: '스트리머 갤러리' },
   { id: 'streamerMessenger', name: '스트리머 메신저' },
   { id: 'streamerJurumable', name: '스트리머 주루마블' },
-  { id: 'dontPressButton', name: '절대 누르지 마세요' },
+  { id: 'dontPressButton', name: '한국인은 절대 못 깨는 게임' },
   { id: 'streamerFanPage', name: '스트리머 팬페이지' },
   { id: 'onyuVn', name: '당신이 여기에 온 이유' },
 ];
