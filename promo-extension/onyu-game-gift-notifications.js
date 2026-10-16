@@ -263,7 +263,9 @@
         }
         if (result && result.ok) {
           const isLifeGame = result.gameKey === 'streamer-life-game';
-          showNotice('별풍선 후원이 확인되어 ' + (result.targetNickname || (isLifeGame ? '인생게임 홍보' : '온이유 이용권')) + ' 신청이 자동 승인됐어요.');
+          const isFanPage = result.gameKey === 'streamer-fanpage';
+          const approvedLabel = isFanPage ? '고점체크 구독' : result.targetNickname || (isLifeGame ? '인생게임 홍보' : '온이유 이용권');
+          showNotice('별풍선 후원이 확인되어 ' + approvedLabel + ' 신청이 자동 승인됐어요.');
           trace('donation-notification-approved', {
             gameKey: String(result.gameKey || ''),
             balloons: candidate.balloons,
