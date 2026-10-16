@@ -1741,6 +1741,7 @@
     if (event.source !== window || event.origin !== location.origin || !data) return;
     if (data.__soopPromoExtensionReady === true) {
       extensionBridgeReady = true;
+      postStreamerVerificationInboxWatch(stockNoteRequests.concat(bettingNoteRequests));
       maybeStartOnyuGiftBackgroundMonitor();
       return;
     }
@@ -1768,9 +1769,9 @@
   });
   window.postMessage({ __soopPromoExtensionProbe: true }, location.origin);
 
-  // 세션 선택형 로딩 — 초기 진입에서는 권한과 화면 셸만 표시하고, 실제 데이터
-  // 호출·실시간 구독은 사용자가 세션을 열었을 때만 시작한다. section id는 기존
-  // 카드와 1:1로 매핑해 기존 기능을 삭제하지 않고 로딩 시점만 늦춘다.
+  // 세션 선택형 로딩 — 초기 진입에서는 권한과 화면 셸만 표시하고, 세션별 상세
+  // 데이터는 사용자가 세션을 열었을 때 불러온다. 스트리머 인증 신청 감시는
+  // 관리자 로그인 상태에서 세션 선택과 무관하게 유지한다.
   const SESSION_DEFINITIONS = [
     {
       id: 'identity', label: '신원·권한', icon: '🔐', role: 'admin',
@@ -2020,7 +2021,7 @@
         ? '일부 데이터를 불러오지 못했습니다. 세션 안의 새로고침 버튼으로 다시 시도하세요.'
         : '현재 세션: ' + (SESSION_DEFINITIONS.find(function (s) { return s.id === activeSessionId; }) || {}).label;
     } else {
-      sessionLauncherStatusEl.textContent = '세션을 선택하면 해당 데이터와 실시간 검수 항목만 로드됩니다.';
+      sessionLauncherStatusEl.textContent = '세션을 선택하면 해당 데이터를 불러옵니다. 스트리머 인증 신청 감시는 관리자 로그인 중 계속됩니다.';
     }
   }
 
@@ -2062,13 +2063,7 @@
     });
     if (sessionId === 'shared') adminChatSubscribed = false;
     if (sessionId === 'identity') {
-      streamerVerificationRequestUnsubscribe = null;
-      bettingVerificationRequestUnsubscribe = null;
       onyuGiftRequestUnsubscribe = null;
-      streamerVerificationRequestSignature = null;
-      bettingVerificationRequestSignature = null;
-      stockNoteRequests = [];
-      bettingNoteRequests = [];
       onyuGiftRequests = [];
     }
     if (sessionId === 'review') {
@@ -2118,11 +2113,10 @@
     const state = sessionState[sessionId];
     if (!state) return;
     if (sessionId === 'identity') {
-      startStreamerVerificationRequestSubscription();
       startOnyuGiftRequestSubscription();
     }
     if (state.loading) return;
-    if (state.loaded && Date.now() - state.lastLoadedAt < SESSION_CACHE_TTL_MS) return;
+    if (sessionId !== 'identity' && state.loaded && Date.now() - state.lastLoadedAt < SESSION_CACHE_TTL_MS) return;
     state.loaded = false;
     state.loading = true;
     state.error = null;
@@ -2256,11 +2250,10 @@
       // loadSessionData already makes the initial callable request. When the
       // session is warm-cached or a later pending request changes, refresh the
       // combined admin view immediately without periodic full-list polling.
-      if (hadPreviousSnapshot || !sessionState.identity.loading) refreshVerificationOverview(true);
+      if (hadPreviousSnapshot) refreshVerificationOverview(true);
     }, function (error) {
       console.error('스트리머 인증 신청 실시간 구독 실패:', error);
     });
-    registerSessionUnsubscriber('identity', streamerVerificationRequestUnsubscribe);
     if (!bettingVerificationRequestUnsubscribe) bettingVerificationRequestUnsubscribe = onValue(ref(db, 'bettingMarket/verifyRequests'), function (snapshot) {
       const requests = [];
       snapshot.forEach(function (child) { requests.push(Object.assign({ id: child.key }, child.val() || {})); });
@@ -2272,11 +2265,26 @@
       if (bettingVerificationRequestSignature === signature) return;
       const hadPreviousSnapshot = bettingVerificationRequestSignature !== null;
       bettingVerificationRequestSignature = signature;
-      if (hadPreviousSnapshot || !sessionState.identity.loading) refreshVerificationOverview(true);
+      if (hadPreviousSnapshot) refreshVerificationOverview(true);
     }, function (error) {
       console.error('배팅시장 스트리머 인증 신청 실시간 구독 실패:', error);
     });
-    registerSessionUnsubscriber('identity', bettingVerificationRequestUnsubscribe);
+  }
+
+  function stopStreamerVerificationRequestSubscription() {
+    if (streamerVerificationRequestUnsubscribe) {
+      try { streamerVerificationRequestUnsubscribe(); } catch (e) { console.warn('주식시장 인증 신청 구독 해제 실패:', e); }
+      streamerVerificationRequestUnsubscribe = null;
+    }
+    if (bettingVerificationRequestUnsubscribe) {
+      try { bettingVerificationRequestUnsubscribe(); } catch (e) { console.warn('배팅시장 인증 신청 구독 해제 실패:', e); }
+      bettingVerificationRequestUnsubscribe = null;
+    }
+    streamerVerificationRequestSignature = null;
+    bettingVerificationRequestSignature = null;
+    stockNoteRequests = [];
+    bettingNoteRequests = [];
+    postStreamerVerificationInboxWatch([]);
   }
 
   // 인증 스트리머 관리 1단계 — 조회는 admin-center 전용 함수 하나로 모아서 받고,
@@ -6185,12 +6193,14 @@
       window.postMessage({ __onyuGiftBackgroundMonitorStop: true }, location.origin);
       onyuGiftBackgroundMonitorStartedForUid = '';
       onyuGiftBackgroundMonitorState = 'waiting';
+      stopStreamerVerificationRequestSubscription();
       resetSessionRuntime();
     }
     currentUser = nextUser;
     authBtnEl.disabled = false;
 
     if (!currentUser) {
+      stopStreamerVerificationRequestSubscription();
       resetSessionRuntime();
       authStatusEl.textContent = '로그인이 필요합니다';
       authBtnEl.textContent = 'Google 로그인';
@@ -6202,8 +6212,14 @@
     authStatusEl.textContent = currentUser.email || '로그인됨';
     authBtnEl.textContent = '로그아웃';
     await refreshAdminCenterState();
-    if (role === 'admin') maybeStartOnyuGiftBackgroundMonitor();
-    // 상세 데이터와 실시간 구독은 세션 선택 후에만 시작한다.
+    if (role === 'admin') {
+      startStreamerVerificationRequestSubscription();
+      maybeStartOnyuGiftBackgroundMonitor();
+    } else {
+      stopStreamerVerificationRequestSubscription();
+    }
+    // 인증 신청 감시는 관리자 로그인 단계에서 시작하고, 세션별 상세 데이터는
+    // 딥링크 또는 사용자의 세션 선택에 따라 로드한다.
     handleDeepLink();
   });
 </script>
