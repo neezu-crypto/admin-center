@@ -1992,6 +1992,35 @@ const notifyFanPageViewerSubscriptionRequest = onValueCreated('/streamerFanPageV
     'https://neezu-crypto.github.io/streamer-fanpage/'
   );
 });
+// 팬페이지 디자인 문의·건의가 서버에 저장되면 관리자가 확인할 수 있도록 알림을 보낸다.
+// Discord에는 제목·본문·Firebase UID를 보내지 않고 문의 유형과 대상 팬페이지만 공유한다.
+const FANPAGE_FEEDBACK_CATEGORY_LABELS = {
+  design: '디자인 변경 문의',
+  suggestion: '기능 건의',
+  bug: '오류 제보',
+  other: '기타',
+};
+const notifyFanPageDesignFeedback = onValueCreated('/streamerFanPageDesignFeedback/{feedbackId}', async (event) => {
+  const data = event.data.val() || {};
+  const category = FANPAGE_FEEDBACK_CATEGORY_LABELS[data.category] || '기타';
+  const nickname = String(data.streamerNickname || '')
+    .replace(/[@<>\r\n`]/g, ' ')
+    .trim()
+    .slice(0, 60);
+  const soopId = /^[A-Za-z0-9]{2,20}$/.test(String(data.streamerId || ''))
+    ? String(data.streamerId).toLowerCase()
+    : '';
+  const target = nickname
+    ? `대상: ${nickname}${soopId ? ` (@${soopId})` : ''} 팬페이지`
+    : '대상: 사이트 전체';
+  await sendDiscordNotification(
+    '🔔 **새 팬페이지 디자인 문의 / 건의**\n' +
+    '유형: ' + category + '\n' +
+    target + '\n' +
+    '상세 내용은 팬페이지 관리자 통계에서 확인해 주세요.\n' +
+    'https://neezu-crypto.github.io/streamer-fanpage/'
+  );
+});
 // 이미지 업로드 알림(2026-09-06 추가) — formatRequestSummary는 streamerName/
 // category 필드를 모르므로(streamerId를 이름으로 착각해 내부 id 문자열을
 // 그대로 보여줄 위험) 위 해금 신청과 동일하게 직접 문구를 구성한다. 썸네일
@@ -4751,6 +4780,7 @@ module.exports = {
   notifyGalleryCommentReport,
   notifyGalleryUnlockRequest,
   notifyFanPageViewerSubscriptionRequest,
+  notifyFanPageDesignFeedback,
   notifyGalleryImageUpload,
   notifyVerifiedStreamerVisit,
   onyuVnLogVerifiedStreamerVisit,
