@@ -657,6 +657,7 @@ const GAME_CATALOG = [
   { id: 'gallery', name: '스트리머 갤러리' },
   { id: 'streamerMessenger', name: '스트리머 메신저' },
   { id: 'streamerJurumable', name: '스트리머 주루마블' },
+  { id: 'dontPressButton', name: '절대 누르지 마세요' },
   { id: 'streamerFanPage', name: '스트리머 팬페이지' },
   { id: 'onyuVn', name: '당신이 여기에 온 이유' },
 ];
@@ -2194,8 +2195,9 @@ const getPurchaseOverview = onCall(async (request) => {
 // lifeGame/gallery는 2026-09-05 추가 — 클라이언트가 presence/{appId}/{uid}
 // 표준 경로에 { lastSeen } 형태로 쓰기 시작한 뒤에만 실제로 값이 잡힌다(각 저장소
 // 쪽 작업과 짝을 이룸). lifeGame은 자체 lifeGame/presence 경로(다른 용도, 세계관
-// 패널·봇 시스템)와 별개로 이 표준 경로에도 병행 기록한다.
-const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'gallery', 'onyuVn', 'streamerMessenger'];
+// 패널·봇 시스템)와 별개로 이 표준 경로에도 병행 기록한다. dontPressButton은
+// 클라이언트 직접 쓰기를 금지하고 해당 게임 서버 함수가 표준 presence를 기록한다.
+const PRESENCE_APPS = ['bettingMarket', 'stockMarket', 'lifeGame', 'gallery', 'onyuVn', 'streamerMessenger', 'dontPressButton'];
 const PRESENCE_GRACE_MS = 60 * 60 * 1000;
 const PRESENCE_HOURLY_RETENTION_DAYS = 30;
 
