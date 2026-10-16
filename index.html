@@ -1912,6 +1912,7 @@
     }
     render();
     renderKillswitchStatus();
+    syncReviewMonitoringMode();
     if (role !== 'none' && currentUser) refreshSessionSummary();
   }
 
@@ -2021,7 +2022,7 @@
         ? '일부 데이터를 불러오지 못했습니다. 세션 안의 새로고침 버튼으로 다시 시도하세요.'
         : '현재 세션: ' + (SESSION_DEFINITIONS.find(function (s) { return s.id === activeSessionId; }) || {}).label;
     } else {
-      sessionLauncherStatusEl.textContent = '세션을 선택하면 해당 데이터를 불러옵니다. 스트리머 인증 신청 감시는 관리자 로그인 중 계속됩니다.';
+      sessionLauncherStatusEl.textContent = '세션을 선택하면 상세 데이터를 불러옵니다. 스트리머 인증 감시와 검수 대기 알림은 관리자 로그인 중 계속됩니다.';
     }
   }
 
@@ -2084,6 +2085,7 @@
   }
 
   function resetSessionRuntime() {
+    stopReviewSummaryMonitoring();
     SESSION_DEFINITIONS.forEach(function (session) {
       teardownSession(session.id);
       sessionState[session.id].loaded = false;
@@ -2105,6 +2107,9 @@
       console.warn('세션 대기 요약 조회 실패:', e);
       sessionSummary = {};
     }
+    // Lightweight listeners may have received their initial snapshots while
+    // the callable was in flight. Prefer their live value once all are ready.
+    applyReviewSummarySnapshotIfReady();
     renderSessionLauncher();
   }
 
@@ -2174,6 +2179,7 @@
     const opts = options || {};
     if (activeSessionId && activeSessionId !== sessionId) teardownSession(activeSessionId);
     activeSessionId = sessionId;
+    syncReviewMonitoringMode();
     setSessionPanelsVisible(sessionId);
     renderSessionLauncher();
     revealCardsOnScroll();
@@ -2200,6 +2206,7 @@
     } else if (activeSessionId) {
       teardownSession(activeSessionId);
       activeSessionId = null;
+      syncReviewMonitoringMode();
       setSessionPanelsVisible(null);
       renderSessionLauncher();
     }
@@ -5341,6 +5348,87 @@
     { path: 'relayRoomRequests', label: '중계방 신청', kind: 'relayRoom' },
     { path: 'lifeGame/sponsorRequests', label: '후원 스트리머 신청 (인생게임)', kind: 'lifeGameSponsor' },
   ];
+
+  // 검수 세션 밖에서는 전체 목록 대신 각 큐의 최신 1건만 구독한다.
+  // 실제 상세 데이터는 검수 세션을 열었을 때 기존 limitToLast(200) 구독으로 읽는다.
+  let reviewSummarySubscriptions = [];
+  let reviewSummarySignals = {};
+  let reviewSummarySignalsSettled = {};
+  let reviewSummarySignalsReceived = 0;
+  let reviewSummarySignalCount = 0;
+  let reviewSummaryMonitoring = false;
+
+  function applyReviewSummarySnapshotIfReady() {
+    if (!reviewSummaryMonitoring || reviewSummarySignalsReceived < reviewSummarySignalCount) return;
+    const signalValues = Object.keys(reviewSummarySignals).map(function (key) { return reviewSummarySignals[key]; });
+    if (signalValues.indexOf(true) === -1 && signalValues.indexOf(null) > -1) return;
+    const hasPending = signalValues.indexOf(true) > -1;
+    if (sessionSummary.review !== hasPending) {
+      sessionSummary.review = hasPending;
+      renderSessionLauncher();
+    }
+  }
+
+  function stopReviewSummaryMonitoring() {
+    reviewSummarySubscriptions.splice(0).forEach(function (unsubscribe) {
+      try { unsubscribe(); } catch (e) { console.warn('검수 대기 요약 구독 해제 실패:', e); }
+    });
+    reviewSummaryMonitoring = false;
+    reviewSummarySignals = {};
+    reviewSummarySignalsSettled = {};
+    reviewSummarySignalsReceived = 0;
+    reviewSummarySignalCount = 0;
+  }
+
+  function startReviewSummaryMonitoring() {
+    if (reviewSummaryMonitoring || role !== 'admin' || !currentUser || activeSessionId === 'review') return;
+    reviewSummaryMonitoring = true;
+
+    const sources = [
+      { key: 'marketReports', query: query(ref(db, 'bettingMarket/marketReports'), limitToLast(1)) },
+      { key: 'nicknameReports', query: query(ref(db, 'bettingMarket/nicknameReports'), limitToLast(1)) },
+      { key: 'presetMergeFailures', query: query(ref(db, 'presetMergeFailures'), limitToLast(1)) },
+      { key: 'listingRequests', query: query(ref(db, 'listingRequests'), orderByChild('status'), equalTo('pending'), limitToLast(1)) },
+    ];
+    PURCHASE_QUEUE_SOURCES.forEach(function (src) {
+      const queueQuery = src.kind === 'bmChest'
+        ? query(ref(db, src.path), limitToLast(1))
+        : query(ref(db, src.path), orderByChild('status'), equalTo('pending'), limitToLast(1));
+      sources.push({ key: 'purchase:' + src.path, query: queueQuery });
+    });
+    ['pendingValidation', 'closed', 'pendingSettlement'].forEach(function (status) {
+      sources.push({
+        key: 'market:' + status,
+        query: query(ref(db, 'bettingMarket/markets'), orderByChild('status'), equalTo(status), limitToLast(1)),
+      });
+    });
+    reviewSummarySignalCount = sources.length;
+
+    sources.forEach(function (source) {
+      const unsubscribe = onValue(source.query, function (snap) {
+        if (!reviewSummarySignalsSettled[source.key]) {
+          reviewSummarySignalsSettled[source.key] = true;
+          reviewSummarySignalsReceived += 1;
+        }
+        reviewSummarySignals[source.key] = snap.exists();
+        applyReviewSummarySnapshotIfReady();
+      }, function (error) {
+        if (!reviewSummarySignalsSettled[source.key]) {
+          reviewSummarySignalsSettled[source.key] = true;
+          reviewSummarySignalsReceived += 1;
+        }
+        reviewSummarySignals[source.key] = null;
+        applyReviewSummarySnapshotIfReady();
+        console.warn('검수 대기 요약 구독 실패:', source.key, error);
+      });
+      reviewSummarySubscriptions.push(unsubscribe);
+    });
+  }
+
+  function syncReviewMonitoringMode() {
+    if (role === 'admin' && currentUser && activeSessionId !== 'review') startReviewSummaryMonitoring();
+    else stopReviewSummaryMonitoring();
+  }
 
   // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market의 js/admin-chat.js와 동일한
   // 패턴(limitToLast(200) 구독, column-reverse로 최신이 아래)을 그대로 재사용한다.
