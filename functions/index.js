@@ -7,6 +7,8 @@ const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
+  fanPageSponsorAdDonationCanMatch,
+  fanPageSponsorAdHasEligibleBackgroundRequest,
   lifeGameSponsorHasEligibleBackgroundRequest,
   notificationFallsInDonationRequestWindow,
 } = require('./donation-verification');
@@ -2836,6 +2838,13 @@ const onyuGetViewerAccess = onCall(async (request) => {
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
 const FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS = 33;
 const LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS = 10;
+const FANPAGE_SPONSOR_ADS_PATH = 'streamerFanPageSponsorAds';
+const FANPAGE_SPONSOR_REQUESTS_PATH = 'streamerFanPageSponsorRequests';
+const FANPAGE_SPONSOR_PENDING_PATH = 'streamerFanPageSponsorPending';
+const FANPAGE_SPONSOR_CLAIMS_PATH = 'streamerFanPageSponsorPlacementClaims';
+const FANPAGE_SPONSOR_MAX_ADS_PER_RAIL = 5;
+const FANPAGE_SPONSOR_MAX_ACTIVE_ADS = FANPAGE_SPONSOR_MAX_ADS_PER_RAIL * 2;
+const FANPAGE_SPONSOR_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ONYU_GIFT_MONITOR_UID_PREFIX = 'onyu_gift_monitor_';
 
 function onyuGiftMonitorUid(adminUid) {
@@ -2993,10 +3002,12 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   let onyuRequests = {};
   let lifeGameRequests = {};
   let fanPagePendingRequests = {};
+  let fanPageSponsorRequests = {};
   const db = getDatabase();
   const requestRef = db.ref('onyuVn/streamerGameGiftRequests');
   const lifeGameRequestRef = db.ref('lifeGame/sponsorRequests');
   const fanPagePendingRef = db.ref('streamerFanPageViewerSubscriptionPending');
+  const fanPageSponsorRequestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH);
   const adminRef = db.ref('adminCenter/adminUids/' + adminUid);
   const connectionId = require('node:crypto').randomBytes(12).toString('hex');
   const monitorStatusRef = db.ref('adminCenter/donationVerificationMonitorStatus/' + adminUid + '/' + connectionId);
@@ -3010,6 +3021,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     if (onyuGiftHasEligibleBackgroundRequest(onyuRequests, now)) activeSources.push('onyu-vn');
     if (lifeGameSponsorHasEligibleBackgroundRequest(lifeGameRequests, now)) activeSources.push('streamer-life-game');
     if (fanPageViewerSubscriptionHasEligibleBackgroundRequest(fanPagePendingRequests, now)) activeSources.push('streamer-fanpage');
+    if (fanPageSponsorAdHasEligibleBackgroundRequest(fanPageSponsorRequests, now)) activeSources.push('streamer-fanpage-sponsor');
     active = activeSources.length > 0;
     writeEvent('watch-state', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
     monitorStatusRef.update({ watching: active, activeSources, lastWatchStateAt: now }).catch(() => null);
@@ -3031,6 +3043,10 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   };
   const onFanPagePendingValue = (snapshot) => {
     fanPagePendingRequests = snapshot.val() || {};
+    if (accessMode === 'monitor') sendMonitorState();
+  };
+  const onFanPageSponsorRequestValue = (snapshot) => {
+    fanPageSponsorRequests = snapshot.val() || {};
     if (accessMode === 'monitor') sendMonitorState();
   };
   const onRequestError = (error) => {
@@ -3063,6 +3079,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     requestRef.off('value', onRequestValue);
     lifeGameRequestRef.off('value', onLifeGameRequestValue);
     fanPagePendingRef.off('value', onFanPagePendingValue);
+    fanPageSponsorRequestRef.off('value', onFanPageSponsorRequestValue);
     adminRef.off('value', onAdminValue);
     if (accessMode === 'monitor') monitorStatusRef.remove().catch(() => null);
     if (!response.destroyed) response.end();
@@ -3072,6 +3089,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     monitorStatusRef.set({ connectedAt: Date.now(), lastHeartbeatAt: Date.now(), active: true, watching: false, activeSources: [], connectionId }).catch(() => null);
     lifeGameRequestRef.on('value', onLifeGameRequestValue, onRequestError);
     fanPagePendingRef.on('value', onFanPagePendingValue, onRequestError);
+    fanPageSponsorRequestRef.on('value', onFanPageSponsorRequestValue, onRequestError);
   }
   adminRef.on('value', onAdminValue, onRequestError);
   requestRef.on('value', onRequestValue, onRequestError);
@@ -3843,6 +3861,187 @@ async function commitFanPageViewerSubscriptionApproval(db, adminUid, requestId, 
   }
 }
 
+async function holdFreshRealtimeSnapshot(ref) {
+  let listener = null;
+  const snapshot = await new Promise((resolve, reject) => {
+    listener = (value) => resolve(value);
+    ref.on('value', listener, reject);
+  });
+  return { snapshot, release: () => ref.off('value', listener) };
+}
+
+async function commitFanPageSponsorAdApproval(db, adminUid, requestId, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, verificationMetadata) {
+  const requestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH + '/' + requestId);
+  const claimRef = db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId);
+  const adsRef = db.ref(FANPAGE_SPONSOR_ADS_PATH);
+  const claimToken = require('node:crypto').randomBytes(16).toString('hex');
+  const verifiedAt = Number(verificationMetadata.verifiedAt) || Date.now();
+  const held = [];
+  let claimPrepared = false;
+  let adCreatedByAttempt = false;
+  let adExpiresAt = 0;
+  let pendingRecord = null;
+  try {
+    for (const ref of [requestRef, claimRef, adsRef]) held.push(await holdFreshRealtimeSnapshot(ref));
+    pendingRecord = held[0].snapshot.val() || {};
+    if (pendingRecord.status === 'approved' && pendingRecord.verificationEventKey === verificationMetadata.verificationEventKey) {
+      const existingAd = pendingRecord.campaignId
+        ? (await db.ref(FANPAGE_SPONSOR_ADS_PATH + '/' + pendingRecord.campaignId).get()).val()
+        : null;
+      return { ok: true, status: 'approved', expiresAt: Number(existingAd && existingAd.expiresAt) || Number(pendingRecord.approvedUntil) || 0 };
+    }
+
+    const claimed = await requestRef.transaction((current) => {
+      if (!fanPageSponsorAdDonationCanMatch(current, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp)) return;
+      const now = Date.now();
+      if (current.status === 'pending' && current.processingToken &&
+          now - Number(current.processingAt || now) < 2 * 60 * 1000) return;
+      return Object.assign({}, current, {
+        status: 'processing',
+        processingAt: now,
+        processingToken: claimToken,
+        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
+      });
+    }, undefined, false);
+    if (!claimed.committed) {
+      const current = claimed.snapshot.val() || {};
+      if (current.status === 'approved' && current.verificationEventKey === verificationMetadata.verificationEventKey) {
+        return { ok: true, status: 'approved', expiresAt: Number(current.approvedUntil) || 0 };
+      }
+      throw new HttpsError('failed-precondition', '홍보 신청이 더 이상 자동 승인 대기 상태가 아닙니다.');
+    }
+    pendingRecord = claimed.snapshot.val() || {};
+
+    const requestSoopId = normalizeSoopId(pendingRecord.soopId);
+    const rail = pendingRecord.rail === 'right' ? 'right' : pendingRecord.rail === 'left' ? 'left' : '';
+    const days = Number(pendingRecord.days);
+    if (!requestSoopId || !rail || !Number.isInteger(days) || days < 1 || days > 30 || days * 10 !== balloons) {
+      throw new HttpsError('failed-precondition', '홍보 신청의 스트리머·위치·기간 정보가 올바르지 않습니다.');
+    }
+
+    const requestClaim = await claimRef.transaction((current) => {
+      const now = Date.now();
+      if (!current || current.status !== 'pending' || normalizeSoopId(current.soopId) !== requestSoopId ||
+          current.rail !== rail || (current.verificationProcessingToken &&
+            now - Number(current.verificationProcessingAt || now) < 2 * 60 * 1000)) return;
+      return Object.assign({}, current, {
+        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
+        verificationProcessingAt: now,
+        verificationProcessingToken: claimToken,
+      });
+    }, undefined, false);
+    if (!requestClaim.committed) throw new HttpsError('failed-precondition', '홍보 자리 예약을 확인하지 못했습니다.');
+    claimPrepared = true;
+
+    const campaignId = requestId;
+    const now = Date.now();
+    adExpiresAt = now + days * 24 * 60 * 60 * 1000;
+    const savedAd = {
+      campaignId,
+      soopId: requestSoopId,
+      rail,
+      nickname: String(pendingRecord.nickname || '').slice(0, 40),
+      status: 'active',
+      startsAt: now,
+      expiresAt: adExpiresAt,
+      requestId,
+    };
+    const capacity = await adsRef.transaction((current) => {
+      const next = { ...(current && typeof current === 'object' ? current : {}) };
+      for (const [id, ad] of Object.entries(next)) {
+        if (!ad || ad.status !== 'active' || Number(ad.expiresAt) <= now) delete next[id];
+      }
+      const existing = next[campaignId];
+      if (existing && existing.status === 'active' && existing.requestId === requestId && existing.soopId === requestSoopId) return next;
+      if (Object.values(next).some((ad) => normalizeSoopId(ad && ad.soopId) === requestSoopId) ||
+          Object.keys(next).length >= FANPAGE_SPONSOR_MAX_ACTIVE_ADS ||
+          Object.values(next).filter((ad) => ad && ad.rail === rail).length >= FANPAGE_SPONSOR_MAX_ADS_PER_RAIL) return;
+      next[campaignId] = savedAd;
+      return next;
+    }, undefined, false);
+    const committedAd = (capacity.snapshot.val() || {})[campaignId];
+    if (!capacity.committed && !(committedAd && committedAd.status === 'active' && committedAd.requestId === requestId && committedAd.soopId === requestSoopId)) {
+      throw new HttpsError('resource-exhausted', '현재 홍보 칸이 모두 찼습니다. 운영자가 신청을 확인해야 합니다.');
+    }
+    const preexistingAd = (held[2].snapshot.val() || {})[campaignId];
+    adCreatedByAttempt = !!capacity.committed && !preexistingAd && committedAd && committedAd.requestId === requestId;
+    if (committedAd && Number(committedAd.expiresAt) > 0) adExpiresAt = Number(committedAd.expiresAt);
+
+    const activation = await claimRef.transaction((current) => {
+      if (!current || current.status !== 'pending' || current.verificationProcessingToken !== claimToken ||
+          normalizeSoopId(current.soopId) !== requestSoopId || current.rail !== rail) return;
+      return Object.assign({}, current, {
+        status: 'active',
+        expiresAt: adExpiresAt,
+        campaignId,
+        verificationEventKey: verificationMetadata.verificationEventKey,
+        verificationProcessingAt: null,
+        verificationProcessingToken: null,
+      });
+    }, undefined, false);
+    if (!activation.committed && !((activation.snapshot.val() || {}).status === 'active' &&
+        (activation.snapshot.val() || {}).campaignId === campaignId)) {
+      throw new HttpsError('aborted', '홍보 자리 예약을 노출 상태로 전환하지 못했습니다.');
+    }
+
+    const finalized = await requestRef.transaction((current) => {
+      if (!current || current.status !== 'processing' || current.processingToken !== claimToken) return;
+      return Object.assign({}, current, verificationMetadata, {
+        status: 'approved',
+        reviewedAt: Date.now(),
+        reviewedBy: adminUid,
+        campaignId,
+        approvedUntil: adExpiresAt,
+        processingAt: null,
+        processingToken: null,
+        verificationProcessingAt: null,
+        verificationProcessingToken: null,
+        updatedAt: Date.now(),
+      });
+    }, undefined, false);
+    const finalValue = finalized.snapshot.val() || {};
+    if (!finalized.committed && !(finalValue.status === 'approved' && finalValue.verificationEventKey === verificationMetadata.verificationEventKey)) {
+      throw new HttpsError('aborted', '신청 승인 결과를 저장하지 못했습니다. 운영자가 확인해야 합니다.');
+    }
+    await db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove().catch((error) => {
+      console.error('고점체크 후원 스트리머 대기 인덱스 정리 실패:', String(error && error.message || error).slice(0, 120));
+    });
+    return { ok: true, status: 'approved', expiresAt: adExpiresAt };
+  } catch (error) {
+    if (adCreatedByAttempt) await adsRef.child(requestId).transaction((current) =>
+      current && current.requestId === requestId && current.soopId === normalizeSoopId(pendingRecord && pendingRecord.soopId) ? null : current,
+    undefined, false).catch(() => null);
+    if (claimPrepared) await claimRef.transaction((current) => {
+      if (!current || (current.verificationProcessingToken !== claimToken &&
+          !(current.status === 'active' && current.campaignId === requestId &&
+            current.verificationEventKey === verificationMetadata.verificationEventKey))) return;
+      return Object.assign({}, current, {
+        status: 'pending',
+        expiresAt: Number(pendingRecord && pendingRecord.expiresAt) || Number(current.expiresAt) || Date.now(),
+        campaignId: null,
+        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
+        verificationProcessingAt: null,
+        verificationProcessingToken: null,
+      });
+    }, undefined, false).catch(() => null);
+    await requestRef.transaction((current) => {
+      if (!current || current.status !== 'processing' || current.processingToken !== claimToken) return;
+      return Object.assign({}, current, {
+        status: 'pending',
+        processingAt: null,
+        processingToken: null,
+        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
+        verificationProcessingAt: null,
+        verificationProcessingToken: null,
+        updatedAt: Date.now(),
+      });
+    }, undefined, false).catch(() => null);
+    throw error;
+  } finally {
+    held.forEach((item) => item.release());
+  }
+}
+
 function findOtherGameDonationRequestCandidates(sourceMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax) {
   const candidates = [];
   OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source) => {
@@ -3897,7 +4096,7 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
   const exactTimestamp = request.data && request.data.exactTimestamp === true;
   const now = Date.now();
   if (!senderSoopId || !Number.isInteger(balloons) ||
-      !(balloons === FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS || (balloons >= 10 && balloons <= 70 && balloons % 10 === 0)) ||
+      !(balloons === FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS || (balloons >= 10 && balloons <= 300 && balloons % 10 === 0)) ||
       !Number.isFinite(observedAt) || observedAt < now - 2 * 60 * 1000 || observedAt > now + 30000 ||
       !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) || eventAtMin > eventAtMax ||
       eventAtMin < observedAt - 24 * 60 * 60 * 1000 || eventAtMax > observedAt + 30000 ||
@@ -3928,15 +4127,17 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     gameCandidates: [],
   };
   try {
-    const [onyuSnap, lifeGameSnap, fanPagePendingSnap, ...otherGameSnaps] = await Promise.all([
+    const [onyuSnap, lifeGameSnap, fanPagePendingSnap, fanPageSponsorSnap, ...otherGameSnaps] = await Promise.all([
       db.ref('onyuVn/streamerGameGiftRequests').get(),
       db.ref('lifeGame/sponsorRequests').get(),
       db.ref('streamerFanPageViewerSubscriptionPending').get(),
+      db.ref(FANPAGE_SPONSOR_REQUESTS_PATH).get(),
       ...OTHER_GAME_DONATION_REQUEST_SOURCES.map((source) => db.ref(source.path).orderByChild('status').equalTo('pending').get()),
     ]);
     const onyuRequests = onyuSnap.val() || {};
     const lifeGameRequests = lifeGameSnap.val() || {};
     const fanPagePendingRequests = fanPagePendingSnap.val() || {};
+    const fanPageSponsorRequests = fanPageSponsorSnap.val() || {};
     const otherGameRequestMaps = {};
     OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source, index) => {
       otherGameRequestMaps[source.path] = otherGameSnaps[index].val() || {};
@@ -3977,6 +4178,25 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
         expectedBalloons: Number(item.balloonCost) || 0,
         donorMatch: true,
       }));
+    const fanPageSponsorCandidates = Object.entries(fanPageSponsorRequests).filter(([, item]) =>
+      fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+    const matchedFanPageSponsorRequestIds = new Set(fanPageSponsorCandidates.map(([requestId]) => requestId));
+    const fanPageSponsorOtherDonationCandidates = Object.entries(fanPageSponsorRequests).filter(([requestId, item]) => {
+      if (!item || item.status !== 'pending' || matchedFanPageSponsorRequestIds.has(requestId) ||
+          normalizeSoopId(item.donorSoopId) !== senderSoopId || Number(item.balloonCost) !== balloons ||
+          Number(item.days) * 10 !== balloons) return false;
+      const requestedAt = Number(item.requestedAt) || 0;
+      if (!requestedAt || observedAt - requestedAt > FANPAGE_SPONSOR_REQUEST_TTL_MS || requestedAt > eventAtMax) return false;
+      if (Number(item.donationCompletedAt) > 0) return false;
+      return eventAtMax >= requestedAt && eventAtMin <= (Number(item.expiresAt) || requestedAt + FANPAGE_SPONSOR_REQUEST_TTL_MS);
+    }).map(([requestId, item]) => ({
+      gameKey: 'streamer-fanpage-sponsor',
+      requestType: 'sponsored-ad',
+      requestId,
+      requestedAt: Number(item.requestedAt) || 0,
+      expectedBalloons: Number(item.balloonCost) || 0,
+      donorMatch: true,
+    }));
     lifeGameDiagnosticCodes = Array.from(new Set([
       ...lifeGameByDonorAndAmount.map(([, item]) => String(item.diagnosticCode || '')),
       ...lifeGameDiagnosticCandidates.map(([, item]) => String(item.diagnosticCode || '')),
@@ -3985,10 +4205,12 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
       ...onyuCandidates.map(([requestId, item]) => ({ game: 'onyu-vn', requestId, item })),
       ...lifeGameCandidates.map(([requestId, item]) => ({ game: 'streamer-life-game', requestId, item })),
       ...fanPageCandidates.map(([requestId, item]) => ({ game: 'streamer-fanpage', requestId, item })),
+      ...fanPageSponsorCandidates.map(([requestId, item]) => ({ game: 'streamer-fanpage-sponsor', requestId, item })),
     ];
     const otherDonationCandidates = [
       ...findOtherGameDonationRequestCandidates(otherGameRequestMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax),
       ...fanPageOtherDonationCandidates,
+      ...fanPageSponsorOtherDonationCandidates,
     ];
     eventDetails.otherDonationCandidates = otherDonationCandidates;
     eventDetails.gameCandidates = candidates.map((candidate) => ({
@@ -4041,6 +4263,13 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
           gameKey: candidate.game,
           targetNickname: String(candidate.item.nickname || ''),
           diagnosticCode: String(candidate.item.diagnosticCode || ''),
+        });
+      } else if (candidate.game === 'streamer-fanpage-sponsor') {
+        result = await commitFanPageSponsorAdApproval(db, adminUid, candidate.requestId, senderSoopId,
+          balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, verificationEventMetadata);
+        result = Object.assign({}, result, {
+          gameKey: candidate.game,
+          targetNickname: String(candidate.item.nickname || ''),
         });
       } else {
         result = await commitFanPageViewerSubscriptionApproval(db, adminUid, candidate.requestId, senderSoopId,

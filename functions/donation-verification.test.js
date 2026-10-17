@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  fanPageSponsorAdDonationCanMatch,
+  fanPageSponsorAdHasEligibleBackgroundRequest,
   lifeGameSponsorHasEligibleBackgroundRequest,
   notificationFallsInDonationRequestWindow,
 } = require('./donation-verification');
@@ -59,4 +61,38 @@ test('preserves the narrow timestamp match when the completion signal exists', (
   assert.equal(notificationFallsInDonationRequestWindow(
     { ...request, donationCompletedAt: completedAt }, 'different', 20, now, eventAt, eventAt, true, true,
   ), false);
+});
+
+const sponsorRequest = {
+  status: 'pending',
+  soopId: 'streamer01',
+  donorSoopId: 'ysk7895',
+  rail: 'left',
+  days: 12,
+  balloonCost: 120,
+  requestedAt: now - 6 * 24 * 60 * 60 * 1000,
+  expiresAt: now + 24 * 60 * 60 * 1000,
+};
+
+test('watches pending streamer-fanpage sponsorship requests up to 30 days of donation value', () => {
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: sponsorRequest }, now), true);
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, balloonCost: 70 } }, now), false);
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, status: 'approved' } }, now), false);
+});
+
+test('matches sponsor-ad donations without a completion click for the request TTL', () => {
+  const eventAt = now - 60 * 1000;
+  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'ysk7895', 120, now, eventAt, eventAt, true), true);
+  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'ysk7895', 130, now, eventAt, eventAt, true), false);
+  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'someone-else', 120, now, eventAt, eventAt, true), false);
+  assert.equal(fanPageSponsorAdDonationCanMatch({ ...sponsorRequest, expiresAt: eventAt - 1 }, 'ysk7895', 120, now, eventAt, eventAt, true), false);
+  assert.equal(notificationFallsInDonationRequestWindow(
+    sponsorRequest, 'ysk7895', 120, now, eventAt, eventAt, true, true,
+  ), false);
+});
+
+test('keeps sponsor requests inactive after expiry or the seven-day request window', () => {
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, expiresAt: now - 1 } }, now), false);
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, donationCompletedAt: now - 1 } }, now), true);
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, requestedAt: now - 8 * 24 * 60 * 60 * 1000 } }, now), false);
 });
