@@ -981,7 +981,7 @@
         <div class="promo-generator-head">
           <div>
             <h3>홍보글 생성기</h3>
-            <p class="hint" style="margin:4px 0 0;">스트리머 이름으로 제목·본문·SOOP 게시판용 HTML을 생성합니다. 생성된 내용은 게시되지 않습니다.</p>
+            <p class="hint" style="margin:4px 0 0;">선택한 스트리머 방송국에 고점체크 홍보용 제목·본문·SOOP 게시판용 HTML을 준비합니다. 대상 이름은 방송국 확인에만 사용하며, 생성된 내용은 게시되지 않습니다.</p>
           </div>
           <button id="streamerPromoGeneratorCloseBtn" class="perm-refresh-btn" type="button">닫기</button>
         </div>
@@ -3299,61 +3299,112 @@
     });
   }
 
-  const PROMO_GAME_URL = 'https://neezu-crypto.github.io/streamer-life-game/';
+  const PROMO_GAME_URL = 'https://neezu-crypto.github.io/streamer-fanpage/viewer-stats.html';
   const PROMO_CREATOR_STATION_URL = 'https://www.sooplive.com/station/skftodwocks2';
-  const PROMO_IMAGE_URLS = [
-    'https://stimg.sooplive.com/NORMAL_BBS/6/27867916/10281788670319832.png',
-    'https://stimg.sooplive.com/NORMAL_BBS/6/27867916/18281788670319843.png',
-  ];
-
-  function escapePromoHtml(value) {
-    return String(value).replace(/[&<>"']/g, function (char) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char];
-    });
-  }
 
   function buildStreamerPromoTitle(name) {
-    return name + '의 운명은? [스트리머 인생게임]';
+    return '나의 시청자 고점은 언제일까? | 📊 스트리머 고점체크';
   }
 
   function buildStreamerPromoBody(name) {
-    return name + '의 인생을 미리 점쳐보는 인생게임 출시!\n\n' +
-      '평범한 직장생활부터 차량 절도범까지 다양한 직업을 체험해보세요\n\n' +
-      '과연 ' + name + '의 인생은 어떻게 마무리될까요?\n\n' +
-      '[게임 정보]\n\n' +
-      '1. 무료\n\n' +
-      '2. 한국어 지원\n\n' +
-      '3. 플레이 타임 약 30분\n\n' +
-      '(다회차 플레이 가능)\n\n' +
-      PROMO_GAME_URL + '\n\n' +
-      '제작: 오목지면시그';
+    return [
+      'STREAMER ANALYTICS / VOD INSIGHTS',
+      '스트리머 고점체크',
+      '다시보기 속 시청자 흐름을 데이터로 확인하세요',
+      '스트리머를 검색하고, 방송의 최고·최저 순간을 찾은 뒤 해당 시간부터 바로 재생할 수 있습니다.',
+      '고점체크 열기 ↗',
+      PROMO_GAME_URL,
+      'VOD PERFORMANCE SNAPSHOT',
+      '방송별 핵심 지표',
+      'PEAK VIEWERS — 최고 시청 순간 — 가장 많은 시청자가 모인 시점',
+      'LOWEST VIEWERS — 최저 시청 순간 — 가장 적었던 시청자와 시점',
+      'JUMP TO MOMENT — 시간대로 바로 재생 — 고점·저점 링크로 해당 장면 이동',
+      '시청자 그래프 (레이아웃 예시)',
+      '방송 시작 · 방송 중 · 방송 종료',
+      '검색부터 재생까지',
+      '01 닉네임 또는 SOOP ID 검색',
+      '02 썸네일·제목·날짜·조회수로 VOD 확인',
+      '03 최고·최저 순간을 눌러 바로 재생',
+      '집계 기준: 1분 단위 그래프 · 방송 시작 후 5분과 종료 전 5분은 통계에서 제외',
+      '방송에서 가장 뜨거웠던 순간은 언제였을까요?',
+      '스트리머 고점체크에서 다시보기의 시청자 데이터를 살펴보세요.',
+      '스트리머 고점체크 바로가기 ↗',
+      'STREAMER PEAK CHECK / 방송 다시보기 시청자 통계',
+      'DEVELOPER',
+      '오목지면시그',
+      'SOOP 스트리머 고점체크 개발자',
+      '방송국 바로가기 ↗',
+      PROMO_CREATOR_STATION_URL,
+    ].join('\n\n');
   }
 
   function buildStreamerPromoHtml(name) {
-    const safeName = escapePromoHtml(name);
-    const figures = PROMO_IMAGE_URLS.map(function (src) {
-      return '<figure data-paragraph-type="IMAGE_BLOCK" style="width: 1016px; margin-left: auto; margin-right: auto; position: relative; margin-bottom: 0; display: block; min-width: 1px; max-width: 100%; height: auto"><img src="' + src + '" alt="" style="width: 100%; height: auto; transition: opacity 0.3s" /></figure>';
-    }).join('\n');
-    const paragraph = function (text) {
-      return '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"><span style="font-size: 18px">' + text + '</span></p>';
-    };
-    const empty = '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"></p>';
-    return [
-      figures,
-      paragraph(safeName + '의 인생을 미리 점쳐보는 인생게임 출시!'),
-      paragraph('평범한 직장생활부터 차량 절도범까지 다양한 직업을 체험해보세요'),
-      paragraph('과연 ' + safeName + '의 인생은 어떻게 마무리될까요?'),
-      empty,
-      paragraph('[게임 정보]'),
-      paragraph('1. 무료'),
-      paragraph('2. 한국어 지원'),
-      paragraph('3. 플레이 타임 약 30분'),
-      paragraph('(다회차 플레이 가능)'),
-      empty,
-      '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"><span style="font-size: 18px"><a href="' + PROMO_GAME_URL + '" class="editorTextLink">' + PROMO_GAME_URL + '</a></span></p>',
-      empty,
-      '<p data-paragraph-type="TEXT_BLOCK" style="text-align: center"><span style="font-size: 18px">제작: </span><span style="color: rgb(74, 144, 226); font-size: 18px"><a href="' + PROMO_CREATOR_STATION_URL + '">오목지면시그</a></span></p>',
-    ].join('\n');
+    return `<figure data-paragraph-type="IMAGE_BLOCK" style="width: 1016px; margin-left: auto; margin-right: auto; position: relative; margin-bottom: 0; display: block; min-width: 1px; max-width: 100%; height: auto"><img src="https://stimg.sooplive.com/NORMAL_BBS/5/14155005/81641792181955251.png" alt="" style="width: 100%; height: auto; transition: opacity 0.3s" data-soop-primary-image="true" /></figure>
+<div data-soop-custom-block="true" style="max-width:860px;width:96%;margin:20px auto;padding:0;background:#f3f6fb;border:1px solid #d8e1ed;border-radius:4px;overflow:hidden;font-family:'Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif;color:#17243a;line-height:1.65;box-sizing:border-box;">
+  <div style="padding:34px 30px 30px;background:#101b2d;border-bottom:4px solid #4d70e8;color:#fff;">
+    <div style="font-size:11px;font-weight:800;letter-spacing:2.5px;color:#9db5ff;">STREAMER ANALYTICS　/　VOD INSIGHTS</div>
+    <div style="margin-top:13px;font-size:30px;font-weight:900;line-height:1.3;color:#fff;">스트리머 고점체크</div>
+    <div style="margin-top:9px;font-size:18px;font-weight:700;color:#e6ecf6;">다시보기 속 시청자 흐름을 데이터로 확인하세요</div>
+    <div style="margin-top:12px;max-width:680px;font-size:14px;color:#bdc9dc;">스트리머를 검색하고, 방송의 최고·최저 순간을 찾은 뒤 해당 시간부터 바로 재생할 수 있습니다.</div>
+    <div style="margin-top:22px;"><a href="${PROMO_GAME_URL}" target="_blank" style="display:inline-block;padding:12px 20px;background:#4d70e8;color:#fff;text-decoration:none;font-size:14px;font-weight:800;border-radius:3px;">고점체크 열기　↗</a>
+    </div>
+  </div>
+  <div style="padding:22px 22px 24px;">
+    <div style="font-size:11px;font-weight:800;letter-spacing:2px;color:#61738f;">VOD PERFORMANCE SNAPSHOT</div>
+    <div style="margin-top:4px;font-size:22px;font-weight:900;color:#17243a;">방송별 핵심 지표</div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:15px;">
+      <div style="flex:1;min-width:155px;padding:15px 16px;background:#fff;border:1px solid #dce4ef;border-top:3px solid #d94d7c;border-radius:3px;box-sizing:border-box;">
+        <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;color:#8794a8;">PEAK VIEWERS</div>
+        <div style="margin-top:7px;font-size:16px;font-weight:900;color:#c43e6a;">최고 시청 순간</div>
+        <div style="margin-top:4px;font-size:12px;color:#66758b;">가장 많은 시청자가 모인 시점</div>
+      </div>
+      <div style="flex:1;min-width:155px;padding:15px 16px;background:#fff;border:1px solid #dce4ef;border-top:3px solid #169889;border-radius:3px;box-sizing:border-box;">
+        <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;color:#8794a8;">LOWEST VIEWERS</div>
+        <div style="margin-top:7px;font-size:16px;font-weight:900;color:#138579;">최저 시청 순간</div>
+        <div style="margin-top:4px;font-size:12px;color:#66758b;">가장 적었던 시청자와 시점</div>
+      </div>
+      <div style="flex:1;min-width:155px;padding:15px 16px;background:#fff;border:1px solid #dce4ef;border-top:3px solid #4d70e8;border-radius:3px;box-sizing:border-box;">
+        <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;color:#8794a8;">JUMP TO MOMENT</div>
+        <div style="margin-top:7px;font-size:16px;font-weight:900;color:#3457c5;">시간대로 바로 재생</div>
+        <div style="margin-top:4px;font-size:12px;color:#66758b;">고점·저점 링크로 해당 장면 이동</div>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-top:18px;">
+      <div style="flex:1;min-width:260px;padding:18px;background:#fff;border:1px solid #dce4ef;border-radius:3px;box-sizing:border-box;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">시청자 그래프<span style="font-size:10px;color:#72829a;">레이아웃 예시</span></div>
+        <div style="display:flex;align-items:flex-end;gap:5px;height:82px;margin-top:15px;padding:8px 8px 0;background:#f5f7fb;border-bottom:1px solid #cfd8e6;box-sizing:border-box;">
+          <div style="flex:1;height:22%;background:#9eb5ff;"></div><div style="flex:1;height:31%;background:#8ca8fb;"></div><div style="flex:1;height:28%;background:#a3b8ff;"></div><div style="flex:1;height:42%;background:#7899f5;"></div><div style="flex:1;height:36%;background:#8ca8fb;"></div><div style="flex:1;height:51%;background:#698df0;"></div><div style="flex:1;height:45%;background:#7899f5;"></div><div style="flex:1;height:66%;background:#5279e7;"></div><div style="flex:1;height:92%;background:#385fce;"></div><div style="flex:1;height:61%;background:#5279e7;"></div><div style="flex:1;height:55%;background:#698df0;"></div><div style="flex:1;height:43%;background:#7899f5;"></div><div style="flex:1;height:38%;background:#8ca8fb;"></div><div style="flex:1;height:30%;background:#9eb5ff;"></div><div style="flex:1;height:25%;background:#aec0ff;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:#8491a4;"><span>방송 시작</span><span>방송 중</span><span>방송 종료</span></div>
+      </div>
+      <div style="flex:1;min-width:260px;padding:18px;background:#fff;border:1px solid #dce4ef;border-radius:3px;box-sizing:border-box;">
+        <div style="font-size:11px;font-weight:800;letter-spacing:1.4px;color:#4d70e8;">HOW TO USE</div>
+        <div style="margin-top:5px;font-size:16px;font-weight:900;color:#23344e;">검색부터 재생까지</div>
+        <div style="margin-top:13px;padding-top:10px;border-top:1px solid #e7ecf3;font-size:13px;color:#43536b;">01　닉네임 또는 SOOP ID 검색</div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid #e7ecf3;font-size:13px;color:#43536b;">02　썸네일·제목·날짜·조회수로 VOD 확인</div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid #e7ecf3;font-size:13px;color:#43536b;">03　최고·최저 순간을 눌러 바로 재생</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;padding:13px 15px;background:#eaf0fb;border-left:3px solid #4d70e8;color:#43536b;font-size:12px;line-height:1.7;">집계 기준　1분 단위 그래프 · 방송 시작 후 5분과 종료 전 5분은 통계에서 제외</div>
+    <div style="margin-top:18px;padding:22px;background:#eaf0fb;border:1px solid #d5dfef;text-align:center;">
+      <div style="font-size:15px;font-weight:900;color:#17243a;">방송에서 가장 뜨거웠던 순간은 언제였을까요?</div>
+      <div style="margin-top:5px;font-size:12px;color:#64748b;">스트리머 고점체크에서 다시보기의 시청자 데이터를 살펴보세요.</div>
+      <div style="margin-top:14px;"><a href="${PROMO_GAME_URL}" target="_blank" style="display:inline-block;padding:12px 22px;background:#4d70e8;color:#fff;text-decoration:none;font-size:13px;font-weight:900;border-radius:3px;">스트리머 고점체크 바로가기　↗</a>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding:0 2px;font-size:10px;color:#8491a4;">STREAMER PEAK CHECK　/　방송 다시보기 시청자 통계</div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;margin-top:20px;padding:0 16px;min-height:112px;background:#111827;border:1px solid #a98b4d;border-top:3px solid #d4b35f;box-sizing:border-box;">
+      <div style="display:flex;align-items:center;gap:14px;min-width:0;"> <img src="https://stimg.sooplive.com/NORMAL_BBS/5/14155005/65581792182802428.png" alt="오목지면시그 프로필" style="display:block;width:auto;height:108px;max-width:108px;flex:0 0 auto;box-sizing:border-box;object-fit:contain;border-radius:50%;" data-soop-image-id="4">
+        <div>
+          <div style="font-size:10px;font-weight:800;letter-spacing:1.8px;color:#d4b35f;">DEVELOPER</div>
+          <div style="margin-top:3px;font-size:18px;font-weight:900;color:#fff1c6;">오목지면시그</div>
+          <div style="font-size:12px;color:#c7bb98;">SOOP 스트리머 고점체크 개발자</div>
+        </div>
+      </div> <a href="${PROMO_CREATOR_STATION_URL}" target="_blank" style="display:inline-block;padding:11px 16px;background:#d4b35f;color:#17130a;text-decoration:none;font-size:13px;font-weight:900;border:1px solid #ebd48e;border-radius:3px;">방송국 바로가기　↗</a>
+    </div>
+  </div>
+</div>
+<p data-paragraph-type="TEXT_BLOCK" style="text-align: left"></p>`;
   }
 
   function renderStreamerPromoDraft() {
