@@ -295,7 +295,7 @@ async function confirmOnyuGiftNotificationInBackground(message) {
   const eventAtMin = Number(message.eventAtMin);
   const eventAtMax = Number(message.eventAtMax);
   const candidateFingerprint = String(message.candidateFingerprint || '').toLowerCase();
-  if (!/^[a-z0-9]{2,20}$/.test(senderSoopId) || !Number.isInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0 ||
+  if (!/^[a-z0-9]{2,20}$/.test(senderSoopId) || !Number.isInteger(balloons) || (balloons !== 33 && (balloons < 10 || balloons > 70 || balloons % 10 !== 0)) ||
       !Number.isFinite(observedAt) || !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) ||
       !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) return { ok: false, reason: 'invalid-notification-candidate' };
   const session = await ensureFreshOnyuGiftMonitorSession();
@@ -977,7 +977,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const candidateFingerprint = String(message.candidateFingerprint || '').toLowerCase();
     const isSoopSender = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl &&
       sourceUrl.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(sourceUrl.hostname);
-    if (!isSoopSender || !/^[a-z0-9]{2,20}$/.test(senderSoopId) || !Number.isInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0 ||
+    if (!isSoopSender || !/^[a-z0-9]{2,20}$/.test(senderSoopId) || !Number.isInteger(balloons) || (balloons !== 33 && (balloons < 10 || balloons > 70 || balloons % 10 !== 0)) ||
         !Number.isFinite(observedAt) || !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) ||
         !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) {
       sendResponse({ ok: false, reason: 'invalid-notification-candidate' });

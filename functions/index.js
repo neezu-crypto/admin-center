@@ -1986,7 +1986,8 @@ const notifyFanPageViewerSubscriptionRequest = onValueCreated('/streamerFanPageV
   const requestedAtText = new Date(requestedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
   await sendDiscordNotification(
     '🔔 **새 구독 신청 (스트리머 고점체크)**\n' +
-    '후원자 닉네임: ' + nickname + (donorSoopId ? ' · SOOP 아이디: @' + donorSoopId : '') + ' · 별풍선 10개 / 30일\n' +
+    '후원자 닉네임: ' + nickname + (donorSoopId ? ' · SOOP 아이디: @' + donorSoopId : '') +
+    ' · 별풍선 ' + (Number(data.balloonCost) || FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS) + '개 / 30일\n' +
     '신청 시각: ' + requestedAtText + '\n' +
     '후원 완료 신호 후 자동 대조하며, 일치하지 않거나 여러 신청과 겹치는 경우 팬페이지 관리자 통계에서 확인해 주세요.\n' +
     'https://neezu-crypto.github.io/streamer-fanpage/'
@@ -2829,6 +2830,8 @@ const onyuGetViewerAccess = onCall(async (request) => {
 // 로그인 유저가 관리자 방송국에 후원해 본인(인증 스트리머) 이용권을 구매하거나
 // 인증 스트리머에게 선물하는 신청 흐름. 별풍선 50개, 지급은 관리자 검수 후다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
+const FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS = 33;
+const LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS = 10;
 const ONYU_GIFT_MONITOR_UID_PREFIX = 'onyu_gift_monitor_';
 
 function onyuGiftMonitorUid(adminUid) {
@@ -2907,7 +2910,7 @@ function lifeGameSponsorHasEligibleBackgroundRequest(requests, now) {
 
 function fanPageViewerSubscriptionHasEligibleBackgroundRequest(requests, now) {
   return Object.values(requests || {}).some((item) => item && (!item.status || item.status === 'pending') &&
-    normalizeSoopId(item.donorSoopId) && Number(item.balloonCost) === 10 &&
+    normalizeSoopId(item.donorSoopId) && [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS].includes(Number(item.balloonCost)) &&
     Number(item.donationCompletedAt) > 0 && Number(item.requestedAt) > now - 24 * 60 * 60 * 1000);
 }
 
@@ -3907,7 +3910,8 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
   const candidateFingerprint = String(request.data && request.data.candidateFingerprint || '').toLowerCase();
   const exactTimestamp = request.data && request.data.exactTimestamp === true;
   const now = Date.now();
-  if (!senderSoopId || !Number.isInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0 ||
+  if (!senderSoopId || !Number.isInteger(balloons) ||
+      !(balloons === FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS || (balloons >= 10 && balloons <= 70 && balloons % 10 === 0)) ||
       !Number.isFinite(observedAt) || observedAt < now - 2 * 60 * 1000 || observedAt > now + 30000 ||
       !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) || eventAtMin > eventAtMax ||
       eventAtMin < observedAt - 24 * 60 * 60 * 1000 || eventAtMax > observedAt + 30000 ||

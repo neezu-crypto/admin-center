@@ -178,7 +178,7 @@
     const amountMatch = receiptText.match(/별풍선\s*([\d,]+)\s*개/);
     if (!amountMatch) return null;
     const balloons = Number(amountMatch[1].replace(/,/g, ''));
-    if (!Number.isSafeInteger(balloons) || balloons < 10 || balloons > 70 || balloons % 10 !== 0) return null;
+    if (!Number.isSafeInteger(balloons) || (balloons !== 33 && (balloons < 10 || balloons > 70 || balloons % 10 !== 0))) return null;
     const observedAt = Date.now();
     const exactTimestamp = exactTimestampFromRow(found.element);
     const age = parseAgeRange(receiptText);
