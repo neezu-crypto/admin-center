@@ -3050,7 +3050,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     if (accessMode === 'monitor') sendMonitorState();
   };
   const onRequestError = (error) => {
-    console.error('온이유 이용권 백그라운드 실시간 구독 실패:', String(error && error.message || error).slice(0, 160));
+    console.error('SOOP 후원 자동 검증 백그라운드 실시간 구독 실패:', String(error && error.message || error).slice(0, 160));
     writeEvent('stream-error', { reason: 'database-subscription-failed' });
     cleanup();
   };
