@@ -2412,7 +2412,7 @@
     if (statusEl) statusEl.textContent = eligible.length
       ? '온이유 자동 확인 대기: ' + eligible.length + '건 · 인생게임·고점체크 구독 후원도 같은 실시간 구독에서 확인하며 SOOP 알림함을 최대 3초 간격으로 확인합니다. ' + backgroundStatus + ' SOOP 로그인 탭은 열어 두세요.'
       : waitingForDonor
-        ? '온이유 후원 완료 신호 대기: ' + waitingForDonor + '건 · 인생게임·고점체크 구독 후원도 신청자의 후원 완료 신호 뒤 같은 구독에서 확인합니다. ' + backgroundStatus
+        ? '온이유 후원 완료 신호 대기: ' + waitingForDonor + '건 · 인생게임·고점체크 후원은 요청 접수 시 감시를 시작하고, 완료 신호가 있으면 더 정확히 대조합니다. ' + backgroundStatus
         : '온이유 이용권의 자동 확인 대기 신청이 없습니다. 인생게임 홍보와 고점체크 구독 후원도 메뉴 선택과 무관한 같은 백그라운드 구독에서 확인합니다. ' + backgroundStatus + ' 알림 항목은 열지 않고, 일치하지 않거나 여러 신청과 겹치면 수동 검수에 남깁니다.';
   }
   function startOnyuGiftRequestSubscription() {
