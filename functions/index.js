@@ -2849,6 +2849,7 @@ const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS = 500;
 const FANPAGE_SPONSOR_MAX_ADS_PER_RAIL = 5;
 const FANPAGE_SPONSOR_MAX_ACTIVE_ADS = FANPAGE_SPONSOR_MAX_ADS_PER_RAIL * 2;
 const FANPAGE_SPONSOR_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const FANPAGE_SPONSOR_MAX_CAMPAIGN_MS = 30 * 24 * 60 * 60 * 1000;
 const ONYU_GIFT_MONITOR_UID_PREFIX = 'onyu_gift_monitor_';
 
 function onyuGiftMonitorUid(adminUid) {
@@ -4122,6 +4123,295 @@ const listFanPageSponsorDonationDiagnostics = onCall(async (request) => {
   return { ok: true, events, checkedAt: Date.now(), retentionDays: 90, maxRecords: FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS };
 });
 
+function validFanPageSponsorRequestId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(value);
+}
+
+async function writeFanPageSponsorAdminAudit(db, request, action, detail) {
+  try {
+    await logToAdminAuditLog(db, request, action, detail);
+    return true;
+  } catch (error) {
+    console.error('고점체크 후원 광고 감사 로그 실패:', String(error && error.message || error).slice(0, 160));
+    return false;
+  }
+}
+
+// 고점체크의 후원 스트리머 신청·광고는 fanpage 서버 전용 노드에 보관한다.
+// 관리센터가 관리자 인증 후 Admin SDK로만 읽고 쓰며, 공개 callable의 App Check나
+// 브라우저 RTDB 권한을 우회해 데이터를 노출하지 않는다. 신청 승인 조건과 슬롯
+// 예약·용량 규칙은 streamer-fanpage/functions/sponsor-ads.js와 맞춰 유지한다.
+const manageFanPageSponsorAds = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const db = getDatabase();
+  const data = request.data || {};
+  const action = String(data.action || 'list');
+
+  if (action === 'list') {
+    const pendingSnapshot = await db.ref(FANPAGE_SPONSOR_PENDING_PATH).get();
+    const pendingMap = pendingSnapshot.val() || {};
+    const requestIds = Object.keys(pendingMap).slice(-100);
+    const requests = [];
+    for (const requestId of requestIds) {
+      const requestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH + '/' + requestId);
+      const record = (await requestRef.get()).val();
+      if (!record || record.status !== 'pending') continue;
+      if (!Number(record.donationCompletedAt) && Number(record.expiresAt) <= Date.now()) {
+        const expired = await requestRef.transaction((current) => {
+          if (!current || current.status !== 'pending' || Number(current.donationCompletedAt) > 0 || Number(current.expiresAt) > Date.now()) return;
+          return Object.assign({}, current, { status: 'expired', updatedAt: Date.now() });
+        }, undefined, false);
+        if (expired.committed) {
+          await Promise.all([
+            db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove(),
+            db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId).remove(),
+          ]);
+        }
+        continue;
+      }
+      requests.push({
+        requestId,
+        nickname: String(record.nickname || '').slice(0, 40),
+        soopId: normalizeSoopId(record.soopId),
+        donorSoopId: normalizeSoopId(record.donorSoopId),
+        rail: record.rail === 'right' ? 'right' : 'left',
+        days: Math.max(1, Math.min(30, Number(record.days) || 1)),
+        balloonCost: Math.max(0, Number(record.balloonCost) || 0),
+        donationCompletedAt: Math.max(0, Number(record.donationCompletedAt) || 0),
+        requestedAt: Math.max(0, Number(record.requestedAt) || 0),
+        expiresAt: Math.max(0, Number(record.expiresAt) || 0),
+      });
+    }
+    requests.sort((a, b) => a.requestedAt - b.requestedAt);
+
+    const adsSnapshot = await db.ref(FANPAGE_SPONSOR_ADS_PATH).get();
+    const ads = Object.entries(adsSnapshot.val() || {})
+      .map(([campaignId, record]) => ({ campaignId, ...(record || {}) }))
+      .filter((ad) => ad.status === 'active')
+      .sort((a, b) => Number(b.expiresAt || 0) - Number(a.expiresAt || 0))
+      .slice(0, 100)
+      .map((ad) => ({
+        campaignId: String(ad.campaignId || ad.requestId || ''),
+        requestId: String(ad.requestId || ''),
+        nickname: String(ad.nickname || '').slice(0, 40),
+        soopId: normalizeSoopId(ad.soopId),
+        rail: ad.rail === 'right' ? 'right' : 'left',
+        startsAt: Math.max(0, Number(ad.startsAt) || 0),
+        expiresAt: Math.max(0, Number(ad.expiresAt) || 0),
+      }));
+    return {
+      ok: true,
+      requests,
+      ads,
+      truncated: Object.keys(pendingMap).length > requestIds.length,
+      checkedAt: Date.now(),
+    };
+  }
+
+  if (action === 'approve' || action === 'reject') {
+    const requestId = typeof data.requestId === 'string' ? data.requestId.trim() : '';
+    if (!validFanPageSponsorRequestId(requestId)) throw new HttpsError('invalid-argument', '신청 번호가 올바르지 않습니다.');
+    const requestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH + '/' + requestId);
+    const claimRef = db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId);
+    const now = Date.now();
+    const initial = (await requestRef.get()).val();
+    if (!initial || initial.status !== 'pending') throw new HttpsError('failed-precondition', '대기 중인 신청만 처리할 수 있습니다.');
+    if (action === 'approve' && !Number(initial.donationCompletedAt)) {
+      throw new HttpsError('failed-precondition', '신청자가 후원 완료를 표시한 신청만 승인할 수 있습니다.');
+    }
+    if (!Number(initial.donationCompletedAt) && Number(initial.expiresAt) <= now) {
+      await requestRef.transaction((current) => {
+        if (!current || current.status !== 'pending' || Number(current.donationCompletedAt) > 0 || Number(current.expiresAt) > Date.now()) return;
+        return Object.assign({}, current, { status: 'expired', updatedAt: Date.now() });
+      }, undefined, false);
+      await Promise.all([
+        db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove(),
+        claimRef.remove(),
+      ]);
+      throw new HttpsError('failed-precondition', '신청이 만료되어 처리할 수 없습니다.');
+    }
+
+    if (action === 'reject') {
+      const rejected = await requestRef.transaction((current) => {
+        if (!current || current.status !== 'pending') return;
+        return Object.assign({}, current, { status: 'rejected', reviewedAt: now, reviewedBy: adminUid, updatedAt: now });
+      }, undefined, false);
+      if (!rejected.committed) throw new HttpsError('failed-precondition', '이미 처리된 신청입니다.');
+      await Promise.all([
+        db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove(),
+        claimRef.remove(),
+      ]);
+      const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 신청 반려', initial.nickname + ' (@' + normalizeSoopId(initial.soopId) + ')');
+      return { ok: true, status: 'rejected', auditLogged };
+    }
+
+    const soopId = normalizeSoopId(initial.soopId);
+    const rail = initial.rail === 'left' || initial.rail === 'right' ? initial.rail : '';
+    const days = Number(initial.days);
+    if (!/^[a-z0-9]{2,20}$/.test(soopId) || !rail || !Number.isInteger(days) || days < 1 || days > 30 || Number(initial.balloonCost) !== days * 10) {
+      throw new HttpsError('failed-precondition', '신청의 SOOP 아이디·영역·기간·후원 개수가 올바르지 않습니다.');
+    }
+    const processingToken = require('node:crypto').randomBytes(16).toString('hex');
+    const processing = await requestRef.transaction((current) => {
+      if (!current || current.status !== 'pending' || !Number(current.donationCompletedAt)) return;
+      return Object.assign({}, current, { status: 'processing', processingAt: now, processingBy: adminUid, processingToken });
+    }, undefined, false);
+    if (!processing.committed) throw new HttpsError('failed-precondition', '이미 처리 중이거나 완료된 신청입니다.');
+
+    let claimPrepared = false;
+    let claimActivated = false;
+    let adCreated = false;
+    const campaignId = requestId;
+    const adRef = db.ref(FANPAGE_SPONSOR_ADS_PATH);
+    const approvedUntil = now + days * 24 * 60 * 60 * 1000;
+    try {
+      const prepared = await claimRef.transaction((current) => {
+        if (!current || current.status !== 'pending' || normalizeSoopId(current.soopId) !== soopId || current.rail !== rail || !Number(current.donationCompletedAt)) return;
+        return Object.assign({}, current, { verificationProcessingAt: now, verificationProcessingToken: processingToken });
+      }, undefined, false);
+      if (!prepared.committed) throw new HttpsError('failed-precondition', '홍보 자리 예약이 신청과 일치하지 않습니다.');
+      claimPrepared = true;
+
+      const savedAd = {
+        campaignId,
+        soopId,
+        rail,
+        nickname: String(initial.nickname || '').trim().slice(0, 40),
+        status: 'active',
+        startsAt: now,
+        expiresAt: approvedUntil,
+        requestId,
+      };
+      const capacity = await adRef.transaction((current) => {
+        const next = Object.assign({}, current && typeof current === 'object' ? current : {});
+        for (const [id, ad] of Object.entries(next)) {
+          if (!ad || ad.status !== 'active' || Number(ad.expiresAt) <= now) delete next[id];
+        }
+        if (Object.values(next).some((ad) => normalizeSoopId(ad && ad.soopId) === soopId) ||
+            Object.keys(next).length >= FANPAGE_SPONSOR_MAX_ACTIVE_ADS ||
+            Object.values(next).filter((ad) => ad && ad.rail === rail).length >= FANPAGE_SPONSOR_MAX_ADS_PER_RAIL) return;
+        next[campaignId] = savedAd;
+        return next;
+      }, undefined, false);
+      if (!capacity.committed) throw new HttpsError('resource-exhausted', '현재 고점체크 후원 광고 슬롯이 가득 찼거나 같은 스트리머가 이미 등록되어 있습니다.');
+      adCreated = true;
+
+      const activated = await claimRef.transaction((current) => {
+        if (!current || current.status !== 'pending' || current.verificationProcessingToken !== processingToken || current.rail !== rail || normalizeSoopId(current.soopId) !== soopId) return;
+        return Object.assign({}, current, { status: 'active', expiresAt: approvedUntil, campaignId, verificationProcessingAt: null, verificationProcessingToken: null });
+      }, undefined, false);
+      if (!activated.committed) throw new HttpsError('aborted', '홍보 자리 예약을 활성화하지 못했습니다.');
+      claimActivated = true;
+
+      const finalized = await requestRef.transaction((current) => {
+        if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
+        return Object.assign({}, current, {
+          status: 'approved', reviewedAt: now, reviewedBy: adminUid,
+          verificationSource: 'admin-center-manual', campaignId, approvedUntil,
+          processingAt: null, processingBy: null, processingToken: null, updatedAt: now,
+        });
+      }, undefined, false);
+      if (!finalized.committed) throw new HttpsError('aborted', '승인 결과를 저장하지 못했습니다.');
+      await db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove().catch((error) => {
+        console.error('고점체크 후원 대기 인덱스 정리 실패:', String(error && error.message || error).slice(0, 160));
+      });
+      const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 광고 승인', initial.nickname + ' (@' + soopId + ') · ' + days + '일');
+      return { ok: true, status: 'approved', expiresAt: approvedUntil, auditLogged };
+    } catch (error) {
+      if (adCreated) {
+        await adRef.child(campaignId).transaction((current) =>
+          current && current.requestId === requestId && Number(current.startsAt) === now ? null : current,
+        undefined, false).catch(() => null);
+      }
+      if (claimPrepared || claimActivated) {
+        await claimRef.transaction((current) => {
+          if (!current || (current.verificationProcessingToken !== processingToken && !(current.status === 'active' && current.campaignId === campaignId))) return;
+          return Object.assign({}, current, {
+            status: 'pending', expiresAt: Number(initial.expiresAt) || Date.now(), campaignId: null,
+            verificationProcessingAt: null, verificationProcessingToken: null,
+            donationCompletedAt: Number(current.donationCompletedAt) || Number(initial.donationCompletedAt) || 0,
+          });
+        }, undefined, false).catch(() => null);
+      }
+      await requestRef.transaction((current) => {
+        if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
+        return Object.assign({}, current, { status: 'pending', processingAt: null, processingBy: null, processingToken: null, updatedAt: Date.now() });
+      }, undefined, false).catch(() => null);
+      throw error;
+    }
+  }
+
+  if (action === 'update' || action === 'end') {
+    const campaignId = typeof data.campaignId === 'string' ? data.campaignId.trim() : '';
+    if (!validFanPageSponsorRequestId(campaignId)) throw new HttpsError('invalid-argument', '광고 번호가 올바르지 않습니다.');
+    const adRef = db.ref(FANPAGE_SPONSOR_ADS_PATH + '/' + campaignId);
+    const current = (await adRef.get()).val();
+    if (!current || current.status !== 'active') throw new HttpsError('not-found', '노출 중인 광고를 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.');
+    const now = Date.now();
+    const soopId = normalizeSoopId(current.soopId);
+    const requestId = String(current.requestId || campaignId);
+    if (!validFanPageSponsorRequestId(requestId)) throw new HttpsError('failed-precondition', '광고의 연결된 신청 번호가 올바르지 않습니다.');
+    const linkedRequestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH + '/' + requestId);
+    if (!(await linkedRequestRef.get()).exists()) throw new HttpsError('failed-precondition', '광고 신청 이력을 찾을 수 없습니다.');
+
+    if (action === 'end') {
+      const ended = await adRef.transaction((value) => {
+        if (!value || value.status !== 'active') return;
+        return Object.assign({}, value, { status: 'ended', endedAt: now, updatedAt: now });
+      }, undefined, false);
+      if (!ended.committed) throw new HttpsError('failed-precondition', '광고가 이미 종료되었거나 처리 중입니다.');
+      await Promise.all([
+        db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId).transaction((claim) =>
+          claim && claim.campaignId === campaignId ? null : claim,
+        undefined, false),
+        linkedRequestRef.update({ endedAt: now, approvedUntil: now, updatedAt: now }),
+      ]);
+      const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 광고 즉시 종료', current.nickname + ' (@' + soopId + ')');
+      return { ok: true, endedAt: now, auditLogged };
+    }
+
+    const nickname = typeof data.nickname === 'string' ? data.nickname.trim() : '';
+    const extendDays = Number(data.extendDays);
+    if (!nickname || nickname.length > 40 || /[<>\x00-\x1F\x7F]/.test(nickname)) {
+      throw new HttpsError('invalid-argument', '닉네임은 금지 문자를 제외하고 1~40자로 입력해 주세요.');
+    }
+    if (!Number.isInteger(extendDays) || extendDays < 0 || extendDays > 30) {
+      throw new HttpsError('invalid-argument', '연장 일수는 0~30일로 입력해 주세요.');
+    }
+    if (Number(current.expiresAt) <= now) throw new HttpsError('failed-precondition', '이미 만료된 광고는 연장하거나 수정할 수 없습니다.');
+    const startsAt = Math.max(0, Number(current.startsAt) || now);
+    const currentExpiresAt = Math.max(now, Number(current.expiresAt) || now);
+    const maximumExpiresAt = startsAt + FANPAGE_SPONSOR_MAX_CAMPAIGN_MS;
+    const expiresAt = extendDays ? Math.min(currentExpiresAt + extendDays * 24 * 60 * 60 * 1000, maximumExpiresAt) : currentExpiresAt;
+    if (extendDays && expiresAt <= currentExpiresAt) throw new HttpsError('failed-precondition', '이 캠페인은 이미 최대 30일 노출 기간을 사용했습니다.');
+    const appliedExtendDays = extendDays ? Math.floor((expiresAt - currentExpiresAt) / (24 * 60 * 60 * 1000)) : 0;
+    if (extendDays && !appliedExtendDays) throw new HttpsError('failed-precondition', '최대 노출 기간까지 하루 미만 남아 있어 일 단위 연장이 불가능합니다.');
+
+    const claimRef = db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId);
+    const claimUpdate = await claimRef.transaction((claim) => {
+      if (!claim || claim.status !== 'active' || claim.campaignId !== campaignId || normalizeSoopId(claim.soopId) !== soopId) return;
+      return Object.assign({}, claim, { expiresAt, updatedAt: now });
+    }, undefined, false);
+    if (!claimUpdate.committed) throw new HttpsError('failed-precondition', '활성 홍보 자리 예약이 없어 광고를 수정할 수 없습니다.');
+
+    const updated = await adRef.transaction((value) => {
+      if (!value || value.status !== 'active' || String(value.requestId || campaignId) !== requestId || Number(value.expiresAt) !== Number(current.expiresAt)) return;
+      return Object.assign({}, value, { nickname, expiresAt, updatedAt: now });
+    }, undefined, false);
+    if (!updated.committed) {
+      await claimRef.transaction((claim) => claim && claim.campaignId === campaignId && Number(claim.expiresAt) === expiresAt
+        ? Object.assign({}, claim, { expiresAt: Number(current.expiresAt), updatedAt: now }) : claim,
+      undefined, false).catch(() => null);
+      throw new HttpsError('aborted', '광고가 동시에 변경되어 저장하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+    }
+    await linkedRequestRef.update({ approvedUntil: expiresAt, updatedAt: now });
+    const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 광고 수정', current.nickname + ' → ' + nickname + ' (@' + soopId + ')' + (appliedExtendDays ? ' · ' + appliedExtendDays + '일 연장' : ''));
+    return { ok: true, expiresAt, extendedDays: appliedExtendDays, auditLogged };
+  }
+
+  throw new HttpsError('invalid-argument', '고점체크 후원 광고 관리 동작을 확인해 주세요.');
+});
+
 const confirmGameDonationFromNotification = onCall(async (request) => {
   const reviewer = await resolveOnyuGiftReviewActor(request);
   const adminUid = reviewer.adminUid;
@@ -5028,6 +5318,7 @@ module.exports = {
   lifeGameApproveSponsorRequest,
   getLifeGameSponsorAutoVerificationDiagnostics,
   listFanPageSponsorDonationDiagnostics,
+  manageFanPageSponsorAds,
   lifeGameRejectSponsorRequest,
   getLifeGameCurrentSponsor,
   updateLifeGameCurrentSponsor,

@@ -181,6 +181,22 @@
   .lifegame-sponsor-actions .sponsor-end-btn { border-color: rgba(226,85,79,.45); color: #bd3d36; }
   .lifegame-sponsor-actions .sponsor-end-btn:hover { border-color: #e2554f; background: #fff5f3; }
   .lifegame-sponsor-actions button:focus-visible { outline: 3px solid rgba(232,70,44,.2); outline-offset: 2px; }
+  #fanpageSponsorAdminStatus { margin: 10px 0 14px; }
+  .fanpage-sponsor-admin-list { display: grid; gap: 9px; }
+  .fanpage-sponsor-admin-item {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;
+    padding: 12px 14px; border: 1px solid var(--sub-border); border-radius: 12px; background: rgba(255,255,255,.58);
+  }
+  .fanpage-sponsor-admin-item strong { display: block; color: var(--ink); font-size: 13px; }
+  .fanpage-sponsor-admin-item .hint { display: block; margin-top: 4px; line-height: 1.55; }
+  .fanpage-sponsor-admin-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+  .fanpage-sponsor-admin-actions input { width: 132px; min-width: 0; height: 34px; padding: 6px 8px; border: 1px solid var(--sub-border); border-radius: 8px; }
+  .fanpage-sponsor-admin-actions input[type="number"] { width: 92px; }
+  .fanpage-sponsor-admin-actions .danger { color: #bd3d36; border-color: rgba(226,85,79,.42); }
+  @media (max-width: 650px) {
+    .fanpage-sponsor-admin-item { grid-template-columns: minmax(0, 1fr); }
+    .fanpage-sponsor-admin-actions { justify-content: flex-start; }
+  }
   @media (max-width: 760px) {
     .played-streamer-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .played-streamer-field.uid, .played-streamer-field.evidence, .played-streamer-field.note, .played-streamer-submit { grid-column: 1 / -1; }
@@ -895,6 +911,17 @@
       </div>
     </div>
 
+    <div class="card" id="section-fanpage-sponsor-ads">
+      <h2>고점체크 오늘의 후원 스트리머 신청·광고 관리</h2>
+      <p class="hint">후원 완료가 표시된 신청만 승인할 수 있습니다. 승인·반려, 노출 중 광고의 닉네임 수정·기간 연장·즉시 종료가 가능하며 모든 변경은 관리자 감사 로그에 기록됩니다.</p>
+      <div id="fanpageSponsorAdminStatus" class="hint" role="status" aria-live="polite">새로고침을 눌러 신청과 광고를 확인하세요.</div>
+      <h3 class="subhead">검토 대기 신청</h3>
+      <div id="fanpageSponsorPendingRequests" class="fanpage-sponsor-admin-list"></div>
+      <h3 class="subhead" style="margin-top:18px;">현재 및 만료 광고</h3>
+      <div id="fanpageSponsorActiveAds" class="fanpage-sponsor-admin-list"></div>
+      <button id="fanpageSponsorAdminRefreshBtn" class="perm-refresh-btn" type="button" style="margin-top:12px;">새로고침</button>
+    </div>
+
     <div class="card" id="section-lifegame-player-uids">
       <h2>인생게임 플레이 유저 UID 집계</h2>
       <p class="hint">주인공 이름을 정하고 0세 플레이가 시작된 시점(startPlaythrough 성공)을 집계합니다. UID별 최초 시작 시각·최근 시작 시각·게임 시작 횟수를 표시합니다. 집계는 기능 배포 이후 시작부터 누적됩니다.</p>
@@ -1530,6 +1557,7 @@
   const updateLifeGameCurrentSponsorFn = httpsCallable(functions, 'updateLifeGameCurrentSponsor');
   const endLifeGameCurrentSponsorFn = httpsCallable(functions, 'endLifeGameCurrentSponsor');
   const listFanPageSponsorDonationDiagnosticsFn = httpsCallable(functions, 'listFanPageSponsorDonationDiagnostics');
+  const manageFanPageSponsorAdsFn = httpsCallable(functions, 'manageFanPageSponsorAds');
   const listLifeGamePlayerStartRecordsFn = httpsCallable(functions, 'listLifeGamePlayerStartRecords');
   // adminListBotDetails는 admin-center가 아니라 streamer-life-game이 배포한
   // 함수다(같은 soop-stock-market 프로젝트 공유 - approveVerification 등
@@ -1807,8 +1835,8 @@
       sections: ['section-played-streamers'],
     },
     {
-      id: 'lifegame-sponsor', label: '오늘의 후원 스트리머 광고', icon: '📢', role: 'admin',
-      sections: ['section-lifegame-current-sponsor'],
+      id: 'lifegame-sponsor', label: '오늘의 후원 스트리머', icon: '📢', role: 'admin',
+      sections: ['section-lifegame-current-sponsor', 'section-fanpage-sponsor-ads'],
     },
     {
       id: 'lifegame-player-uids', label: '인생게임 플레이 유저 UID 집계', icon: '🧾', role: 'admin',
@@ -2159,7 +2187,7 @@
       } else if (sessionId === 'played-streamers') {
         jobs.push(refreshLifeGamePlayedStreamers());
       } else if (sessionId === 'lifegame-sponsor') {
-        jobs.push(refreshLifeGameCurrentSponsor());
+        jobs.push(refreshLifeGameCurrentSponsor(), refreshFanPageSponsorManagement());
       } else if (sessionId === 'lifegame-player-uids') {
         jobs.push(refreshLifeGamePlayerUidList());
       } else if (sessionId === 'promotions') {
@@ -5240,6 +5268,162 @@
       lifeGameCurrentSponsorStatusEl.textContent = '종료 실패: ' + (e.message || e);
     }
   });
+
+  const fanPageSponsorAdminStatusEl = document.getElementById('fanpageSponsorAdminStatus');
+  const fanPageSponsorPendingRequestsEl = document.getElementById('fanpageSponsorPendingRequests');
+  const fanPageSponsorActiveAdsEl = document.getElementById('fanpageSponsorActiveAds');
+  const fanPageSponsorAdminRefreshBtnEl = document.getElementById('fanpageSponsorAdminRefreshBtn');
+
+  function fanPageSponsorAdminDate(timestamp) {
+    return timestamp ? new Date(timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '확인 전';
+  }
+
+  function fanPageSponsorAdminButton(label, action, className) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'perm-refresh-btn' + (className ? ' ' + className : '');
+    button.textContent = label;
+    button.dataset.action = action;
+    return button;
+  }
+
+  async function refreshFanPageSponsorManagement() {
+    if (!fanPageSponsorAdminStatusEl) return;
+    fanPageSponsorAdminStatusEl.textContent = '고점체크 신청·광고를 불러오는 중...';
+    fanPageSponsorAdminRefreshBtnEl.disabled = true;
+    try {
+      const response = await manageFanPageSponsorAdsFn({ action: 'list' });
+      const data = response.data || {};
+      const requests = Array.isArray(data.requests) ? data.requests : [];
+      const ads = Array.isArray(data.ads) ? data.ads : [];
+      fanPageSponsorPendingRequestsEl.replaceChildren();
+      fanPageSponsorActiveAdsEl.replaceChildren();
+
+      if (!requests.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = data.truncated ? '표시 가능한 대기 신청이 없습니다. (목록이 100건을 초과합니다.)' : '검토 대기 신청이 없습니다.';
+        fanPageSponsorPendingRequestsEl.append(empty);
+      }
+      requests.forEach(function (item) {
+        const row = document.createElement('article');
+        row.className = 'fanpage-sponsor-admin-item';
+        const details = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = item.nickname + ' · @' + item.soopId + ' · ' + (item.rail === 'right' ? '오른쪽 영역' : '왼쪽 영역');
+        const meta = document.createElement('span');
+        meta.className = 'hint';
+        meta.textContent = '후원자 @' + item.donorSoopId + ' · ' + item.days + '일 / 별풍선 ' + Number(item.balloonCost || 0).toLocaleString('ko-KR') + '개 · 신청 ' + fanPageSponsorAdminDate(item.requestedAt) + ' · ' + (item.donationCompletedAt ? '후원 완료 ' + fanPageSponsorAdminDate(item.donationCompletedAt) : '후원 완료 표시 전');
+        details.append(title, meta);
+        const actions = document.createElement('div');
+        actions.className = 'fanpage-sponsor-admin-actions';
+        const reject = fanPageSponsorAdminButton('반려', 'reject', 'danger');
+        const approve = fanPageSponsorAdminButton('후원 확인 · 승인', 'approve', 'sponsor-save-btn');
+        approve.disabled = !item.donationCompletedAt;
+        reject.addEventListener('click', async function () {
+          if (!confirm(item.nickname + '님의 고점체크 후원 광고 신청을 반려할까요?')) return;
+          reject.disabled = true;
+          await processFanPageSponsorRequest(item.requestId, 'reject', reject);
+        });
+        approve.addEventListener('click', async function () {
+          if (!item.donationCompletedAt) return;
+          if (!confirm(item.nickname + '님의 후원을 확인하고 ' + item.days + '일 광고를 승인할까요?')) return;
+          approve.disabled = true;
+          await processFanPageSponsorRequest(item.requestId, 'approve', approve);
+        });
+        actions.append(reject, approve);
+        row.append(details, actions);
+        fanPageSponsorPendingRequestsEl.append(row);
+      });
+
+      if (!ads.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = '관리할 광고가 없습니다.';
+        fanPageSponsorActiveAdsEl.append(empty);
+      }
+      ads.forEach(function (ad) {
+        const row = document.createElement('article');
+        row.className = 'fanpage-sponsor-admin-item';
+        const details = document.createElement('div');
+        const title = document.createElement('strong');
+        const expired = Number(ad.expiresAt) <= Date.now();
+        title.textContent = (expired ? '만료됨' : '노출 중') + ' · ' + ad.nickname + ' (@' + ad.soopId + ') · ' + (ad.rail === 'right' ? '오른쪽 영역' : '왼쪽 영역');
+        const meta = document.createElement('span');
+        meta.className = 'hint';
+        meta.textContent = '노출 시작 ' + fanPageSponsorAdminDate(ad.startsAt) + ' · 종료 ' + fanPageSponsorAdminDate(ad.expiresAt);
+        details.append(title, meta);
+        const actions = document.createElement('div');
+        actions.className = 'fanpage-sponsor-admin-actions';
+        const nickname = document.createElement('input');
+        nickname.type = 'text';
+        nickname.maxLength = 40;
+        nickname.value = ad.nickname || '';
+        nickname.setAttribute('aria-label', '표시 닉네임');
+        const extend = document.createElement('input');
+        extend.type = 'number';
+        extend.min = '0';
+        extend.max = '30';
+        extend.step = '1';
+        extend.value = '0';
+        extend.setAttribute('aria-label', '연장 일수 (총 30일 이내)');
+        extend.title = '연장 일수 (캠페인 총 노출 기간 최대 30일)';
+        const save = fanPageSponsorAdminButton('수정 / 연장', 'update', 'sponsor-save-btn');
+        const end = fanPageSponsorAdminButton('즉시 종료', 'end', 'danger');
+        save.disabled = expired;
+        end.disabled = expired;
+        save.addEventListener('click', async function () {
+          if (!nickname.value.trim()) { window.alert('표시 닉네임을 입력해 주세요.'); return; }
+          save.disabled = true;
+          try {
+            const result = await manageFanPageSponsorAdsFn({
+              action: 'update', campaignId: ad.campaignId, nickname: nickname.value,
+              extendDays: extend.value,
+            });
+            const added = Number(result.data && result.data.extendedDays) || 0;
+            fanPageSponsorAdminStatusEl.textContent = '고점체크 광고 정보를 수정했습니다.' + (added ? ' ' + added + '일 연장했습니다.' : '') + (result.data && result.data.auditLogged === false ? ' (감사 로그 기록 실패)' : '');
+            await refreshFanPageSponsorManagement();
+          } catch (error) {
+            fanPageSponsorAdminStatusEl.textContent = '광고 수정 실패: ' + (error.message || error);
+            save.disabled = false;
+          }
+        });
+        end.addEventListener('click', async function () {
+          if (!confirm('@' + ad.soopId + ' 고점체크 후원 광고를 즉시 종료할까요?')) return;
+          end.disabled = true;
+          try {
+            const result = await manageFanPageSponsorAdsFn({ action: 'end', campaignId: ad.campaignId });
+            fanPageSponsorAdminStatusEl.textContent = '고점체크 광고를 즉시 종료했습니다.' + (result.data && result.data.auditLogged === false ? ' (감사 로그 기록 실패)' : '');
+            await refreshFanPageSponsorManagement();
+          } catch (error) {
+            fanPageSponsorAdminStatusEl.textContent = '광고 종료 실패: ' + (error.message || error);
+            end.disabled = false;
+          }
+        });
+        actions.append(nickname, extend, save, end);
+        row.append(details, actions);
+        fanPageSponsorActiveAdsEl.append(row);
+      });
+      fanPageSponsorAdminStatusEl.textContent = requests.length + '건의 대기 신청 · ' + ads.filter(function (ad) { return Number(ad.expiresAt) > Date.now(); }).length + '건 노출 중' + (data.truncated ? ' · 대기 신청은 최근 100건만 표시' : '') + ' · 조회 ' + fanPageSponsorAdminDate(data.checkedAt);
+    } catch (error) {
+      console.error('고점체크 후원 신청·광고 조회 실패:', error);
+      fanPageSponsorAdminStatusEl.textContent = '조회 실패: ' + (error.message || error);
+    } finally {
+      fanPageSponsorAdminRefreshBtnEl.disabled = false;
+    }
+  }
+
+  async function processFanPageSponsorRequest(requestId, action, button) {
+    try {
+      await manageFanPageSponsorAdsFn({ action, requestId });
+      await refreshFanPageSponsorManagement();
+    } catch (error) {
+      fanPageSponsorAdminStatusEl.textContent = (action === 'approve' ? '승인' : '반려') + ' 실패: ' + (error.message || error);
+      button.disabled = false;
+    }
+  }
+
+  fanPageSponsorAdminRefreshBtnEl.addEventListener('click', refreshFanPageSponsorManagement);
 
   let lifeGamePlayerUidRows = [];
   function formatLifeGameStartTime(value) {
