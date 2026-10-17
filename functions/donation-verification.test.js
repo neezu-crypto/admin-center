@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   fanPageSponsorAdDonationCanMatch,
+  describeFanPageSponsorDonationCandidate,
   fanPageSponsorAdHasEligibleBackgroundRequest,
   lifeGameSponsorHasEligibleBackgroundRequest,
   notificationFallsInDonationRequestWindow,
@@ -73,6 +74,36 @@ const sponsorRequest = {
   requestedAt: now - 6 * 24 * 60 * 60 * 1000,
   expiresAt: now + 24 * 60 * 60 * 1000,
 };
+
+test('describes sponsor-ad donation candidate matches and exclusion reasons', () => {
+  const eventAt = now - 60 * 1000;
+  const exactMatch = describeFanPageSponsorDonationCandidate(
+    'request-1', sponsorRequest, 'YSK7895', 120, now, eventAt, eventAt, true,
+  );
+  assert.equal(exactMatch.eligibleByCurrentRule, true);
+  assert.equal(exactMatch.donorMatch, true);
+  assert.equal(exactMatch.amountMatch, true);
+  assert.deepEqual(exactMatch.reasons, []);
+
+  const donorMismatch = describeFanPageSponsorDonationCandidate(
+    'request-2', sponsorRequest, 'anotherUser', 120, now, eventAt, eventAt, true,
+  );
+  assert.equal(donorMismatch.eligibleByCurrentRule, false);
+  assert.deepEqual(donorMismatch.reasons, ['donor-account-mismatch']);
+
+  const staleWindow = describeFanPageSponsorDonationCandidate(
+    'request-3', sponsorRequest, 'ysk7895', 120, now, sponsorRequest.requestedAt - 1000,
+    sponsorRequest.requestedAt - 1000, true,
+  );
+  assert.equal(staleWindow.eligibleByCurrentRule, false);
+  assert.ok(staleWindow.reasons.includes('notification-may-precede-request'));
+});
+
+test('omits unrelated pending sponsor requests from a donation diagnostic', () => {
+  assert.equal(describeFanPageSponsorDonationCandidate(
+    'request-unrelated', sponsorRequest, 'anotherUser', 33, now, now - 1000, now - 1000, true,
+  ), null);
+});
 
 test('watches pending streamer-fanpage sponsorship requests up to 30 days of donation value', () => {
   assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: sponsorRequest }, now), true);

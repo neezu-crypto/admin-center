@@ -8,6 +8,7 @@ const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
   fanPageSponsorAdDonationCanMatch,
+  describeFanPageSponsorDonationCandidate,
   fanPageSponsorAdHasEligibleBackgroundRequest,
   lifeGameSponsorHasEligibleBackgroundRequest,
   notificationFallsInDonationRequestWindow,
@@ -2842,6 +2843,9 @@ const FANPAGE_SPONSOR_ADS_PATH = 'streamerFanPageSponsorAds';
 const FANPAGE_SPONSOR_REQUESTS_PATH = 'streamerFanPageSponsorRequests';
 const FANPAGE_SPONSOR_PENDING_PATH = 'streamerFanPageSponsorPending';
 const FANPAGE_SPONSOR_CLAIMS_PATH = 'streamerFanPageSponsorPlacementClaims';
+const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_PATH = 'adminCenter/fanPageSponsorDonationDiagnostics';
+const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS = 500;
 const FANPAGE_SPONSOR_MAX_ADS_PER_RAIL = 5;
 const FANPAGE_SPONSOR_MAX_ACTIVE_ADS = FANPAGE_SPONSOR_MAX_ADS_PER_RAIL * 2;
 const FANPAGE_SPONSOR_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -4083,6 +4087,41 @@ async function writeLifeGameSponsorDonationDiagnostic(db, diagnosticCodes, event
   await db.ref().update(updates);
 }
 
+async function writeFanPageSponsorDonationDiagnostic(db, eventKey, details) {
+  if (!/^[a-f0-9]{40}$/.test(String(eventKey || ''))) return;
+  const now = Date.now();
+  const diagnosticsRef = db.ref(FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_PATH);
+  const recordRef = diagnosticsRef.child(eventKey);
+  await recordRef.transaction((current) => Object.assign({}, current || {}, details || {}, {
+    eventKey,
+    createdAt: Number(current && current.createdAt) || now,
+    updatedAt: now,
+  }), undefined, false);
+
+  // Admin-only diagnostic data is bounded even if SOOP notifications keep arriving.
+  // Keep at most 500 records from the last 90 days; no raw notification text or token is stored.
+  const allSnapshot = await diagnosticsRef.get();
+  const entries = Object.entries(allSnapshot.val() || {})
+    .sort((a, b) => (Number(a[1] && a[1].createdAt) || 0) - (Number(b[1] && b[1].createdAt) || 0));
+  const cutoff = now - FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_RETENTION_MS;
+  const removeCount = Math.max(0, entries.length - FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS);
+  const updates = {};
+  entries.forEach(([key, value], index) => {
+    if ((Number(value && value.createdAt) || 0) < cutoff || index < removeCount) updates[key] = null;
+  });
+  if (Object.keys(updates).length) await diagnosticsRef.update(updates);
+}
+
+const listFanPageSponsorDonationDiagnostics = onCall(async (request) => {
+  await requireAdmin(request);
+  const snapshot = await getDatabase().ref(FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_PATH).get();
+  const events = Object.entries(snapshot.val() || {})
+    .map(([eventKey, value]) => Object.assign({ eventKey }, value || {}))
+    .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
+    .slice(0, 100);
+  return { ok: true, events, checkedAt: Date.now(), retentionDays: 90, maxRecords: FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS };
+});
+
 const confirmGameDonationFromNotification = onCall(async (request) => {
   const reviewer = await resolveOnyuGiftReviewActor(request);
   const adminUid = reviewer.adminUid;
@@ -4212,17 +4251,32 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
       ...fanPageOtherDonationCandidates,
       ...fanPageSponsorOtherDonationCandidates,
     ];
-    eventDetails.otherDonationCandidates = otherDonationCandidates;
-    eventDetails.gameCandidates = candidates.map((candidate) => ({
+    eventDetails.otherDonationCandidateCount = otherDonationCandidates.length;
+    eventDetails.otherDonationCandidates = otherDonationCandidates.slice(0, 20);
+    eventDetails.otherDonationCandidatesOmitted = Math.max(0, otherDonationCandidates.length - 20);
+    const fanPageSponsorDiagnosticCandidates = Object.entries(fanPageSponsorRequests)
+      .map(([requestId, item]) => describeFanPageSponsorDonationCandidate(
+        requestId, item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp,
+      ))
+      .filter(Boolean)
+      .sort((a, b) => (Number(b.requestedAt) || 0) - (Number(a.requestedAt) || 0));
+    eventDetails.sponsorAdCandidateCount = fanPageSponsorDiagnosticCandidates.length;
+    eventDetails.sponsorAdCandidates = fanPageSponsorDiagnosticCandidates.slice(0, 20);
+    eventDetails.sponsorAdCandidatesOmitted = Math.max(0, fanPageSponsorDiagnosticCandidates.length - 20);
+    eventDetails.gameCandidateCount = candidates.length;
+    eventDetails.gameCandidates = candidates.slice(0, 20).map((candidate) => ({
       game: candidate.game,
       requestId: candidate.requestId,
       diagnosticCode: candidate.game === 'streamer-life-game' ? String(candidate.item.diagnosticCode || '') : '',
     }));
-    eventDetails.lifeGameDiagnosticCandidates = lifeGameDiagnosticCandidates.map(([requestId, item]) => ({
+    eventDetails.gameCandidatesOmitted = Math.max(0, candidates.length - 20);
+    eventDetails.lifeGameDiagnosticCandidateCount = lifeGameDiagnosticCandidates.length;
+    eventDetails.lifeGameDiagnosticCandidates = lifeGameDiagnosticCandidates.slice(0, 20).map(([requestId, item]) => ({
       requestId,
       diagnosticCode: String(item.diagnosticCode || ''),
       senderMatched: normalizeSoopId(item.donorSoopId) === senderSoopId,
     }));
+    eventDetails.lifeGameDiagnosticCandidatesOmitted = Math.max(0, lifeGameDiagnosticCandidates.length - 20);
 
     if (candidates.length !== 1 || otherDonationCandidates.length > 0) {
       const reason = candidates.length > 1 || (candidates.length === 1 && otherDonationCandidates.length > 0)
@@ -4230,7 +4284,12 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
         : 'no-matching-pending-request';
       await writeLifeGameSponsorDonationDiagnostic(db, lifeGameDiagnosticCodes, eventKey, Object.assign({}, eventDetails, {
         outcome: reason === 'ambiguous-across-game-requests' ? 'ambiguous' : 'not-matched', reason,
-      }));
+      })).catch((error) => console.warn('인생게임 후원 자동검증 진단 저장 실패:', error && (error.code || error.message) || error));
+      if (eventDetails.sponsorAdCandidateCount > 0 || candidates.some((candidate) => candidate.game === 'streamer-fanpage-sponsor')) {
+        await writeFanPageSponsorDonationDiagnostic(db, eventKey, Object.assign({}, eventDetails, {
+          outcome: reason === 'ambiguous-across-game-requests' ? 'ambiguous' : 'not-matched', reason,
+        })).catch((error) => console.warn('고점체크 후원 자동검증 진단 저장 실패:', error && (error.code || error.message) || error));
+      }
       if (reason === 'ambiguous-across-game-requests') {
         await eventRef.update({ status: 'ambiguous', completedAt: Date.now(), claimToken: null, reason });
       } else {
@@ -4283,13 +4342,23 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     await eventRef.update({ status: 'approved', requestId: candidate.requestId, gameKey: candidate.game, claimToken: null, approvedAt: Date.now() });
     await writeLifeGameSponsorDonationDiagnostic(db, lifeGameDiagnosticCodes, eventKey, Object.assign({}, eventDetails, {
       outcome: 'approved', reason: '', matchedGame: candidate.game, matchedRequestId: candidate.requestId,
-    }));
+    })).catch((error) => console.warn('인생게임 후원 자동검증 진단 저장 실패:', error && (error.code || error.message) || error));
+    if (candidate.game === 'streamer-fanpage-sponsor' || eventDetails.sponsorAdCandidateCount > 0) {
+      await writeFanPageSponsorDonationDiagnostic(db, eventKey, Object.assign({}, eventDetails, {
+        outcome: 'approved', reason: '', matchedGame: candidate.game, matchedRequestId: candidate.requestId,
+      })).catch((error) => console.warn('고점체크 후원 자동검증 진단 저장 실패:', error && (error.code || error.message) || error));
+    }
     return Object.assign({}, result, { ok: true, eventKey, verificationSource: 'soop-donation-notification' });
   } catch (error) {
     await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false).catch(() => null);
     await writeLifeGameSponsorDonationDiagnostic(db, lifeGameDiagnosticCodes, eventKey, Object.assign({}, eventDetails, {
       outcome: 'error', reason: String(error && (error.code || error.message) || 'server-error').slice(0, 120),
     })).catch(() => null);
+    if (Number(eventDetails.sponsorAdCandidateCount) > 0) {
+      await writeFanPageSponsorDonationDiagnostic(db, eventKey, Object.assign({}, eventDetails, {
+        outcome: 'error', reason: String(error && (error.code || error.message) || 'server-error').slice(0, 120),
+      })).catch(() => null);
+    }
     if (error instanceof HttpsError && ['failed-precondition', 'already-exists'].includes(error.code)) {
       return { ok: false, reason: 'request-no-longer-pending', eventKey };
     }
@@ -4958,6 +5027,7 @@ module.exports = {
   setLifeGameBotConfig,
   lifeGameApproveSponsorRequest,
   getLifeGameSponsorAutoVerificationDiagnostics,
+  listFanPageSponsorDonationDiagnostics,
   lifeGameRejectSponsorRequest,
   getLifeGameCurrentSponsor,
   updateLifeGameCurrentSponsor,
