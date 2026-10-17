@@ -6,6 +6,10 @@ const { getAuth } = require('firebase-admin/auth');
 const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
+const {
+  lifeGameSponsorHasEligibleBackgroundRequest,
+  notificationFallsInDonationRequestWindow,
+} = require('./donation-verification');
 
 initializeApp();
 
@@ -2900,14 +2904,6 @@ function onyuGiftHasEligibleBackgroundRequest(requests, now) {
     Number(gift.donationCompletedAt) > 0 && Number(gift.requestedAt) > now - 24 * 60 * 60 * 1000);
 }
 
-function lifeGameSponsorHasEligibleBackgroundRequest(requests, now) {
-  return Object.values(requests || {}).some((item) => item && item.status === 'pending' &&
-    normalizeSoopId(item.donorSoopId) && /^LG-[A-F0-9]{8}$/.test(String(item.diagnosticCode || '')) &&
-    Number(item.starBalloons) >= 10 && Number(item.starBalloons) <= 70 && Number(item.starBalloons) % 10 === 0 &&
-    Number(item.days) * 10 === Number(item.starBalloons) && Number(item.donationCompletedAt) > 0 &&
-    Number(item.requestedAt) > now - 24 * 60 * 60 * 1000);
-}
-
 function fanPageViewerSubscriptionHasEligibleBackgroundRequest(requests, now) {
   return Object.values(requests || {}).some((item) => item && (!item.status || item.status === 'pending') &&
     normalizeSoopId(item.donorSoopId) && [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS].includes(Number(item.balloonCost)) &&
@@ -3016,6 +3012,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     if (fanPageViewerSubscriptionHasEligibleBackgroundRequest(fanPagePendingRequests, now)) activeSources.push('streamer-fanpage');
     active = activeSources.length > 0;
     writeEvent('watch-state', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
+    monitorStatusRef.update({ watching: active, activeSources, lastWatchStateAt: now }).catch(() => null);
   };
   const onRequestValue = (snapshot) => {
     onyuRequests = snapshot.val() || {};
@@ -3050,7 +3047,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     if (accessMode === 'monitor') {
       const now = Date.now();
       writeEvent('heartbeat', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
-      monitorStatusRef.update({ active: true, lastHeartbeatAt: now }).catch(() => null);
+      monitorStatusRef.update({ active: true, watching: active, activeSources, lastHeartbeatAt: now }).catch(() => null);
     }
     else writeEvent('heartbeat', { at: Date.now() });
   }, 20000);
@@ -3072,7 +3069,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   }
   response.on('close', cleanup);
   if (accessMode === 'monitor') {
-    monitorStatusRef.set({ connectedAt: Date.now(), lastHeartbeatAt: Date.now(), active: true, connectionId }).catch(() => null);
+    monitorStatusRef.set({ connectedAt: Date.now(), lastHeartbeatAt: Date.now(), active: true, watching: false, activeSources: [], connectionId }).catch(() => null);
     lifeGameRequestRef.on('value', onLifeGameRequestValue, onRequestError);
     fanPagePendingRef.on('value', onFanPagePendingValue, onRequestError);
   }
@@ -3118,6 +3115,9 @@ const getLifeGameSponsorAutoVerificationDiagnostics = onCall(async (request) => 
     },
     monitorConnections: Object.values(monitors).map((monitor) => ({
       connected: monitor && monitor.active === true && now - Number(monitor.lastHeartbeatAt || 0) < 60000,
+      watching: monitor && monitor.watching === true,
+      activeSources: Array.isArray(monitor && monitor.activeSources) ? monitor.activeSources : [],
+      lastWatchStateAt: Number(monitor && monitor.lastWatchStateAt) || 0,
       connectedAt: Number(monitor && monitor.connectedAt) || 0,
       lastHeartbeatAt: Number(monitor && monitor.lastHeartbeatAt) || 0,
     })),
@@ -3751,20 +3751,6 @@ const onyuConfirmStreamerGameGiftFromNotification = onCall(async (request) => {
   }
 });
 
-function notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp) {
-  if (!item || item.status !== 'pending' || normalizeSoopId(item.donorSoopId) !== senderSoopId ||
-      Number(item.balloons || item.starBalloons || item.balloonCost) !== balloons) return false;
-  const requestedAt = Number(item.requestedAt) || 0;
-  const donationCompletedAt = Number(item.donationCompletedAt) || 0;
-  if (!requestedAt || requestedAt > observedAt || observedAt - requestedAt > 24 * 60 * 60 * 1000) return false;
-  if (!donationCompletedAt || donationCompletedAt < requestedAt || donationCompletedAt > observedAt + 30000 ||
-      observedAt - donationCompletedAt > 20 * 60 * 1000) return false;
-  if (exactTimestamp) return eventAtMin === eventAtMax && requestedAt <= eventAtMin &&
-    eventAtMin >= donationCompletedAt - 5 * 60 * 1000 && eventAtMin <= donationCompletedAt + 2 * 60 * 1000;
-  return requestedAt <= eventAtMax && eventAtMin <= donationCompletedAt + 2 * 60 * 1000 &&
-    eventAtMax >= donationCompletedAt - 5 * 60 * 1000;
-}
-
 // Other services also collect SOOP donations on the same admin station. Their
 // requests do not all carry a donor ID or a completion signal, so a recent
 // amount/time overlap must block automatic approval instead of being guessed.
@@ -3961,12 +3947,12 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
       Number(item.starBalloons) === balloons && Number(item.days) * 10 === balloons &&
       /^LG-[A-F0-9]{8}$/.test(String(item.diagnosticCode || '')) &&
       notificationFallsInDonationRequestWindow(Object.assign({}, item, { donorSoopId: senderSoopId }), senderSoopId,
-        balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+        balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, true));
     const lifeGameByDonorAndAmount = Object.entries(lifeGameRequests).filter(([, item]) => item && item.status === 'pending' &&
       normalizeSoopId(item.donorSoopId) === senderSoopId && Number(item.starBalloons) === balloons &&
       Number(item.days) * 10 === balloons && /^LG-[A-F0-9]{8}$/.test(String(item.diagnosticCode || '')));
     const lifeGameCandidates = lifeGameByDonorAndAmount.filter(([, item]) =>
-      notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+      notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, true));
     const fanPageRequestIds = Object.entries(fanPagePendingRequests).filter(([, index]) => index &&
       (!index.status || index.status === 'pending') && normalizeSoopId(index.donorSoopId) === senderSoopId &&
       Number(index.balloonCost) === balloons && Number(index.requestedAt) > observedAt - 24 * 60 * 60 * 1000 &&
