@@ -1853,6 +1853,24 @@ const notifyOnyuStreamerGameGiftRequest = onValueCreated('/onyuVn/streamerGameGi
     '실제 후원을 확인한 뒤 관리자센터에서 승인해 주세요.\n' + deepLink('section-onyu-access')
   );
 });
+const notifyOnyuProductionInquiry = onValueCreated('/onyuVn/productionInquiries/{requestId}', async (event) => {
+  const data = event.data.val() || {};
+  const safeText = (value, fallback, maxLength) => String(value || fallback || '')
+    .replace(/[\r\n`*_~|>]/g, ' ')
+    .replace(/@/g, '＠')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+  const nickname = safeText(data.nickname, '닉네임 없음', 80);
+  const soopId = safeText(data.soopId, '', 30);
+  const description = safeText(data.description, '문의 내용 없음', 240);
+  await sendDiscordNotification(
+    '🎬 **온 이유 미연시 제작 문의**\n' +
+    '인증 스트리머: ' + nickname + (soopId ? ' (@' + soopId + ')' : '') + '\n' +
+    '문의 내용: ' + description + '\n' +
+    '관리자센터에서 자세한 내용을 확인해 주세요.\n' + deepLink('section-onyu-production-inquiries')
+  );
+});
 const notifyOnyuStreamerGameGiftAutoApproval = onValueUpdated('/onyuVn/streamerGameGiftRequests/{requestId}', async (event) => {
   const before = event.data.before.val() || {};
   const data = event.data.after.val() || {};
@@ -4502,8 +4520,11 @@ const onyuStartSession = onCall(async (request) => {
 const onyuSubmitReview = onCall(async (request) => {
   const uid = requireAuth(request);
   const provider = request.auth.token && request.auth.token.firebase && request.auth.token.firebase.sign_in_provider;
-  if (provider === 'anonymous') {
-    throw new HttpsError('failed-precondition', '로그인한 계정으로만 후기를 저장할 수 있습니다.');
+  const db = getDatabase();
+  const userSnap = await db.ref('users/' + uid + '/streamerVerified').get();
+  const verified = userSnap.val() === true || await isVerifiedStreamerUid(uid);
+  if (provider === 'anonymous' && !verified) {
+    throw new HttpsError('failed-precondition', '로그인했거나 스트리머 인증을 완료한 계정으로만 후기를 저장할 수 있습니다.');
   }
   const endingId = String(request.data && request.data.endingId || '').trim();
   if (endingId !== 'lover') {
@@ -4517,9 +4538,6 @@ const onyuSubmitReview = onCall(async (request) => {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     throw new HttpsError('invalid-argument', '별점은 1~5점 중에서 선택해 주세요.');
   }
-  const db = getDatabase();
-  const userSnap = await db.ref('users/' + uid + '/streamerVerified').get();
-  const verified = userSnap.val() === true || await isVerifiedStreamerUid(uid);
   let nickname = '';
   let soopId = '';
   let promoteRequested = false;
@@ -4576,7 +4594,66 @@ const onyuSubmitReview = onCall(async (request) => {
     ? { endingId, review: saved.review, rating: saved.rating, nickname: saved.nickname || '', soopId: saved.soopId || '', createdAt: saved.createdAt, updatedAt: saved.updatedAt }
     : null;
   await db.ref().update(updates);
-  return { ok: true, updatedAt: now, promoteRequested, nickname, soopId };
+  return { ok: true, updatedAt: now, promoteRequested, verifiedStreamer: verified, nickname, soopId };
+});
+
+// 연인 엔딩 후기를 저장한 인증 스트리머가 본인 IP의 미연시 제작을 문의한다.
+// 신원·프로필은 클라이언트 입력을 받지 않고 인증 UID와 검증된 스트리머 기록에서 가져온다.
+const onyuSubmitStreamerProductionInquiry = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const db = getDatabase();
+  const userSnap = await db.ref('users/' + uid).get();
+  const profileSnap = await db.ref('streamerVerifications').orderByChild('uid').equalTo(uid).limitToFirst(1).get();
+  const user = userSnap.val() || {};
+  const verified = user.streamerVerified === true || profileSnap.exists();
+  if (!verified) throw new HttpsError('permission-denied', '인증 스트리머만 미연시 제작 문의를 보낼 수 있습니다.');
+
+  const description = String(request.data && request.data.description || '').replace(/\0/g, '').trim();
+  if (!description) throw new HttpsError('invalid-argument', '원하는 이야기와 제작 방향을 입력해 주세요.');
+  if (description.length > 3000) throw new HttpsError('invalid-argument', '문의 내용은 3,000자 이내로 작성해 주세요.');
+
+  let nickname = '';
+  let soopId = '';
+  profileSnap.forEach((child) => {
+    const profile = child.val() || {};
+    nickname = String(profile.nickname || '').trim().slice(0, 80);
+    soopId = normalizeSoopId(profile.soopId);
+    return true;
+  });
+  if (!nickname) nickname = String(user.nickname || user.displayName || '').trim().slice(0, 80);
+  if (!soopId) soopId = normalizeSoopId(user.soopId);
+
+  const requestRef = db.ref('onyuVn/productionInquiries').push();
+  const requestedAt = Date.now();
+  await requestRef.set({
+    uid,
+    nickname,
+    soopId,
+    description,
+    status: 'new',
+    requestedAt,
+  });
+  return { ok: true, requestId: requestRef.key, requestedAt };
+});
+
+const onyuAdminListProductionInquiries = onCall(async (request) => {
+  await requireAdmin(request);
+  const snap = await getDatabase().ref('onyuVn/productionInquiries').orderByChild('requestedAt').limitToLast(100).get();
+  const inquiries = [];
+  snap.forEach((child) => {
+    const item = child.val() || {};
+    if (typeof item.description !== 'string') return;
+    inquiries.push({
+      id: child.key,
+      nickname: String(item.nickname || '').slice(0, 80),
+      soopId: normalizeSoopId(item.soopId),
+      description: item.description.slice(0, 3000),
+      status: item.status === 'new' ? 'new' : String(item.status || 'new').slice(0, 30),
+      requestedAt: Number(item.requestedAt) || 0,
+    });
+  });
+  inquiries.sort((a, b) => b.requestedAt - a.requestedAt);
+  return { inquiries };
 });
 
 const ONYU_REVIEW_PAGE_SIZE = 30;
@@ -5201,12 +5278,15 @@ module.exports = {
   getVisitorAnalytics,
   onyuRequestViewerAccess,
   onyuSubmitReview,
+  onyuSubmitStreamerProductionInquiry,
+  onyuAdminListProductionInquiries,
   onyuVnListPublicReviews,
   onyuAdminListPlayerReviews,
   onyuAdminSetPlayerReviewVisibility,
   onyuAdminDeletePlayerReview,
   notifyOnyuViewerAccessRequest,
   notifyOnyuStreamerGameGiftRequest,
+  notifyOnyuProductionInquiry,
   notifyOnyuStreamerGameGiftAutoApproval,
   onyuGetViewerAccess,
   onyuListStreamerGiftTargets,
