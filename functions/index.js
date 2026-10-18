@@ -4638,7 +4638,9 @@ const onyuSubmitStreamerProductionInquiry = onCall(async (request) => {
 
 const onyuAdminListProductionInquiries = onCall(async (request) => {
   await requireAdmin(request);
-  const snap = await getDatabase().ref('onyuVn/productionInquiries').orderByChild('requestedAt').limitToLast(100).get();
+  // Keep this low-volume admin queue unindexed, avoiding an RTDB rules change
+  // that would need to be synchronized across all sibling apps.
+  const snap = await getDatabase().ref('onyuVn/productionInquiries').get();
   const inquiries = [];
   snap.forEach((child) => {
     const item = child.val() || {};
@@ -4653,7 +4655,7 @@ const onyuAdminListProductionInquiries = onCall(async (request) => {
     });
   });
   inquiries.sort((a, b) => b.requestedAt - a.requestedAt);
-  return { inquiries };
+  return { inquiries: inquiries.slice(0, 100) };
 });
 
 const ONYU_REVIEW_PAGE_SIZE = 30;
