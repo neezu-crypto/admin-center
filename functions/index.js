@@ -667,6 +667,7 @@ const GAME_CATALOG = [
   { id: 'dontPressButton', name: '한국인은 절대 못 깨는 게임' },
   { id: 'streamerFanPage', name: '스트리머 팬페이지' },
   { id: 'onyuVn', name: '당신이 여기에 온 이유' },
+  { id: 'gameSeriesShop', name: '스트리머 게임시리즈 상점' },
 ];
 
 const AUDIT_LOG_CAP = 200;
