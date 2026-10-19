@@ -2895,7 +2895,7 @@ const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_RETENTION_MS = 90 * 24 * 60 * 60 * 10
 const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS = 500;
 const FANPAGE_SPONSOR_MAX_ADS_PER_RAIL = 5;
 const FANPAGE_SPONSOR_MAX_ACTIVE_ADS = FANPAGE_SPONSOR_MAX_ADS_PER_RAIL * 2;
-const FANPAGE_SPONSOR_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const FANPAGE_SPONSOR_AD_WATCH_MS = 60 * 60 * 1000;
 const FANPAGE_SPONSOR_MAX_CAMPAIGN_MS = 30 * 24 * 60 * 60 * 1000;
 const ONYU_GIFT_MONITOR_UID_PREFIX = 'onyu_gift_monitor_';
 
@@ -3752,7 +3752,7 @@ async function holdFreshRealtimeSnapshot(ref) {
   return { snapshot, release: () => ref.off('value', listener) };
 }
 
-async function commitFanPageSponsorAdApproval(db, adminUid, requestId, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, verificationMetadata) {
+async function commitFanPageSponsorAdApproval(db, adminUid, requestId, senderSoopId, balloons, observedAt, verificationMetadata) {
   const requestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH + '/' + requestId);
   const claimRef = db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId);
   const adsRef = db.ref(FANPAGE_SPONSOR_ADS_PATH);
@@ -3774,7 +3774,7 @@ async function commitFanPageSponsorAdApproval(db, adminUid, requestId, senderSoo
     }
 
     const claimed = await requestRef.transaction((current) => {
-      if (!fanPageSponsorAdDonationCanMatch(current, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp)) return;
+      if (!fanPageSponsorAdDonationCanMatch(current, senderSoopId, balloons, observedAt)) return;
       const now = Date.now();
       if (current.status === 'pending' && current.processingToken &&
           now - Number(current.processingAt || now) < 2 * 60 * 1000) return;
@@ -4417,16 +4417,15 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
         donorMatch: true,
       }));
     const fanPageSponsorCandidates = Object.entries(fanPageSponsorRequests).filter(([, item]) =>
-      fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+      fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt));
     const matchedFanPageSponsorRequestIds = new Set(fanPageSponsorCandidates.map(([requestId]) => requestId));
     const fanPageSponsorOtherDonationCandidates = Object.entries(fanPageSponsorRequests).filter(([requestId, item]) => {
       if (!item || item.status !== 'pending' || matchedFanPageSponsorRequestIds.has(requestId) ||
-          normalizeSoopId(item.donorSoopId) !== senderSoopId || Number(item.balloonCost) !== balloons ||
-          Number(item.days) * 10 !== balloons) return false;
+          normalizeSoopId(item.donorSoopId) !== senderSoopId) return false;
       const requestedAt = Number(item.requestedAt) || 0;
-      if (!requestedAt || observedAt - requestedAt > FANPAGE_SPONSOR_REQUEST_TTL_MS || requestedAt > eventAtMax) return false;
-      if (Number(item.donationCompletedAt) > 0) return false;
-      return eventAtMax >= requestedAt && eventAtMin <= (Number(item.expiresAt) || requestedAt + FANPAGE_SPONSOR_REQUEST_TTL_MS);
+      const amountCouldMatch = Number(item.balloonCost) === balloons || Number(item.days) * 10 === balloons;
+      return amountCouldMatch && requestedAt > 0 && requestedAt <= observedAt &&
+        observedAt - requestedAt < FANPAGE_SPONSOR_AD_WATCH_MS;
     }).map(([requestId, item]) => ({
       gameKey: 'streamer-fanpage-sponsor',
       requestType: 'sponsored-ad',
@@ -4455,7 +4454,7 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     eventDetails.otherDonationCandidatesOmitted = Math.max(0, otherDonationCandidates.length - 20);
     const fanPageSponsorDiagnosticCandidates = Object.entries(fanPageSponsorRequests)
       .map(([requestId, item]) => describeFanPageSponsorDonationCandidate(
-        requestId, item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp,
+        requestId, item, senderSoopId, balloons, observedAt,
       ))
       .filter(Boolean)
       .sort((a, b) => (Number(b.requestedAt) || 0) - (Number(a.requestedAt) || 0));
@@ -4524,7 +4523,7 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
         });
       } else if (candidate.game === 'streamer-fanpage-sponsor') {
         result = await commitFanPageSponsorAdApproval(db, adminUid, candidate.requestId, senderSoopId,
-          balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, verificationEventMetadata);
+          balloons, observedAt, verificationEventMetadata);
         result = Object.assign({}, result, {
           gameKey: candidate.game,
           targetNickname: String(candidate.item.nickname || ''),

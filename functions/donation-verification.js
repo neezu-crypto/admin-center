@@ -1,6 +1,6 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FANPAGE_VIEWER_SUBSCRIPTION_WATCH_MS = 60 * 60 * 1000;
-const FANPAGE_SPONSOR_REQUEST_TTL_MS = 7 * DAY_MS;
+const FANPAGE_SPONSOR_AD_WATCH_MS = 60 * 60 * 1000;
 
 function normalizeSoopId(value) {
   const id = String(value || '').trim();
@@ -42,32 +42,24 @@ function fanPageSponsorAdHasEligibleBackgroundRequest(requests, now) {
         !normalizeSoopId(item.soopId) || !['left', 'right'].includes(item.rail)) return false;
     const days = Number(item.days);
     const requestedAt = Number(item.requestedAt) || 0;
-    const expiresAt = Number(item.expiresAt) || 0;
-    const hasCompletionSignal = Number(item.donationCompletedAt) > 0;
     return Number.isInteger(days) && days >= 1 && days <= 30 &&
       Number(item.balloonCost) === days * 10 && requestedAt > 0 && requestedAt <= now &&
-      now - requestedAt <= FANPAGE_SPONSOR_REQUEST_TTL_MS && (hasCompletionSignal || expiresAt > now);
+      now - requestedAt < FANPAGE_SPONSOR_AD_WATCH_MS;
   });
 }
 
-function fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp) {
+function fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt) {
   const normalizedSenderSoopId = normalizeSoopId(senderSoopId);
   if (!item || item.status !== 'pending' || !normalizedSenderSoopId || normalizeSoopId(item.donorSoopId) !== normalizedSenderSoopId ||
       !normalizeSoopId(item.soopId) || !['left', 'right'].includes(item.rail)) return false;
   const days = Number(item.days);
   const requestedAt = Number(item.requestedAt) || 0;
-  const expiresAt = Number(item.expiresAt) || 0;
-  const hasCompletionSignal = Number(item.donationCompletedAt) > 0;
   if (!Number.isInteger(days) || days < 1 || days > 30 || days * 10 !== balloons ||
-      Number(item.balloonCost) !== balloons || !requestedAt ||
-      (!hasCompletionSignal && expiresAt <= eventAtMax)) return false;
-  return notificationFallsInDonationRequestWindow(
-    item, normalizedSenderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp,
-    true, FANPAGE_SPONSOR_REQUEST_TTL_MS,
-  );
+      Number(item.balloonCost) !== balloons || !requestedAt || requestedAt > observedAt) return false;
+  return observedAt - requestedAt < FANPAGE_SPONSOR_AD_WATCH_MS;
 }
 
-function describeFanPageSponsorDonationCandidate(requestId, item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp) {
+function describeFanPageSponsorDonationCandidate(requestId, item, senderSoopId, balloons, observedAt) {
   if (!item || item.status !== 'pending') return null;
   const normalizedSenderSoopId = normalizeSoopId(senderSoopId);
   const donorSoopId = normalizeSoopId(item.donorSoopId);
@@ -82,23 +74,16 @@ function describeFanPageSponsorDonationCandidate(requestId, item, senderSoopId, 
   if (!donorMatch && !amountMatch) return null;
 
   const reasons = [];
-  const eligibleByCurrentRule = fanPageSponsorAdDonationCanMatch(
-    item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp,
-  );
+  const eligibleByCurrentRule = fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt);
   if (!donorMatch) reasons.push('donor-account-mismatch');
   if (!amountMatch) reasons.push('balloon-count-mismatch');
   if (!soopId || !['left', 'right'].includes(item.rail) || !Number.isInteger(days) || days < 1 || days > 30 || balloonCost !== days * 10) {
     reasons.push('invalid-sponsor-request-fields');
   }
-  if (!requestedAt || requestedAt > observedAt || observedAt - requestedAt > FANPAGE_SPONSOR_REQUEST_TTL_MS) {
-    reasons.push('request-outside-seven-day-window');
-  }
-  if (!donationCompletedAt && expiresAt <= eventAtMax) reasons.push('request-expired');
-  if (donationCompletedAt && (donationCompletedAt < requestedAt || donationCompletedAt > observedAt + 30000 || observedAt - donationCompletedAt > 20 * 60 * 1000)) {
-    reasons.push('completion-signal-invalid-or-stale');
-  }
-  if (donorMatch && amountMatch && !eligibleByCurrentRule && !reasons.length) {
-    reasons.push(eventAtMin < requestedAt ? 'notification-may-precede-request' : 'notification-outside-request-window');
+  if (!requestedAt || requestedAt > observedAt) {
+    reasons.push('request-not-yet-created');
+  } else if (observedAt - requestedAt >= FANPAGE_SPONSOR_AD_WATCH_MS) {
+    reasons.push('automatic-watch-window-ended');
   }
 
   return {
@@ -116,6 +101,7 @@ function describeFanPageSponsorDonationCandidate(requestId, item, senderSoopId, 
     expiresAt,
     donationCompletedAt,
     eligibleByCurrentRule,
+    automaticWatchExpiresAt: requestedAt > 0 ? requestedAt + FANPAGE_SPONSOR_AD_WATCH_MS : 0,
     reasons,
   };
 }

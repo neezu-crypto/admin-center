@@ -74,7 +74,7 @@ const sponsorRequest = {
   rail: 'left',
   days: 12,
   balloonCost: 120,
-  requestedAt: now - 6 * 24 * 60 * 60 * 1000,
+  requestedAt: now - 5 * 60 * 1000,
   expiresAt: now + 24 * 60 * 60 * 1000,
 };
 
@@ -141,9 +141,8 @@ test('matches viewer subscription by donor ID and amount without a completion cl
 });
 
 test('describes sponsor-ad donation candidate matches and exclusion reasons', () => {
-  const eventAt = now - 60 * 1000;
   const exactMatch = describeFanPageSponsorDonationCandidate(
-    'request-1', sponsorRequest, 'YSK7895', 120, now, eventAt, eventAt, true,
+    'request-1', sponsorRequest, 'YSK7895', 120, now,
   );
   assert.equal(exactMatch.eligibleByCurrentRule, true);
   assert.equal(exactMatch.donorMatch, true);
@@ -151,44 +150,49 @@ test('describes sponsor-ad donation candidate matches and exclusion reasons', ()
   assert.deepEqual(exactMatch.reasons, []);
 
   const donorMismatch = describeFanPageSponsorDonationCandidate(
-    'request-2', sponsorRequest, 'anotherUser', 120, now, eventAt, eventAt, true,
+    'request-2', sponsorRequest, 'anotherUser', 120, now,
   );
   assert.equal(donorMismatch.eligibleByCurrentRule, false);
   assert.deepEqual(donorMismatch.reasons, ['donor-account-mismatch']);
 
-  const staleWindow = describeFanPageSponsorDonationCandidate(
-    'request-3', sponsorRequest, 'ysk7895', 120, now, sponsorRequest.requestedAt - 1000,
-    sponsorRequest.requestedAt - 1000, true,
+  const staleRequest = describeFanPageSponsorDonationCandidate(
+    'request-3', { ...sponsorRequest, requestedAt: now - hourMs }, 'ysk7895', 120, now,
   );
-  assert.equal(staleWindow.eligibleByCurrentRule, false);
-  assert.ok(staleWindow.reasons.includes('notification-may-precede-request'));
+  assert.equal(staleRequest.eligibleByCurrentRule, false);
+  assert.ok(staleRequest.reasons.includes('automatic-watch-window-ended'));
 });
 
 test('omits unrelated pending sponsor requests from a donation diagnostic', () => {
   assert.equal(describeFanPageSponsorDonationCandidate(
-    'request-unrelated', sponsorRequest, 'anotherUser', 33, now, now - 1000, now - 1000, true,
+    'request-unrelated', sponsorRequest, 'anotherUser', 33, now,
   ), null);
 });
 
-test('watches pending streamer-fanpage sponsorship requests up to 30 days of donation value', () => {
+test('watches pending streamer-fanpage sponsorship requests for one hour without a completion click', () => {
   assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: sponsorRequest }, now), true);
   assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, balloonCost: 70 } }, now), false);
   assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, status: 'approved' } }, now), false);
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({
+    request: { ...sponsorRequest, donationCompletedAt: now - 5 * 60 * 1000 },
+  }, now), true);
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({
+    request: { ...sponsorRequest, requestedAt: now - hourMs },
+  }, now), false);
 });
 
-test('matches sponsor-ad donations without a completion click for the request TTL', () => {
-  const eventAt = now - 60 * 1000;
-  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'ysk7895', 120, now, eventAt, eventAt, true), true);
-  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'ysk7895', 130, now, eventAt, eventAt, true), false);
-  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'someone-else', 120, now, eventAt, eventAt, true), false);
-  assert.equal(fanPageSponsorAdDonationCanMatch({ ...sponsorRequest, expiresAt: eventAt - 1 }, 'ysk7895', 120, now, eventAt, eventAt, true), false);
-  assert.equal(notificationFallsInDonationRequestWindow(
-    sponsorRequest, 'ysk7895', 120, now, eventAt, eventAt, true, true,
-  ), false);
+test('matches sponsor-ad donations by donor ID and exact amount, independent of click or alert time', () => {
+  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'YSK7895', 120, now), true);
+  assert.equal(fanPageSponsorAdDonationCanMatch({ ...sponsorRequest, donationCompletedAt: now - hourMs }, 'ysk7895', 120, now), true);
+  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'ysk7895', 130, now), false);
+  assert.equal(fanPageSponsorAdDonationCanMatch(sponsorRequest, 'someone-else', 120, now), false);
+  assert.equal(fanPageSponsorAdDonationCanMatch({ ...sponsorRequest, requestedAt: now - hourMs }, 'ysk7895', 120, now), false);
+  assert.equal(fanPageSponsorAdDonationCanMatch({ ...sponsorRequest, requestedAt: now + 1 }, 'ysk7895', 120, now), false);
 });
 
-test('keeps sponsor requests inactive after expiry or the seven-day request window', () => {
-  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, expiresAt: now - 1 } }, now), false);
-  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, donationCompletedAt: now - 1 } }, now), true);
-  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: { ...sponsorRequest, requestedAt: now - 8 * 24 * 60 * 60 * 1000 } }, now), false);
+test('stops sponsor-ad automatic matching at one hour even if the request remains pending', () => {
+  const oldRequest = { ...sponsorRequest, requestedAt: now - 2 * hourMs, expiresAt: now + 5 * 24 * hourMs };
+  assert.equal(fanPageSponsorAdHasEligibleBackgroundRequest({ request: oldRequest }, now), false);
+  assert.equal(fanPageSponsorAdDonationCanMatch(oldRequest, 'ysk7895', 120, now), false);
+  assert.equal(describeFanPageSponsorDonationCandidate('old-request', oldRequest, 'ysk7895', 120, now)
+    .reasons.includes('automatic-watch-window-ended'), true);
 });
