@@ -7,6 +7,8 @@ const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
+  fanPageViewerSubscriptionDonationCanMatch,
+  fanPageViewerSubscriptionHasEligibleBackgroundRequest,
   fanPageSponsorAdDonationCanMatch,
   describeFanPageSponsorDonationCandidate,
   fanPageSponsorAdHasEligibleBackgroundRequest,
@@ -2963,12 +2965,6 @@ function onyuGiftHasEligibleBackgroundRequest(requests, now) {
     Number(gift.donationCompletedAt) > 0 && Number(gift.requestedAt) > now - 24 * 60 * 60 * 1000);
 }
 
-function fanPageViewerSubscriptionHasEligibleBackgroundRequest(requests, now) {
-  return Object.values(requests || {}).some((item) => item && (!item.status || item.status === 'pending') &&
-    normalizeSoopId(item.donorSoopId) && [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS].includes(Number(item.balloonCost)) &&
-    Number(item.donationCompletedAt) > 0 && Number(item.requestedAt) > now - 24 * 60 * 60 * 1000);
-}
-
 const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB' }, async (request, response) => {
   const origin = String(request.get('Origin') || '');
   const allowedOrigin = origin === 'https://neezu-crypto.github.io' || /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
@@ -3070,7 +3066,8 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     activeSources = [];
     if (onyuGiftHasEligibleBackgroundRequest(onyuRequests, now)) activeSources.push('onyu-vn');
     if (lifeGameSponsorHasEligibleBackgroundRequest(lifeGameRequests, now)) activeSources.push('streamer-life-game');
-    if (fanPageViewerSubscriptionHasEligibleBackgroundRequest(fanPagePendingRequests, now)) activeSources.push('streamer-fanpage');
+    if (fanPageViewerSubscriptionHasEligibleBackgroundRequest(fanPagePendingRequests, now,
+      [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS])) activeSources.push('streamer-fanpage');
     if (fanPageSponsorAdHasEligibleBackgroundRequest(fanPageSponsorRequests, now)) activeSources.push('streamer-fanpage-sponsor');
     active = activeSources.length > 0;
     writeEvent('watch-state', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
@@ -3669,7 +3666,9 @@ async function commitFanPageViewerSubscriptionApproval(db, adminUid, requestId, 
   const claimedAt = Date.now();
   const claim = await requestRef.transaction((current) => {
     if (!current || current.status !== 'pending' ||
-        !notificationFallsInDonationRequestWindow(current, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp)) return;
+        !fanPageViewerSubscriptionDonationCanMatch(current, senderSoopId, balloons, observedAt,
+          eventAtMin, eventAtMax, exactTimestamp,
+          [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS])) return;
     return Object.assign({}, current, { status: 'processing', processingAt: claimedAt, processingToken: claimToken });
   }, undefined, false);
   if (!claim.committed) {
@@ -4386,17 +4385,21 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     const lifeGameCandidates = lifeGameByDonorAndAmount.filter(([, item]) =>
       notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, true));
     const fanPageRequestIds = Object.entries(fanPagePendingRequests).filter(([, index]) => index &&
-      (!index.status || index.status === 'pending') && normalizeSoopId(index.donorSoopId) === senderSoopId &&
-      Number(index.balloonCost) === balloons && Number(index.requestedAt) > observedAt - 24 * 60 * 60 * 1000 &&
-      Number(index.requestedAt) >= eventAtMin - OTHER_GAME_DONATION_REQUEST_WINDOW_MS &&
-      Number(index.requestedAt) <= eventAtMax)
+      fanPageViewerSubscriptionDonationCanMatch(
+        Object.assign({}, index, { status: index.status || 'pending' }), senderSoopId, balloons,
+        observedAt, eventAtMin, eventAtMax, exactTimestamp,
+        [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS],
+      ))
       .map(([requestId]) => requestId);
     const fanPageRequests = await Promise.all(fanPageRequestIds.map(async (requestId) => {
       const snapshot = await db.ref('streamerFanPageViewerSubscriptionRequests/' + requestId).get();
       return [requestId, snapshot.val()];
     }));
     const fanPageCandidates = fanPageRequests.filter(([, item]) =>
-      notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
+      fanPageViewerSubscriptionDonationCanMatch(
+        item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp,
+        [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS],
+      ));
     const matchedFanPageRequestIds = new Set(fanPageCandidates.map(([requestId]) => requestId));
     const fanPageOtherDonationCandidates = fanPageRequests.filter(([requestId, item]) => item && item.status === 'pending' &&
       !matchedFanPageRequestIds.has(requestId) && normalizeSoopId(item.donorSoopId) === senderSoopId &&

@@ -6,6 +6,23 @@ function normalizeSoopId(value) {
   return /^[a-z0-9]{2,20}$/i.test(id) ? id.toLowerCase() : '';
 }
 
+function fanPageViewerSubscriptionHasEligibleBackgroundRequest(requests, now, allowedBalloons) {
+  return Object.values(requests || {}).some((item) => {
+    const requestedAt = Number(item && item.requestedAt) || 0;
+    return item && (!item.status || item.status === 'pending') && normalizeSoopId(item.donorSoopId) &&
+      Array.isArray(allowedBalloons) && allowedBalloons.includes(Number(item.balloonCost)) &&
+      requestedAt > now - DAY_MS && requestedAt <= now;
+  });
+}
+
+function fanPageViewerSubscriptionDonationCanMatch(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, allowedBalloons) {
+  const balloonCost = Number(item && item.balloonCost);
+  if (!Array.isArray(allowedBalloons) || !allowedBalloons.includes(balloonCost) || balloonCost !== balloons) return false;
+  return notificationFallsInDonationRequestWindow(
+    item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, true, DAY_MS,
+  );
+}
+
 function lifeGameSponsorHasEligibleBackgroundRequest(requests, now) {
   return Object.values(requests || {}).some((item) => item && item.status === 'pending' &&
     normalizeSoopId(item.donorSoopId) && /^LG-[A-F0-9]{8}$/.test(String(item.diagnosticCode || '')) &&
@@ -127,6 +144,8 @@ function notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, 
 }
 
 module.exports = {
+  fanPageViewerSubscriptionDonationCanMatch,
+  fanPageViewerSubscriptionHasEligibleBackgroundRequest,
   fanPageSponsorAdDonationCanMatch,
   fanPageSponsorAdHasEligibleBackgroundRequest,
   describeFanPageSponsorDonationCandidate,

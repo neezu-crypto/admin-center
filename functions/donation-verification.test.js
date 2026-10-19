@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  fanPageViewerSubscriptionDonationCanMatch,
+  fanPageViewerSubscriptionHasEligibleBackgroundRequest,
   fanPageSponsorAdDonationCanMatch,
   describeFanPageSponsorDonationCandidate,
   fanPageSponsorAdHasEligibleBackgroundRequest,
@@ -74,6 +76,50 @@ const sponsorRequest = {
   requestedAt: now - 6 * 24 * 60 * 60 * 1000,
   expiresAt: now + 24 * 60 * 60 * 1000,
 };
+
+const viewerSubscriptionRequest = {
+  status: 'pending',
+  donorSoopId: 'ysk7895',
+  balloonCost: 33,
+  requestedAt: now - 5 * 60 * 1000,
+  donationCompletedAt: 0,
+};
+
+test('starts background watch for a pending viewer subscription without a completion click', () => {
+  assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
+    { request: viewerSubscriptionRequest }, now, [10, 33],
+  ), true);
+  assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
+    { request: { ...viewerSubscriptionRequest, status: 'approved' } }, now, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
+    { request: { ...viewerSubscriptionRequest, donorSoopId: '' } }, now, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
+    { request: { ...viewerSubscriptionRequest, requestedAt: now - 25 * 60 * 60 * 1000 } }, now, [10, 33],
+  ), false);
+});
+
+test('matches viewer subscription donations without a completion click only when the full alert time is after the request', () => {
+  const eventAt = now - 60 * 1000;
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    viewerSubscriptionRequest, 'YSK7895', 33, now, eventAt, eventAt, true, [10, 33],
+  ), true);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    viewerSubscriptionRequest, 'otheruser', 33, now, eventAt, eventAt, true, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    viewerSubscriptionRequest, 'ysk7895', 50, now, eventAt, eventAt, true, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    viewerSubscriptionRequest, 'ysk7895', 33, now, viewerSubscriptionRequest.requestedAt - 1000,
+    viewerSubscriptionRequest.requestedAt - 1000, true, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    viewerSubscriptionRequest, 'ysk7895', 33, now, viewerSubscriptionRequest.requestedAt - 30_000,
+    viewerSubscriptionRequest.requestedAt + 30_000, false, [10, 33],
+  ), false);
+});
 
 test('describes sponsor-ad donation candidate matches and exclusion reasons', () => {
   const eventAt = now - 60 * 1000;
