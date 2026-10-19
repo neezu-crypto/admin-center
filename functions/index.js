@@ -2019,6 +2019,44 @@ const notifyFanPageViewerSubscriptionRequest = onValueCreated('/streamerFanPageV
     'https://neezu-crypto.github.io/streamer-fanpage/'
   );
 });
+// 고점체크 후원 스트리머 신청도 새 대기 인덱스가 생성되면 Discord로 알린다.
+// 요청 본문은 server-only 요청 노드에서 읽고, Firebase UID는 알림에 포함하지 않는다.
+const notifyFanPageSponsorAdRequest = onValueCreated('/streamerFanPageSponsorPending/{requestId}', async (event) => {
+  const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+  if (!requestId) return null;
+  const requestSnapshot = await getDatabase()
+    .ref('streamerFanPageSponsorRequests/' + requestId)
+    .get();
+  const data = requestSnapshot.val() || {};
+  if (!Object.keys(data).length) {
+    console.warn('고점체크 홍보 신청 디스코드 알림: 연결된 신청 데이터가 없습니다.', requestId);
+    return null;
+  }
+  const clean = (value, maxLength) => String(value || '')
+    .replace(/[@<>\r\n`*_~|]/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+  const nickname = clean(data.nickname, 60) || '(닉네임 없음)';
+  const streamerSoopId = normalizeSoopId(data.soopId);
+  const donorSoopId = normalizeSoopId(data.donorSoopId);
+  const days = Math.max(1, Math.min(30, Number(data.days) || 1));
+  const balloons = Math.max(0, Number(data.balloonCost) || days * 10);
+  const railLabel = data.rail === 'right' ? '오른쪽' : data.rail === 'left' ? '왼쪽' : '(확인 필요)';
+  const requestedAt = Number(data.requestedAt) || Date.now();
+  const requestedAtText = new Date(requestedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+  const statusLabel = data.status === 'approved' ? '\n상태: 이미 승인됨' : '';
+  await sendDiscordNotification(
+    '🔔 **새 홍보 신청 (스트리머 고점체크)**\n' +
+    '홍보 대상: ' + nickname + (streamerSoopId ? ' · @' + streamerSoopId : '') + '\n' +
+    '후원 계정: ' + (donorSoopId ? '@' + donorSoopId : '(확인 필요)') +
+    ' · 별풍선 ' + balloons.toLocaleString('ko-KR') + '개 / ' + days + '일\n' +
+    '홍보 위치: ' + railLabel + '\n' +
+    '신청 시각: ' + requestedAtText +
+    statusLabel + '\n' +
+    '신청 번호: `' + requestId + '`\n' +
+    deepLink('section-fanpage-sponsor-ads')
+  );
+});
 // 팬페이지 디자인 문의·건의가 서버에 저장되면 관리자가 확인할 수 있도록 알림을 보낸다.
 // Discord에는 문의 유형과 인증된 제출자·대상 팬페이지의 공개 신원만 보내며 제목·본문·UID는 포함하지 않는다.
 const FANPAGE_FEEDBACK_CATEGORY_LABELS = {
@@ -5271,6 +5309,7 @@ module.exports = {
   notifyGalleryCommentReport,
   notifyGalleryUnlockRequest,
   notifyFanPageViewerSubscriptionRequest,
+  notifyFanPageSponsorAdRequest,
   notifyFanPageDesignFeedback,
   notifyGalleryImageUpload,
   notifyVerifiedStreamerVisit,
