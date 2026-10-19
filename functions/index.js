@@ -4106,17 +4106,45 @@ const manageFanPageSponsorAds = onCall(async (request) => {
     }
 
     if (action === 'reject') {
-      const rejected = await requestRef.transaction((current) => {
-        if (!current || current.status !== 'pending') return;
-        return Object.assign({}, current, { status: 'rejected', reviewedAt: now, reviewedBy: adminUid, updatedAt: now });
-      }, undefined, false);
-      if (!rejected.committed) throw new HttpsError('failed-precondition', '이미 처리된 신청입니다.');
-      await Promise.all([
-        db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove(),
-        claimRef.remove(),
-      ]);
-      const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 신청 반려', initial.nickname + ' (@' + normalizeSoopId(initial.soopId) + ')');
-      return { ok: true, status: 'rejected', auditLogged };
+      // A one-shot get() does not keep RTDB's local cache active for a transaction
+      // in a fresh Functions instance. Hold a value listener until the transaction
+      // finishes so its update callback receives the current server record.
+      const heldRequest = await holdFreshRealtimeSnapshot(requestRef);
+      try {
+        const currentRequest = heldRequest.snapshot.val();
+        if (currentRequest && currentRequest.status === 'rejected') {
+          await Promise.all([
+            db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove(),
+            claimRef.remove(),
+          ]);
+          return { ok: true, status: 'rejected', alreadyProcessed: true };
+        }
+        if (!currentRequest || currentRequest.status !== 'pending') {
+          const status = String(currentRequest && currentRequest.status || 'missing');
+          throw new HttpsError('failed-precondition', '현재 신청 상태가 ' + status + '입니다. 목록을 새로고침해 주세요.');
+        }
+
+        const rejected = await requestRef.transaction((current) => {
+          if (!current || current.status !== 'pending') return;
+          return Object.assign({}, current, { status: 'rejected', reviewedAt: now, reviewedBy: adminUid, updatedAt: now });
+        }, undefined, false);
+        const result = rejected.snapshot.val();
+        if (!rejected.committed && !(result && result.status === 'rejected')) {
+          console.error('고점체크 후원 신청 반려 트랜잭션 실패:', {
+            requestId,
+            currentStatus: String(result && result.status || 'missing'),
+          });
+          throw new HttpsError('aborted', '반려 상태를 저장하지 못했습니다. 신청 목록을 새로고침한 뒤 다시 시도해 주세요.');
+        }
+        await Promise.all([
+          db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove(),
+          claimRef.remove(),
+        ]);
+        const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 신청 반려', currentRequest.nickname + ' (@' + normalizeSoopId(currentRequest.soopId) + ')');
+        return { ok: true, status: 'rejected', auditLogged };
+      } finally {
+        heldRequest.release();
+      }
     }
 
     const soopId = normalizeSoopId(initial.soopId);

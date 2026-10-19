@@ -5480,7 +5480,9 @@
       await manageFanPageSponsorAdsFn({ action, requestId });
       await refreshFanPageSponsorManagement();
     } catch (error) {
-      fanPageSponsorAdminStatusEl.textContent = (action === 'approve' ? '승인' : '반려') + ' 실패: ' + (error.message || error);
+      const failureMessage = (action === 'approve' ? '승인' : '반려') + ' 실패: ' + (error.message || error);
+      await refreshFanPageSponsorManagement();
+      fanPageSponsorAdminStatusEl.textContent = failureMessage;
       button.disabled = false;
     }
   }
