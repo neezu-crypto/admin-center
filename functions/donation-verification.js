@@ -15,12 +15,15 @@ function fanPageViewerSubscriptionHasEligibleBackgroundRequest(requests, now, al
   });
 }
 
-function fanPageViewerSubscriptionDonationCanMatch(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, allowedBalloons) {
+function fanPageViewerSubscriptionDonationCanMatch(item, senderSoopId, balloons, observedAt, allowedBalloons) {
   const balloonCost = Number(item && item.balloonCost);
-  if (!Array.isArray(allowedBalloons) || !allowedBalloons.includes(balloonCost) || balloonCost !== balloons) return false;
-  return notificationFallsInDonationRequestWindow(
-    item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, true, DAY_MS,
-  );
+  const requestedAt = Number(item && item.requestedAt) || 0;
+  const donorSoopId = normalizeSoopId(item && item.donorSoopId);
+  const normalizedSenderSoopId = normalizeSoopId(senderSoopId);
+  return !!item && item.status === 'pending' &&
+    !!normalizedSenderSoopId && donorSoopId === normalizedSenderSoopId &&
+    Array.isArray(allowedBalloons) && allowedBalloons.includes(balloonCost) && balloonCost === balloons &&
+    Number.isFinite(observedAt) && requestedAt > 0 && requestedAt <= observedAt && observedAt - requestedAt <= DAY_MS;
 }
 
 function lifeGameSponsorHasEligibleBackgroundRequest(requests, now) {

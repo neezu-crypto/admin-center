@@ -100,24 +100,27 @@ test('starts background watch for a pending viewer subscription without a comple
   ), false);
 });
 
-test('matches viewer subscription donations without a completion click only when the full alert time is after the request', () => {
-  const eventAt = now - 60 * 1000;
+test('matches viewer subscription by donor ID and amount without a completion click or alert-time match', () => {
   assert.equal(fanPageViewerSubscriptionDonationCanMatch(
-    viewerSubscriptionRequest, 'YSK7895', 33, now, eventAt, eventAt, true, [10, 33],
+    viewerSubscriptionRequest, 'YSK7895', 33, now, [10, 33],
   ), true);
   assert.equal(fanPageViewerSubscriptionDonationCanMatch(
-    viewerSubscriptionRequest, 'otheruser', 33, now, eventAt, eventAt, true, [10, 33],
+    viewerSubscriptionRequest, 'otheruser', 33, now, [10, 33],
   ), false);
   assert.equal(fanPageViewerSubscriptionDonationCanMatch(
-    viewerSubscriptionRequest, 'ysk7895', 50, now, eventAt, eventAt, true, [10, 33],
+    viewerSubscriptionRequest, '', 33, now, [10, 33],
   ), false);
   assert.equal(fanPageViewerSubscriptionDonationCanMatch(
-    viewerSubscriptionRequest, 'ysk7895', 33, now, viewerSubscriptionRequest.requestedAt - 1000,
-    viewerSubscriptionRequest.requestedAt - 1000, true, [10, 33],
+    viewerSubscriptionRequest, 'ysk7895', 50, now, [10, 33],
   ), false);
   assert.equal(fanPageViewerSubscriptionDonationCanMatch(
-    viewerSubscriptionRequest, 'ysk7895', 33, now, viewerSubscriptionRequest.requestedAt - 30_000,
-    viewerSubscriptionRequest.requestedAt + 30_000, false, [10, 33],
+    viewerSubscriptionRequest, 'ysk7895', 33, now, [10, 33],
+  ), true);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    { ...viewerSubscriptionRequest, requestedAt: now - 25 * 60 * 60 * 1000 }, 'ysk7895', 33, now, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    { ...viewerSubscriptionRequest, requestedAt: now + 1000 }, 'ysk7895', 33, now, [10, 33],
   ), false);
 });
 

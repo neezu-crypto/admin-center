@@ -3667,7 +3667,6 @@ async function commitFanPageViewerSubscriptionApproval(db, adminUid, requestId, 
   const claim = await requestRef.transaction((current) => {
     if (!current || current.status !== 'pending' ||
         !fanPageViewerSubscriptionDonationCanMatch(current, senderSoopId, balloons, observedAt,
-          eventAtMin, eventAtMax, exactTimestamp,
           [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS])) return;
     return Object.assign({}, current, { status: 'processing', processingAt: claimedAt, processingToken: claimToken });
   }, undefined, false);
@@ -4387,7 +4386,7 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     const fanPageRequestIds = Object.entries(fanPagePendingRequests).filter(([, index]) => index &&
       fanPageViewerSubscriptionDonationCanMatch(
         Object.assign({}, index, { status: index.status || 'pending' }), senderSoopId, balloons,
-        observedAt, eventAtMin, eventAtMax, exactTimestamp,
+        observedAt,
         [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS],
       ))
       .map(([requestId]) => requestId);
@@ -4397,7 +4396,7 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     }));
     const fanPageCandidates = fanPageRequests.filter(([, item]) =>
       fanPageViewerSubscriptionDonationCanMatch(
-        item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp,
+        item, senderSoopId, balloons, observedAt,
         [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS],
       ));
     const matchedFanPageRequestIds = new Set(fanPageCandidates.map(([requestId]) => requestId));
