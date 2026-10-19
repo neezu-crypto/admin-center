@@ -1,4 +1,5 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
+const FANPAGE_VIEWER_SUBSCRIPTION_WATCH_MS = 60 * 60 * 1000;
 const FANPAGE_SPONSOR_REQUEST_TTL_MS = 7 * DAY_MS;
 
 function normalizeSoopId(value) {
@@ -11,7 +12,7 @@ function fanPageViewerSubscriptionHasEligibleBackgroundRequest(requests, now, al
     const requestedAt = Number(item && item.requestedAt) || 0;
     return item && (!item.status || item.status === 'pending') && normalizeSoopId(item.donorSoopId) &&
       Array.isArray(allowedBalloons) && allowedBalloons.includes(Number(item.balloonCost)) &&
-      requestedAt > now - DAY_MS && requestedAt <= now;
+      requestedAt > now - FANPAGE_VIEWER_SUBSCRIPTION_WATCH_MS && requestedAt <= now;
   });
 }
 
@@ -23,7 +24,8 @@ function fanPageViewerSubscriptionDonationCanMatch(item, senderSoopId, balloons,
   return !!item && item.status === 'pending' &&
     !!normalizedSenderSoopId && donorSoopId === normalizedSenderSoopId &&
     Array.isArray(allowedBalloons) && allowedBalloons.includes(balloonCost) && balloonCost === balloons &&
-    Number.isFinite(observedAt) && requestedAt > 0 && requestedAt <= observedAt && observedAt - requestedAt <= DAY_MS;
+    Number.isFinite(observedAt) && requestedAt > 0 && requestedAt <= observedAt &&
+    observedAt - requestedAt < FANPAGE_VIEWER_SUBSCRIPTION_WATCH_MS;
 }
 
 function lifeGameSponsorHasEligibleBackgroundRequest(requests, now) {

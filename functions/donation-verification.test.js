@@ -11,6 +11,7 @@ const {
 } = require('./donation-verification');
 
 const now = 1_800_000_000_000;
+const hourMs = 60 * 60 * 1000;
 const request = {
   status: 'pending',
   donorSoopId: 'ysk7895',
@@ -96,7 +97,16 @@ test('starts background watch for a pending viewer subscription without a comple
     { request: { ...viewerSubscriptionRequest, donorSoopId: '' } }, now, [10, 33],
   ), false);
   assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
-    { request: { ...viewerSubscriptionRequest, requestedAt: now - 25 * 60 * 60 * 1000 } }, now, [10, 33],
+    { request: { ...viewerSubscriptionRequest, requestedAt: now - hourMs - 1 } }, now, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
+    { request: { ...viewerSubscriptionRequest, requestedAt: now - hourMs + 1000 } }, now, [10, 33],
+  ), true);
+  assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
+    { request: { ...viewerSubscriptionRequest, requestedAt: now - hourMs } }, now, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionHasEligibleBackgroundRequest(
+    { request: { ...viewerSubscriptionRequest, requestedAt: now - 25 * hourMs } }, now, [10, 33],
   ), false);
 });
 
@@ -117,7 +127,13 @@ test('matches viewer subscription by donor ID and amount without a completion cl
     viewerSubscriptionRequest, 'ysk7895', 33, now, [10, 33],
   ), true);
   assert.equal(fanPageViewerSubscriptionDonationCanMatch(
-    { ...viewerSubscriptionRequest, requestedAt: now - 25 * 60 * 60 * 1000 }, 'ysk7895', 33, now, [10, 33],
+    { ...viewerSubscriptionRequest, requestedAt: now - hourMs - 1 }, 'ysk7895', 33, now, [10, 33],
+  ), false);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    { ...viewerSubscriptionRequest, requestedAt: now - hourMs + 1000 }, 'ysk7895', 33, now, [10, 33],
+  ), true);
+  assert.equal(fanPageViewerSubscriptionDonationCanMatch(
+    { ...viewerSubscriptionRequest, requestedAt: now - hourMs }, 'ysk7895', 33, now, [10, 33],
   ), false);
   assert.equal(fanPageViewerSubscriptionDonationCanMatch(
     { ...viewerSubscriptionRequest, requestedAt: now + 1000 }, 'ysk7895', 33, now, [10, 33],

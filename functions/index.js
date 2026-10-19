@@ -3061,7 +3061,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     if (closed || response.destroyed) return;
     response.write('event: ' + name + '\ndata: ' + JSON.stringify(data || {}) + '\n\n');
   };
-  const sendMonitorState = () => {
+  const sendMonitorState = (eventName = 'watch-state') => {
     const now = Date.now();
     activeSources = [];
     if (onyuGiftHasEligibleBackgroundRequest(onyuRequests, now)) activeSources.push('onyu-vn');
@@ -3070,8 +3070,14 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
       [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS])) activeSources.push('streamer-fanpage');
     if (fanPageSponsorAdHasEligibleBackgroundRequest(fanPageSponsorRequests, now)) activeSources.push('streamer-fanpage-sponsor');
     active = activeSources.length > 0;
-    writeEvent('watch-state', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
-    monitorStatusRef.update({ watching: active, activeSources, lastWatchStateAt: now }).catch(() => null);
+    const expiresAt = active ? now + 60000 : 0;
+    writeEvent(eventName, { active, activeSources, expiresAt });
+    const statusUpdate = { watching: active, activeSources, lastWatchStateAt: now };
+    if (eventName === 'heartbeat') {
+      statusUpdate.active = true;
+      statusUpdate.lastHeartbeatAt = now;
+    }
+    monitorStatusRef.update(statusUpdate).catch(() => null);
   };
   const onRequestValue = (snapshot) => {
     onyuRequests = snapshot.val() || {};
@@ -3108,9 +3114,8 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   };
   const heartbeat = setInterval(() => {
     if (accessMode === 'monitor') {
-      const now = Date.now();
-      writeEvent('heartbeat', { active, activeSources, expiresAt: active ? now + 60000 : 0 });
-      monitorStatusRef.update({ active: true, watching: active, activeSources, lastHeartbeatAt: now }).catch(() => null);
+      // Recheck request windows while the feed stays open so expired sources stop without a new RTDB update.
+      sendMonitorState('heartbeat');
     }
     else writeEvent('heartbeat', { at: Date.now() });
   }, 20000);
