@@ -397,44 +397,10 @@ const bootstrapAdminUid = onCall(async (request) => {
   return { ok: true, uid };
 });
 
-// 주식시장·배팅시장이 공유하는 streamerVerifications 노드를 uid 필드로 조회한다.
-// Admin SDK로 조회하므로 그 노드의 RTDB 규칙과 무관하게 항상 읽을 수 있다.
-async function isVerifiedStreamerUid(uid) {
-  const db = getDatabase();
-  const snap = await db
-    .ref('streamerVerifications')
-    .orderByChild('uid')
-    .equalTo(uid)
-    .limitToFirst(1)
-    .get();
-  return snap.exists();
-}
-
-// 과거 인증 스트리머 위임을 위해 사용하던 이름은 호환성을 위해 남겨두되,
-// 통합 관리 센터를 관리자 전용으로 전환한 뒤에는 모든 호출을 관리자 판정으로
-// 수렴시킨다. 클라이언트 UI를 우회해 callable을 직접 호출하는 경우도 동일하게 차단한다.
-async function requireAdminOrVerifiedStreamer(request) {
-  const uid = await requireAdmin(request);
-  return { uid, role: 'admin' };
-}
-
-// 과거 위임 권한 카탈로그용 이름도 관리자 전용 검증으로 고정한다. permissionKey는
-// 호출부 호환을 위해 받지만 더 이상 스트리머에게 권한을 열어주지 않는다.
-async function requireAdminOrDelegatedPermission(request, permissionKey) {
-  void permissionKey;
-  const uid = await requireAdmin(request);
-  return { uid, role: 'admin' };
-}
-
-// 통합 관리 센터 — 관리자만 권한 상태를 조회할 수 있다.
+// 통합 관리 센터는 관리자만 접근하며 인증 스트리머 위임 권한을 사용하지 않는다.
 const getAdminCenterState = onCall(async (request) => {
   await requireAdmin(request);
-  const db = getDatabase();
-  const [permsSnap, killswitchSnap] = await Promise.all([
-    db.ref('adminCenter/streamerPermissions').get(),
-    db.ref('adminCenter/killswitchLastRun').get(),
-  ]);
-  return { role: 'admin', permissions: permsSnap.val() || {}, killswitchLastRun: killswitchSnap.val() || null };
+  return { role: 'admin' };
 });
 
 // 통합 관리 센터의 초기 세션 배지용 경량 요약. 전체 목록을 반환하지 않고 각 큐에
@@ -470,9 +436,7 @@ function isPendingVerificationRequest(request) {
 const getAdminSessionSummary = onCall(async (request) => {
   await requireAdmin(request);
   const role = 'admin';
-  const permissions = (await getDatabase().ref('adminCenter/streamerPermissions').get()).val() || {};
   const db = getDatabase();
-  const canReview = role === 'admin' || permissions.reviewQueue === true;
 
   const summary = { identity: false, monitoring: false, review: false, content: false, promotions: false, settings: false, devbar: false, shared: false };
   const tasks = [];
@@ -487,7 +451,7 @@ const getAdminSessionSummary = onCall(async (request) => {
       hasAnyEntry(db, 'streamerVerificationRequests', 'pending'),
     ]).then(function (values) { summary.identity = values.some(Boolean); }));
   }
-  if (canReview) {
+  if (role === 'admin') {
     tasks.push(Promise.all([
       hasAnyEntry(db, 'bettingMarket/marketReports'),
       hasAnyEntry(db, 'bettingMarket/nicknameReports'),
@@ -510,53 +474,6 @@ const getAdminSessionSummary = onCall(async (request) => {
   }
   await Promise.all(tasks);
   return { role, summary };
-});
-
-// 통합 관리 센터 — 위임 권한 하나를 켜고/끈다. 관리자만 가능하고, 인증 스트리머 전원에게
-// 동일하게 적용된다(스트리머별 개별 권한이 아니라 하나의 공용 스위치 목록).
-const setAdminCenterPermission = onCall(async (request) => {
-  await requireAdmin(request);
-  const { key, granted } = request.data || {};
-  if (typeof key !== 'string' || !key.trim() || key.length > 60) {
-    throw new HttpsError('invalid-argument', '권한 key가 올바르지 않습니다.');
-  }
-  if (typeof granted !== 'boolean') {
-    throw new HttpsError('invalid-argument', 'granted 값은 true/false여야 합니다.');
-  }
-  const db = getDatabase();
-  await db.ref('adminCenter/streamerPermissions/' + key.trim()).set(granted);
-  return { ok: true };
-});
-
-// 07번 4단계 — 즉시 회수 킬스위치. 카탈로그(PERMISSION_CATALOG)가 아직 비어 있어
-// 지금 당장 되돌릴 위임 권한은 없지만, 나중에 카탈로그가 채워진 뒤 사고가 나면
-// 그때 급하게 만들 여유가 없으므로 실제 위임을 시작하기 전에 미리 마련해둔다
-// (07번에서 이 순서를 고정한 이유 그대로). 개별 스위치를 하나씩 끄는 대신
-// 위임된 권한 전체를 한 번에 false로 되돌리는 패닉 버튼.
-const revokeAllStreamerPermissions = onCall(async (request) => {
-  const uid = await requireAdmin(request);
-  const adminName = request.auth.token.name || request.auth.token.email || uid;
-  const db = getDatabase();
-  const snap = await db.ref('adminCenter/streamerPermissions').get();
-  const data = snap.val() || {};
-  const updates = {};
-  let revokedCount = 0;
-  Object.keys(data).forEach(function (key) {
-    if (data[key]) {
-      updates[key] = false;
-      revokedCount += 1;
-    }
-  });
-  if (revokedCount > 0) {
-    await db.ref('adminCenter/streamerPermissions').update(updates);
-  }
-  await db.ref('adminCenter/killswitchLastRun').set({
-    adminUid: uid,
-    adminName: adminName,
-    at: Date.now(),
-    revokedCount: revokedCount,
-  });
-  return { ok: true, revokedCount: revokedCount };
 });
 
 // 통합 관리 센터 — 인증 스트리머 관리 1단계: 배팅시장(bettingMarket/verifyRequests)·
@@ -603,7 +520,7 @@ const listStreamerVerificationOverview = onCall(async (request) => {
 // 통합 관리 센터 — 감사 로그 통합: 배팅시장의 기존 bettingMarket/auditLog와
 // 주식시장의 새 adminAuditLog(이번에 처음 만든 것 - 스트리머 인증 관련 액션만
 // 우선 기록 중, 다른 관리 액션 전체로 넓히는 건 별도 작업)를 합쳐서 시간순으로
-// 보여준다. 관리자는 항상, 인증 스트리머는 'viewMonitoring' 위임 권한이 있을 때만.
+// 보여준다. 관리자 전용.
 const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
   await requireAdmin(request);
@@ -738,8 +655,7 @@ const DEVBAR_URL_RE = /^https:\/\/\S+$/;
 const DEVBAR_GAME_ID_RE = /^[a-zA-Z0-9_-]{1,40}$/;
 
 const setDevbarLink = onCall(async (request) => {
-  // 07번 4단계 — devbar 링크 편집은 위임 권한 카탈로그의 첫 항목('devbarEdit').
-  // 신원·재화에 영향이 없는 낮은 리스크 작업이라 관리자가 켜면 인증 스트리머도 쓸 수 있다.
+  // devbar 링크 편집은 서비스 전역 설정이므로 관리자만 허용한다.
   await requireAdmin(request);
   const { gameId, label, url, order } = request.data || {};
   const trimmedGameId = String(gameId || '').trim();
@@ -5293,8 +5209,6 @@ module.exports = {
   migrateBannedAccounts,
   getAdminCenterState,
   getAdminSessionSummary,
-  setAdminCenterPermission,
-  revokeAllStreamerPermissions,
   setDevbarLink,
   deleteDevbarLink,
   getAdultImageGeneratorLinks,

@@ -304,7 +304,7 @@
   <table>
     <tr><th>노드</th><th>용도</th><th>규칙</th></tr>
     <tr><td><span class="chip">streamerVerifications</span></td><td>인증 스트리머 원장(공유)</td><td>읽기 공개, 쓰기 Functions 전용</td></tr>
-    <tr><td><span class="chip">adminCenter/streamerPermissions</span></td><td>인증 스트리머에게 위임한 권한 스위치(전원 공통)</td><td>Functions 전용(.read/.write 모두 false)</td></tr>
+    <tr><td><span class="chip">adminCenter/streamerPermissions</span></td><td>과거 인증 스트리머 권한 위임 설정(현재 사용하지 않음; 기존 값은 보존)</td><td>Functions 전용(.read/.write 모두 false)</td></tr>
     <tr><td><span class="chip">adminAuditLog</span></td><td>주식시장 쪽 관리 액션 감사 로그(신설, 아직 인증 관련 액션만 기록)</td><td>Functions 전용</td></tr>
     <tr><td><span class="chip">seriesConfig/{gameId}/contentFreeze</span></td><td>게임별 "콘텐츠 동결" 라벨(서비스 점검과는 다른 개념 — 08번 참고)</td><td>Functions 전용</td></tr>
     <tr><td><span class="chip">bettingMarket/auditLog</span></td><td>배팅시장 자체 감사 로그(기존)</td><td>Functions 전용</td></tr>
@@ -317,15 +317,14 @@
   <p>어느 게임도 소유하지 않는 <strong>시리즈 전체 관리 허브</strong>. 각 게임의 기존 관리 Cloud Functions를 대체하지 않고 <strong>그대로 호출</strong>하며(새 승인/거절 로직을 중복 구현하지 않음), 여러 게임에 걸친 데이터만 한 화면에 모아서 보여준다.</p>
   <h3>권한 모델</h3>
   <ul>
-    <li><strong>관리자</strong>(고정 이메일) — 항상 전체 권한</li>
-    <li><strong>인증 스트리머</strong> — 관리자가 <span class="chip">adminCenter/streamerPermissions</span>에서 켠 권한만 사용 가능(스트리머 개인별이 아니라 <strong>전원 공통</strong> 스위치). 승인·거절·해제처럼 신원을 좌우하는 민감한 권한은 아직 위임 대상에 넣지 않았다</li>
+    <li><strong>관리자</strong> — 등록된 관리자 UID 또는 관리자 이메일로 확인된 계정만 통합 관리 센터와 관련 관리 함수를 사용할 수 있다.</li>
   </ul>
+  <div class="callout"><b>2026-10-20 운영 변경</b> — 인증 스트리머 권한 위임 기능을 폐지했다. 예전 <span class="chip">adminCenter/streamerPermissions</span> 값은 삭제하지 않고 보존하지만 더는 화면이나 서버 권한 판정에서 참조하지 않는다. 검수·통계·devbar 관리 및 배경시장 프리셋 병합 처리는 관리자 전용이다.</div>
   <h3>지금 구현된 기능</h3>
   <ul>
     <li>인증 스트리머 관리 — 배팅시장·주식시장 양쪽의 대기 신청·인증 목록 통합 조회, 승인/거절/해제(각 게임 기존 함수 라우팅)</li>
     <li>감사 로그 통합 — 배팅시장 <span class="chip">bettingMarket/auditLog</span> + 주식시장 신설 <span class="chip">adminAuditLog</span> 병합 조회</li>
     <li>게임 콘텐츠 동결 상태 — 게임별 <span class="chip">contentFreeze</span> 토글(서비스 점검이 아니라 "신규 개발 중단, 버그 수정만" 라벨)</li>
-    <li>인증 스트리머 권한 위임 — 위임 가능 권한 목록(카탈로그) 체리피크 UI</li>
   </ul>
 </section>
 
@@ -337,12 +336,11 @@
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
       <td>즉시 회수 킬스위치</td>
-      <td><code>revokeAllStreamerPermissions</code>(관리자 전용)로 위임된 권한 전체를 한 번에 false로 되돌리고, <span class="chip">adminCenter/killswitchLastRun</span>에 실행 기록(누가/언제/몇 건)을 남긴다. "인증 스트리머 권한 위임" 카드에 버튼 + 마지막 실행 기록 표시 추가. 배포·커밋 완료</td>
+      <td>과거 위임 권한 일괄 회수 기능. 2026-10-20 권한 위임 기능을 폐지하면서 화면·호출 함수도 함께 제거했다. 기존 설정 값은 보존하되 어떠한 권한 판정에도 사용하지 않는다.</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
-      <td>위임 권한 카탈로그 채우기</td>
-      <td>첫 항목 <code>devbarEdit</code>(devbar 링크 편집), 두 번째 항목 <code>viewMonitoring</code>(모니터링 열람 — 전체 통계 요약·이상 거래 모니터링/페이지별 접속자 분석/배경시장 갤러리 통계/감사 로그, 조회 전용)에 이어 세 번째 항목 <code>reviewQueue</code>(페이지별 검수 처리 — 마켓/닉네임 신고·배경시장 프리셋 병합 실패, 읽기+쓰기) 등록. viewMonitoring 때 admin-center 자체 함수 3개(<code>listAuditLogOverview</code>/<code>getVisitorAnalytics</code>/<code>getGalleryStats</code>)는 <code>requireAdminOrDelegatedPermission</code>으로 교체하고, soop-stock-market의 통계 조회는 <code>adminAction</code> 디스패처(다른 민감한 액션이 훨씬 많아 통째로 열 수 없음) 대신 전용 함수 <code>getOverviewStatsForMonitoring</code>을 새로 만들어 같은 권한 노드를 공유해서 검증했다. reviewQueue는 마켓/닉네임 신고 쪽은 StreamBet-Market의 <code>dismissMarketReport</code>/<code>dismissNicknameReport</code>/<code>blockNickname</code>이 이미 <code>requireAdminOrVerifiedStreamer</code>(인증 스트리머 전원에게 이미 열려 있음)라 손댈 게 없었지만, 프리셋 병합 실패는 interior-3d-viewer의 <code>resolvePresetMergeFailure</code>/<code>listPresetMergeFailures</code>가 순수 관리자 전용이라 이 저장소에도 처음으로 <code>requireAdminOrDelegatedPermission</code>을 새로 만들어 적용했고, RTDB 규칙(<code>presetMergeFailures</code>의 <code>.read</code>)도 3개 저장소 <code>database.rules.json</code>에 동일하게 위임 권한 조건을 추가했다(클라이언트가 이 노드를 실시간 구독으로 직접 읽으므로 함수 가드만으론 부족함). 3개 카드/그룹을 각각 <code>adminShell</code>에서 독립 래퍼(<code>monitoringShell</code>/<code>reviewQueueShell</code>)로 옮겨 devbar 편집과 동일한 패턴으로 토글. <code>PERMISSION_CATALOG</code>는 UI 표시용일 뿐, 실권한은 서버 검증이 담당한다. 07번에 실행 결과 기록</td>
+      <td>과거 완료한 위임 기능의 이력. 2026-10-20 이후 <code>getOverviewStatsForMonitoring</code>, <code>listPresetMergeFailures</code>/<code>resolvePresetMergeFailure</code> 및 RTDB의 <code>presetMergeFailures</code> 읽기는 관리자 UID에만 허용된다. StreamBet-Market의 별도 검수 권한 정책은 이 위임 기능과 별개로 유지한다.</td>
     </tr>
     <tr>
       <td><strong style="color:#3fb689;">완료</strong></td>
@@ -540,7 +538,7 @@
     <li><span class="chip">interior-3d-viewer</span>의 3개 페이지 — 각자 독립된 인라인 devbar 마크업이라 페이지마다 동일한 로직을 반복 적용해야 함</li>
     <li><span class="chip">soop-stock-market/index.html</span> — <code>&lt;nav class="topnav"&gt;</code>/<code>.topnav-btn</code> 마크업이 devbar와 이름부터 다르므로, 공통 로직을 적용하려면 클래스명 통일 또는 별도 어댑터가 필요</li>
   </ul>
-  <div class="callout"><b>권한 위임 후보로도 적합 — 실제로 채택됨</b> — 링크 목록 수정은 신원·재화에 영향이 없는 낮은 리스크 작업이라는 판단대로, 07번 "위임 권한 카탈로그 채우기"의 첫 항목(<code>devbarEdit</code>)으로 실제 구현했다. <code>setDevbarLink</code>/<code>deleteDevbarLink</code>가 이제 관리자 또는 이 권한을 받은 인증 스트리머 둘 다 호출할 수 있다.</div>
+  <div class="callout"><b>권한 위임 기능 폐지(2026-10-20)</b> — 당시 위임 후보로 구현했던 devbar 링크 편집은 현재 관리자 전용이다. <code>setDevbarLink</code>/<code>deleteDevbarLink</code>는 위임 설정과 무관하게 관리자 UID 검증을 통과해야 한다.</div>
   <div class="callout warn"><b>실행 결과 — soop-stock-market의 topnav만 넘침 처리가 없었다</b> — devbarLinks로 링크가 계속 늘어날 수 있는 구조가 된 뒤 사용자 요청으로 재점검한 결과, StreamBet-Market(<code>js/devbar.js</code>)·interior-3d-viewer(인라인 마퀴)는 이미 넘칠 때 자동 스크롤되지만 <strong>soop-stock-market의 topnav만 이 처리가 아예 없었다</strong>(480px 이하에서 라벨 텍스트를 숨기는 미디어 쿼리 하나가 유일한 대응이었음 — 실제 오버플로 자체는 그냥 잘리거나 가로 스크롤이 생겼다). <code>.topnav-right</code>를 새 <code>.topnav-viewport</code>(overflow:hidden)로 감싸고 나머지 두 저장소와 동일한 마퀴 로직(트랙 복제 + <code>translateX(-50%)</code> 무한루프, resize 시 재계산, <code>prefers-reduced-motion</code>이면 가로 스크롤로 대체)을 그대로 이식해 통일했다.</div>
 </section>
 

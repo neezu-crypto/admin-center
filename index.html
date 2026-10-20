@@ -754,19 +754,6 @@
       <div id="onyuEntitlementLookupResults"></div>
     </div>
 
-    <div class="card" id="section-permission-delegation">
-      <h2>인증 스트리머 권한 위임</h2>
-      <p class="hint">
-        여기서 체크한 권한은 <b>인증된 스트리머 전원에게 동일하게</b> 부여됩니다(스트리머별 개별 설정이 아님).
-        관리자는 이 목록과 무관하게 항상 모든 권한을 가집니다.
-      </p>
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
-        <button id="killswitchBtn" type="button" style="background:none; border:1px solid #e2554f; color:#e2554f; border-radius: 12px; padding:6px 12px; font-size:12.5px; cursor:pointer;">즉시 회수 킬스위치</button>
-        <span id="killswitchStatus" class="hint" style="margin:0;"></span>
-      </div>
-      <div id="permissionEditList"></div>
-    </div>
-
     <h2 class="card-group-header">검수·승인</h2>
     <div class="card" id="section-purchase-approval">
       <h2>상품 구매 승인 검수 <span id="purchaseApprovalCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
@@ -1097,15 +1084,6 @@
     </div>
   </div>
 
-  <!-- 레거시 호환용 셸. 통합 관리 센터는 관리자 전용이므로 항상 숨긴다. -->
-  <div id="streamerShell" hidden>
-    <div class="card" id="section-granted-permissions">
-      <h2>부여받은 권한</h2>
-      <p class="hint">관리자가 인증 스트리머 전체에게 부여한 권한만 여기서 사용할 수 있습니다.</p>
-      <div id="permissionViewList"></div>
-    </div>
-  </div>
-
   <!-- devbar 편집은 관리자 전용 독립 래퍼로 유지한다. -->
   <div id="devbarShell" hidden>
     <div class="card" id="section-devbar">
@@ -1309,8 +1287,6 @@
   const db = getDatabase(app);
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
   const getAdminSessionSummaryFn = httpsCallable(functions, 'getAdminSessionSummary');
-  const setAdminCenterPermissionFn = httpsCallable(functions, 'setAdminCenterPermission');
-  const revokeAllStreamerPermissionsFn = httpsCallable(functions, 'revokeAllStreamerPermissions');
   // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market이 이미 배포한 함수를 그대로
   // httpsCallable로 부른다(06번 원칙 — codebase가 달라도 같은 프로젝트 안에서는
   // 함수 이름만 맞으면 호출 가능, 24번에서 재확인된 사실).
@@ -1593,16 +1569,6 @@
   const searchSeriesUserFn = httpsCallable(functions, 'searchSeriesUser');
   const getPurchaseOverviewFn = httpsCallable(functions, 'getPurchaseOverview');
 
-  // 07번 4단계 — 첫 위임 권한. devbar 링크 편집은 신원·재화에 영향이 없는 낮은
-  // 리스크 작업이라(08번 callout) 카탈로그 첫 후보로 채웠다. 실제 강제는
-  // 서버(admin-center/functions/index.js의 requireAdminOrDelegatedPermission)가
-  // 하고, 여기 key는 그 값과 정확히 일치해야 한다.
-  const PERMISSION_CATALOG = [
-    { key: 'devbarEdit', label: 'devbar 링크 편집', desc: '각 페이지 상단 devbar에 표시되는 게임 링크를 추가·수정·삭제할 수 있습니다.' },
-    { key: 'viewMonitoring', label: '모니터링 열람', desc: '전체 통계 요약·이상 거래 모니터링, 페이지별 접속자 분석, 배경시장 갤러리 통계, 감사 로그를 볼 수 있습니다(조회 전용, 쓰기 없음).' },
-    { key: 'reviewQueue', label: '페이지별 검수 처리', desc: '마켓 신고·닉네임 신고·배경시장 프리셋 병합 실패 건을 확인하고 직접 처리(확인 완료/차단/이전/무시)할 수 있습니다(읽기+쓰기).' },
-  ];
-
   const authStatusEl = document.getElementById('authStatus');
   const authBtnEl = document.getElementById('authBtn');
   const roleBadgeEl = document.getElementById('roleBadge');
@@ -1614,7 +1580,6 @@
   const gateMessageEl = document.getElementById('gateMessage');
   const gateLoginBtn = document.getElementById('gateLoginBtn');
   const adminShellEl = document.getElementById('adminShell');
-  const streamerShellEl = document.getElementById('streamerShell');
   const sharedShellEl = document.getElementById('sharedShell');
   const devbarShellEl = document.getElementById('devbarShell');
   const monitoringShellEl = document.getElementById('monitoringShell');
@@ -1622,10 +1587,6 @@
   const adminChatMessagesEl = document.getElementById('adminChatMessages');
   const adminChatInputEl = document.getElementById('adminChatInput');
   const adminChatSendBtn = document.getElementById('adminChatSendBtn');
-  const permissionEditListEl = document.getElementById('permissionEditList');
-  const permissionViewListEl = document.getElementById('permissionViewList');
-  const killswitchBtn = document.getElementById('killswitchBtn');
-  const killswitchStatusEl = document.getElementById('killswitchStatus');
   const verificationRefreshBtn = document.getElementById('verificationRefreshBtn');
   const verificationPendingListEl = document.getElementById('verificationPendingList');
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
@@ -1760,8 +1721,6 @@
   let extensionBridgeReady = false;
   let onyuGiftBackgroundMonitorStartedForUid = '';
   let onyuGiftBackgroundMonitorState = 'waiting';
-  let grantedPermissions = {};
-  let killswitchLastRun = null;
 
   async function maybeStartOnyuGiftBackgroundMonitor() {
     if (!extensionBridgeReady || !currentUser || role !== 'admin' ||
@@ -1827,14 +1786,14 @@
   const SESSION_DEFINITIONS = [
     {
       id: 'identity', label: '신원·권한', icon: '🔐', role: 'admin',
-      sections: ['section-user-search', 'section-verification', 'section-onyu-access', 'section-permission-delegation', 'section-bootstrap'],
+      sections: ['section-user-search', 'section-verification', 'section-onyu-access', 'section-bootstrap'],
     },
     {
-      id: 'monitoring', label: '모니터링', icon: '📊', permission: 'viewMonitoring',
+      id: 'monitoring', label: '모니터링', icon: '📊', role: 'admin',
       sections: ['section-stats', 'section-visitor-analytics', 'section-gallery-stats', 'section-lifegame-stats', 'section-onyu-stats', 'section-audit-log', 'section-skin-purchases'],
     },
     {
-      id: 'review', label: '검수·승인', icon: '🔎', permission: 'reviewQueue',
+      id: 'review', label: '검수·승인', icon: '🔎', role: 'admin',
       sections: ['section-review-queue', 'section-onyu-reviews', 'section-onyu-production-inquiries', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
     },
     {
@@ -1862,7 +1821,7 @@
       sections: ['section-discord-webhook'],
     },
     {
-      id: 'devbar', label: 'devbar 구성', icon: '🔗', permission: 'devbarEdit',
+      id: 'devbar', label: 'devbar 구성', icon: '🔗', role: 'admin',
       sections: ['section-devbar'],
     },
     {
@@ -1870,8 +1829,8 @@
       sections: ['section-adult-image-generator'],
     },
     {
-      id: 'shared', label: '공용 도구', icon: '💬', roles: ['admin', 'streamer'],
-      sections: ['section-granted-permissions', 'section-chat'],
+      id: 'shared', label: '공용 도구', icon: '💬', role: 'admin',
+      sections: ['section-chat'],
     },
   ];
   const SESSION_SECTION_IDS = SESSION_DEFINITIONS.reduce(function (map, session) {
@@ -1907,44 +1866,6 @@
   });
   gateLoginBtn.addEventListener('click', signIn);
 
-  function renderPermissionEditList() {
-    if (!PERMISSION_CATALOG.length) {
-      permissionEditListEl.innerHTML = '<div class="empty-state">아직 위임 가능한 권한이 없습니다.</div>';
-      return;
-    }
-    permissionEditListEl.innerHTML = '';
-    PERMISSION_CATALOG.forEach(function (perm) {
-      const row = document.createElement('div');
-      row.className = 'perm-row';
-      const checkboxId = 'perm-' + perm.key;
-      row.innerHTML =
-        '<input type="checkbox" id="' + checkboxId + '"' + (grantedPermissions[perm.key] ? ' checked' : '') + '>' +
-        '<label for="' + checkboxId + '">' + perm.label +
-        (perm.desc ? '<span class="perm-desc">' + perm.desc + '</span>' : '') + '</label>';
-      row.querySelector('input').addEventListener('change', function (e) {
-        setPermission(perm.key, e.target.checked);
-      });
-      permissionEditListEl.appendChild(row);
-    });
-  }
-
-  function renderPermissionViewList() {
-    const grantedKeys = PERMISSION_CATALOG.filter(function (p) { return grantedPermissions[p.key]; });
-    if (!grantedKeys.length) {
-      permissionViewListEl.innerHTML = '<div class="empty-state">관리자가 아직 부여한 권한이 없습니다.</div>';
-      return;
-    }
-    permissionViewListEl.innerHTML = '';
-    grantedKeys.forEach(function (perm) {
-      const row = document.createElement('div');
-      row.className = 'perm-row';
-      row.innerHTML =
-        '<label>' + perm.label + (perm.desc ? '<span class="perm-desc">' + perm.desc + '</span>' : '') + '</label>' +
-        '<span class="perm-granted-tag">사용 가능</span>';
-      permissionViewListEl.appendChild(row);
-    });
-  }
-
   // 역할 판별(관리자/인증 스트리머)과 위임 권한 조회를 한 번의 서버 함수 호출로 처리한다
   // (getAdminCenterState가 role까지 함께 반환 - 클라이언트는 streamerVerifications를
   // 직접 조회하지 않는다). 실시간 구독(onValue) 대신 단발성 호출 방식이라, 권한을
@@ -1954,57 +1875,13 @@
     try {
       const result = await getAdminCenterStateFn();
       role = result.data.role === 'admin' ? 'admin' : 'none';
-      grantedPermissions = result.data.permissions || {};
-      killswitchLastRun = result.data.killswitchLastRun || null;
     } catch (e) {
       console.error('통합 관리 센터 상태 조회 실패:', e);
       role = 'none';
-      grantedPermissions = {};
-      killswitchLastRun = null;
     }
     render();
-    renderKillswitchStatus();
     syncReviewMonitoringMode();
     if (role !== 'none' && currentUser) refreshSessionSummary();
-  }
-
-  // 07번 4단계 — 카탈로그가 채워지기 전에 미리 마련해두는 패닉 버튼. 위임된 권한을
-  // 하나씩 끄는 대신 전부 한 번에 false로 되돌린다.
-  function renderKillswitchStatus() {
-    if (!killswitchLastRun) {
-      killswitchStatusEl.textContent = '';
-      return;
-    }
-    const when = new Date(killswitchLastRun.at).toLocaleString('ko-KR');
-    killswitchStatusEl.textContent =
-      '마지막 실행: ' + (killswitchLastRun.adminName || killswitchLastRun.adminUid) +
-      ' · ' + when + ' · ' + killswitchLastRun.revokedCount + '건 회수';
-  }
-
-  killswitchBtn.addEventListener('click', function () {
-    if (!window.confirm('위임된 권한을 전부 즉시 회수할까요? 인증 스트리머 전원에게서 모든 위임 권한이 즉시 꺼집니다.')) return;
-    killswitchBtn.disabled = true;
-    revokeAllStreamerPermissionsFn().then(function (result) {
-      window.alert((result.data.revokedCount || 0) + '건의 권한을 회수했습니다.');
-      return refreshAdminCenterState();
-    }).catch(function (err) {
-      console.error('킬스위치 실행 실패:', err);
-      window.alert('회수에 실패했습니다: ' + (err && err.message ? err.message : err));
-    }).finally(function () {
-      killswitchBtn.disabled = false;
-    });
-  });
-
-  // 권한 부여/해제는 관리자만 - 서버(setAdminCenterPermission Cloud Function)가
-  // requireAdmin으로 검증한다. 클라이언트는 UI 판단(체크박스 표시)만 한다.
-  function setPermission(key, granted) {
-    setAdminCenterPermissionFn({ key: key, granted: granted }).then(function () {
-      refreshAdminCenterState(); // 실시간 구독이 없으므로 성공 후 직접 다시 조회
-    }).catch(function (err) {
-      console.error('권한 변경 실패:', err);
-      window.alert('권한 변경에 실패했습니다. 잠시 후 다시 시도해 주세요.');
-      renderPermissionEditList(); // 실패 시 체크박스를 실제 저장된 상태로 되돌림
-    });
   }
 
   function escapeHtml(s) {
@@ -2029,7 +1906,6 @@
     if (role !== 'admin') return false;
     if (session.roles && session.roles.indexOf(role) === -1) return false;
     if (session.role && session.role !== role) return false;
-    if (session.permission && role !== 'admin' && !grantedPermissions[session.permission]) return false;
     return true;
   }
 
@@ -2210,7 +2086,6 @@
       } else if (sessionId === 'adult-image-generator') {
         jobs.push(refreshAdultImageGeneratorLinks());
       } else if (sessionId === 'shared') {
-        renderPermissionViewList();
         startAdminChatSubscription();
       }
       if (jobs.length) await Promise.allSettled(jobs);
@@ -6639,17 +6514,16 @@
     { id: 'section-user-search', label: '🔍 유저 검색/조회', role: 'admin', group: '신원·권한' },
     { id: 'section-verification', label: '🎙️ 인증 스트리머 관리', role: 'admin' },
     { id: 'section-onyu-access', label: '🎮 온 이유 이용권 관리', role: 'admin' },
-    { id: 'section-permission-delegation', label: '🗝️ 권한 위임', role: 'admin' },
-    { id: 'section-stats', label: '📊 전체 통계', role: 'admin', group: '모니터링', permKey: 'viewMonitoring' },
-    { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin', permKey: 'viewMonitoring' },
-    { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin', permKey: 'viewMonitoring' },
-    { id: 'section-lifegame-stats', label: '📖 인생게임 통계', role: 'admin', permKey: 'viewMonitoring' },
-    { id: 'section-onyu-stats', label: '💜 온 이유 통계', role: 'admin', permKey: 'viewMonitoring' },
-    { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin', permKey: 'viewMonitoring' },
-    { id: 'section-skin-purchases', label: '🎨 스킨 구매 내역', role: 'admin', permKey: 'viewMonitoring' },
-    { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인', permKey: 'reviewQueue' },
-    { id: 'section-onyu-reviews', label: '💬 온 이유 플레이 후기', role: 'admin', permKey: 'reviewQueue' },
-    { id: 'section-onyu-production-inquiries', label: '🎬 온 이유 미연시 제작 문의', role: 'admin', permKey: 'reviewQueue' },
+    { id: 'section-stats', label: '📊 전체 통계', role: 'admin', group: '모니터링' },
+    { id: 'section-visitor-analytics', label: '👥 접속자 분석', role: 'admin' },
+    { id: 'section-gallery-stats', label: '🖼️ 갤러리 통계', role: 'admin' },
+    { id: 'section-lifegame-stats', label: '📖 인생게임 통계', role: 'admin' },
+    { id: 'section-onyu-stats', label: '💜 온 이유 통계', role: 'admin' },
+    { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin' },
+    { id: 'section-skin-purchases', label: '🎨 스킨 구매 내역', role: 'admin' },
+    { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin', group: '검수·승인' },
+    { id: 'section-onyu-reviews', label: '💬 온 이유 플레이 후기', role: 'admin' },
+    { id: 'section-onyu-production-inquiries', label: '🎬 온 이유 미연시 제작 문의', role: 'admin' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
@@ -6661,9 +6535,8 @@
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
-    { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin', permKey: 'devbarEdit' },
+    { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin' },
     { id: 'section-adult-image-generator', label: '🖼️ Adult Image Generator', role: 'admin', group: '운영 도구' },
-    { id: 'section-granted-permissions', label: '🗝️ 부여받은 권한', role: 'streamer' },
     { id: 'section-chat', label: '💬 채팅', role: 'shared' },
   ];
 
@@ -6674,7 +6547,7 @@
       return;
     }
     const items = QUICKNAV_ITEMS.filter(function (item) {
-      return item.role === 'admin' || item.role === 'shared' || item.permKey;
+      return item.role === 'admin' || item.role === 'shared';
     });
     quicknavEl.innerHTML = '<div class="quicknav-title">🧭 빠른 이동</div><div class="quicknav-scroll">' +
       items.map(function (item) {
@@ -6717,7 +6590,6 @@
     prepareInitialSessionView();
     gateEl.hidden = role === 'admin';
     adminShellEl.hidden = role !== 'admin';
-    streamerShellEl.hidden = true;
     sharedShellEl.hidden = role !== 'admin';
     devbarShellEl.hidden = role !== 'admin';
     monitoringShellEl.hidden = role !== 'admin';
@@ -6726,7 +6598,6 @@
     if (role === 'admin') {
       roleBadgeEl.textContent = '관리자';
       roleBadgeEl.className = 'role-badge admin';
-      renderPermissionEditList();
     } else if (currentUser) {
       gateMessageEl.textContent = '이 계정(' + (currentUser.email || '익명') + ')은 관리자 계정이 아닙니다.';
     } else {
