@@ -858,8 +858,8 @@
     </div>
 
     <div class="card" id="section-played-streamers">
-      <h2>플레이한 스트리머 리스트</h2>
-      <p class="hint">아래 후보는 인생게임에서 검색된 스트리머를 주인공으로 시작한 기록입니다. 다시보기로 실제 플레이를 직접 확인한 뒤 검수 완료 항목으로 등록하세요. 등록한 Firebase UID와 SOOP 아이디가 인증 신청과 모두 일치할 때만 자동 승인됩니다.</p>
+      <h2>인생게임 스트리머 검수 목록</h2>
+      <p class="hint">인생게임에서 주인공으로 선택된 미검수 스트리머 후보의 자동 집계는 2026-10-20부터 중단했습니다. 이전 후보 기록은 유지되며, 다시보기로 실제 플레이를 확인한 뒤 허용 목록에 등록할 수 있습니다. 검수 완료로 등록한 Firebase UID와 SOOP 아이디가 인증 신청과 모두 일치할 때만 자동 승인됩니다.</p>
       <h3 class="subhead">검수 완료 직접 등록</h3>
       <div class="played-streamer-form">
         <label class="played-streamer-field uid">Firebase UID
@@ -880,7 +880,7 @@
         <button id="playedStreamerAddBtn" class="played-streamer-submit" type="button">검수 완료로 등록</button>
       </div>
       <span id="playedStreamerStatus" class="hint"></span>
-      <h3 class="subhead" style="margin-top:16px;">미검수 후보</h3>
+      <h3 class="subhead" style="margin-top:16px;">기존 미검수 후보 · 신규 집계 중단</h3>
       <div id="playedStreamerCandidateList"></div>
       <h3 class="subhead" style="margin-top:16px;">검수 완료 목록</h3>
       <div id="playedStreamerApprovedList"></div>
@@ -1842,7 +1842,7 @@
       sections: ['section-content-freeze', 'section-lifegame-bots', 'section-promoted-content'],
     },
     {
-      id: 'played-streamers', label: '플레이한 스트리머 리스트', icon: '🎮', role: 'admin',
+      id: 'played-streamers', label: '인생게임 스트리머 검수 목록', icon: '🎮', role: 'admin',
       sections: ['section-played-streamers'],
     },
     {
@@ -5563,7 +5563,7 @@
       const result = (await listLifeGamePlayedStreamersFn()).data || {};
       playedStreamerCandidateListEl.innerHTML = renderPlayedStreamerRows(result.candidates, false);
       playedStreamerApprovedListEl.innerHTML = renderPlayedStreamerRows(result.approved, true);
-      playedStreamerStatusEl.textContent = '후보 ' + (result.candidates || []).length + '명 · 검수 완료 ' + (result.approved || []).length + '명';
+      playedStreamerStatusEl.textContent = '기존 후보 ' + (result.candidates || []).length + '명 · 검수 완료 ' + (result.approved || []).length + '명 · 신규 집계 중단';
     } catch (e) {
       console.error('인생게임 플레이 스트리머 조회 실패:', e);
       playedStreamerStatusEl.textContent = '조회 실패: ' + (e.message || e);
@@ -6655,7 +6655,7 @@
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
     { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-bots', label: '🤖 인생게임 봇 관리', role: 'admin' },
-    { id: 'section-played-streamers', label: '🎮 플레이한 스트리머 리스트', role: 'admin', group: '콘텐츠·현황' },
+    { id: 'section-played-streamers', label: '🎮 인생게임 스트리머 검수 목록', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-current-sponsor', label: '📢 오늘의 후원 스트리머 광고', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-player-uids', label: '🧾 인생게임 플레이 유저 UID 집계', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
