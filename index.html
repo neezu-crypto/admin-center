@@ -995,7 +995,7 @@
         <p id="streamerPromoPendingHint" class="hint" style="margin:5px 0 8px;">게시하지 않은 것이 확실한 기록만 해제하세요. 실제 게시 확인이 늦어진 기록을 해제하면 중복 게시될 수 있습니다.</p>
         <div id="streamerPromoPendingList"></div>
       </div>
-      <p class="hint" style="margin:6px 0 0;">순차 자동 게시에서는 HTTPS SOOP 글쓰기 주소(`/station/{방송국ID}/post/write/{게시판ID}`) 형식이고 방송국 ID까지 일치하는 항목만 게시합니다. 형식이 다르거나 ID가 다른 미완료 항목은 자동으로 건너뜁니다. 실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 누적 홍보완료 목표를 비워두면 반복 건수만큼 한 번 실행하고, 목표를 설정하면 기존 완료 수를 포함해 목표에 도달할 때까지 반복 건수만큼 묶어 자동 진행합니다. 묶음당 최대 100건이며 게시 간격은 10초~10분으로 제한됩니다. 목표 자동 진행 중에는 통합 관리 센터 탭을 닫거나 새로고침하지 마세요. 완료 상태를 확인할 수 없거나 오류가 나면 다음 게시를 멈춥니다. ‘게시 순서 무작위’를 선택하면 선택된 대상의 순서만 섞고 대기시간은 설정값을 유지합니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
+      <p class="hint" style="margin:6px 0 0;">순차 자동 게시에서는 HTTPS SOOP 글쓰기 주소(`/station/{방송국ID}/post/write/{게시판ID}`) 형식이고 방송국 ID까지 일치하는 항목만 게시합니다. 형식이 다르거나 ID가 다른 미완료 항목은 자동으로 건너뜁니다. 실제 게시글이 정상 등록되고 제목·게임 링크가 확인된 뒤에만 완료 처리됩니다. 누적 홍보완료 목표를 비워두면 반복 건수만큼 한 번 실행하고, 목표를 설정하면 기존 완료 수를 포함해 목표에 도달할 때까지 반복 건수만큼 묶어 자동 진행합니다. 묶음당 최대 100건이며 게시 간격은 10초~10분으로 제한됩니다. 목표 자동 진행 중에는 통합 관리 센터 탭을 닫거나 새로고침하지 마세요. 완료 상태를 확인할 수 없거나 오류가 나면 다음 게시를 멈춥니다. ‘게시 순서 무작위’를 선택하면 홍보 완료 및 유효하지 않은 링크를 제외한 전체 게시 가능 목록에서 설정 건수만큼 무작위로 추첨해 게시하고, 대기시간은 설정값을 유지합니다. 자동 게시 중 Esc 또는 중단 버튼으로 이후 작업을 중지할 수 있습니다.</p>
       <h3 class="subhead" style="margin-top:16px;">최근 글쓰기 열어봄 (최근 1건)</h3>
       <div id="streamerPromoRecentList"></div>
       <div class="promo-stats-panel">
@@ -3946,8 +3946,20 @@
     ));
   }
 
-  function makeStreamerPromoBatchItems(streamers, count) {
-    return streamers.slice(0, count).map(function (item) {
+  function selectStreamerPromoBatchCandidates(streamers, count, randomizeOrder, random) {
+    const candidates = Array.isArray(streamers) ? streamers.slice() : [];
+    if (randomizeOrder) {
+      const randomValue = typeof random === 'function' ? random : Math.random;
+      for (let index = candidates.length - 1; index > 0; index -= 1) {
+        const targetIndex = Math.floor(randomValue() * (index + 1));
+        [candidates[index], candidates[targetIndex]] = [candidates[targetIndex], candidates[index]];
+      }
+    }
+    return candidates.slice(0, Math.max(0, Math.trunc(Number(count) || 0)));
+  }
+
+  function makeStreamerPromoBatchItems(streamers, count, randomizeOrder) {
+    return selectStreamerPromoBatchCandidates(streamers, count, randomizeOrder).map(function (item) {
       const nickname = String(item.nickname).trim();
       return {
         promoKey: String(item.key),
@@ -4139,7 +4151,7 @@
       return;
     }
 
-    const nextItems = makeStreamerPromoBatchItems(candidates.eligible, nextCount);
+    const nextItems = makeStreamerPromoBatchItems(candidates.eligible, nextCount, goalRun.settings.randomizeOrder === true);
     goalRun.phase = 'waiting';
     goalRun.processing = false;
     goalRun.nextStartAt = Date.now() + goalRun.delayMs;
@@ -4206,7 +4218,7 @@
       }
       const remainingGoal = goalMode ? parsedGoal - completedCount : 0;
       const selectedCount = goalMode ? getStreamerPromoGoalBatchSize(remainingGoal, repeatCount, eligible.length) : (testOnly ? 1 : repeatCount);
-      const selected = makeStreamerPromoBatchItems(eligible, selectedCount);
+      const selected = makeStreamerPromoBatchItems(eligible, selectedCount, randomizeOrder);
       if (!selected.length) {
         const detail = skippedInvalidLinkCount ? ' SOOP 글쓰기 주소 형식 또는 방송국 ID가 맞지 않아 ' + skippedInvalidLinkCount + '건을 건너뛰었습니다.' : '';
         throw new Error('미완료 상태인 항목 중 유효한 SOOP 글쓰기 링크가 없습니다.' + detail);
@@ -4225,7 +4237,7 @@
       const prompt = actionLabel + '을 시작할까요?\n\n대상 ' + selected.length + '명' +
         (testOnly ? ' (글쓰기 화면 입력만, 게시하지 않음)' : ' · 게시 확인 후 다음 대상으로 이동') +
         goalPrompt +
-        (randomizeOrder ? '\n게시 순서: 무작위 (대상 목록은 동일, 대기시간은 설정값 유지)' : '') +
+        (randomizeOrder ? '\n게시 대상: 완료·유효하지 않은 링크를 제외한 전체 ' + eligible.length.toLocaleString('ko-KR') + '명 중 ' + selected.length.toLocaleString('ko-KR') + '명 무작위 추첨' : '') +
         (skippedInvalidLinkCount ? '\nSOOP 링크 형식 불일치 또는 방송국 ID 불일치 ' + skippedInvalidLinkCount + '건 자동 제외' : '') +
         '\n사이클당 대기: ' + delaySeconds + '초\n\n' + targetNames + moreNames +
         (testOnly ? '' : '\n\nSOOP에 실제 공개 게시됩니다. 자동화 중 Esc 또는 중단 버튼으로 이후 작업을 멈출 수 있습니다.');
