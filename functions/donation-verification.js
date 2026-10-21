@@ -1,31 +1,9 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
-const FANPAGE_VIEWER_SUBSCRIPTION_WATCH_MS = 60 * 60 * 1000;
 const FANPAGE_SPONSOR_AD_WATCH_MS = 60 * 60 * 1000;
 
 function normalizeSoopId(value) {
   const id = String(value || '').trim();
   return /^[a-z0-9]{2,20}$/i.test(id) ? id.toLowerCase() : '';
-}
-
-function fanPageViewerSubscriptionHasEligibleBackgroundRequest(requests, now, allowedBalloons) {
-  return Object.values(requests || {}).some((item) => {
-    const requestedAt = Number(item && item.requestedAt) || 0;
-    return item && (!item.status || item.status === 'pending') && normalizeSoopId(item.donorSoopId) &&
-      Array.isArray(allowedBalloons) && allowedBalloons.includes(Number(item.balloonCost)) &&
-      requestedAt > now - FANPAGE_VIEWER_SUBSCRIPTION_WATCH_MS && requestedAt <= now;
-  });
-}
-
-function fanPageViewerSubscriptionDonationCanMatch(item, senderSoopId, balloons, observedAt, allowedBalloons) {
-  const balloonCost = Number(item && item.balloonCost);
-  const requestedAt = Number(item && item.requestedAt) || 0;
-  const donorSoopId = normalizeSoopId(item && item.donorSoopId);
-  const normalizedSenderSoopId = normalizeSoopId(senderSoopId);
-  return !!item && item.status === 'pending' &&
-    !!normalizedSenderSoopId && donorSoopId === normalizedSenderSoopId &&
-    Array.isArray(allowedBalloons) && allowedBalloons.includes(balloonCost) && balloonCost === balloons &&
-    Number.isFinite(observedAt) && requestedAt > 0 && requestedAt <= observedAt &&
-    observedAt - requestedAt < FANPAGE_VIEWER_SUBSCRIPTION_WATCH_MS;
 }
 
 function fanPageSponsorAdHasEligibleBackgroundRequest(requests, now) {
@@ -117,8 +95,6 @@ function notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, 
 }
 
 module.exports = {
-  fanPageViewerSubscriptionDonationCanMatch,
-  fanPageViewerSubscriptionHasEligibleBackgroundRequest,
   fanPageSponsorAdDonationCanMatch,
   fanPageSponsorAdHasEligibleBackgroundRequest,
   describeFanPageSponsorDonationCandidate,

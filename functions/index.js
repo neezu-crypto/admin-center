@@ -7,8 +7,6 @@ const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
-  fanPageViewerSubscriptionDonationCanMatch,
-  fanPageViewerSubscriptionHasEligibleBackgroundRequest,
   fanPageSponsorAdDonationCanMatch,
   describeFanPageSponsorDonationCandidate,
   fanPageSponsorAdHasEligibleBackgroundRequest,
@@ -2800,7 +2798,6 @@ const onyuGetViewerAccess = onCall(async (request) => {
 // 과거 신청의 후원 대조·검수 경로가 사용하는 기록 형식. 신규 구매·선물 신청은 받지 않는다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
 const FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS = 33;
-const LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS = 10;
 const FANPAGE_SPONSOR_ADS_PATH = 'streamerFanPageSponsorAds';
 const FANPAGE_SPONSOR_REQUESTS_PATH = 'streamerFanPageSponsorRequests';
 const FANPAGE_SPONSOR_PENDING_PATH = 'streamerFanPageSponsorPending';
@@ -2954,11 +2951,9 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   let closed = false;
   let active = false;
   let activeSources = [];
-  let fanPagePendingRequests = {};
   let fanPageSponsorRequests = {};
   const db = getDatabase();
   const requestRef = db.ref('onyuVn/streamerGameGiftRequests');
-  const fanPagePendingRef = db.ref('streamerFanPageViewerSubscriptionPending');
   const fanPageSponsorRequestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH);
   const adminRef = db.ref('adminCenter/adminUids/' + adminUid);
   const connectionId = require('node:crypto').randomBytes(12).toString('hex');
@@ -2970,8 +2965,6 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   const sendMonitorState = (eventName = 'watch-state') => {
     const now = Date.now();
     activeSources = [];
-    if (fanPageViewerSubscriptionHasEligibleBackgroundRequest(fanPagePendingRequests, now,
-      [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS])) activeSources.push('streamer-fanpage');
     if (fanPageSponsorAdHasEligibleBackgroundRequest(fanPageSponsorRequests, now)) activeSources.push('streamer-fanpage-sponsor');
     active = activeSources.length > 0;
     const expiresAt = active ? now + 60000 : 0;
@@ -2988,10 +2981,6 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     const requests = Object.keys(value).map((id) => Object.assign({}, value[id] || {}, { requestId: id }))
       .sort((a, b) => (Number(b.updatedAt || b.requestedAt) || 0) - (Number(a.updatedAt || a.requestedAt) || 0));
     writeEvent('requests', { requests });
-  };
-  const onFanPagePendingValue = (snapshot) => {
-    fanPagePendingRequests = snapshot.val() || {};
-    if (accessMode === 'monitor') sendMonitorState();
   };
   const onFanPageSponsorRequestValue = (snapshot) => {
     fanPageSponsorRequests = snapshot.val() || {};
@@ -3024,7 +3013,6 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     clearInterval(heartbeat);
     clearTimeout(maxDuration);
     if (accessMode !== 'monitor') requestRef.off('value', onRequestValue);
-    fanPagePendingRef.off('value', onFanPagePendingValue);
     fanPageSponsorRequestRef.off('value', onFanPageSponsorRequestValue);
     adminRef.off('value', onAdminValue);
     if (accessMode === 'monitor') monitorStatusRef.remove().catch(() => null);
@@ -3033,13 +3021,12 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   response.on('close', cleanup);
   if (accessMode === 'monitor') {
     monitorStatusRef.set({ connectedAt: Date.now(), lastHeartbeatAt: Date.now(), active: true, watching: false, activeSources: [], connectionId }).catch(() => null);
-    fanPagePendingRef.on('value', onFanPagePendingValue, onRequestError);
     fanPageSponsorRequestRef.on('value', onFanPageSponsorRequestValue, onRequestError);
   }
   adminRef.on('value', onAdminValue, onRequestError);
   // Onyu no longer accepts new gift requests. Keep legacy history available only
   // to a directly authenticated admin; the restricted background monitor does
-  // not subscribe to Onyu or LifeGame gift requests.
+  // not subscribe to Onyu, LifeGame, or fanpage viewer-subscription requests.
   if (accessMode !== 'monitor') requestRef.on('value', onRequestValue, onRequestError);
 });
 
@@ -3560,84 +3547,6 @@ const OTHER_GAME_DONATION_REQUEST_SOURCES = [
   { path: 'unfreezeDonationRequests', gameKey: 'soop-stock-market', requestType: 'unfreeze-donation', donorField: 'soopId', fixedAmount: 50 },
 ];
 const OTHER_GAME_DONATION_REQUEST_WINDOW_MS = 20 * 60 * 1000;
-
-async function commitFanPageViewerSubscriptionApproval(db, adminUid, requestId, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, verificationMetadata) {
-  const requestRef = db.ref('streamerFanPageViewerSubscriptionRequests/' + requestId);
-  const claimToken = require('node:crypto').randomBytes(16).toString('hex');
-  const claimedAt = Date.now();
-  const claim = await requestRef.transaction((current) => {
-    if (!current || current.status !== 'pending' ||
-        !fanPageViewerSubscriptionDonationCanMatch(current, senderSoopId, balloons, observedAt,
-          [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS])) return;
-    return Object.assign({}, current, { status: 'processing', processingAt: claimedAt, processingToken: claimToken });
-  }, undefined, false);
-  if (!claim.committed) {
-    const current = claim.snapshot.val() || {};
-    if (current.status === 'approved' && current.verificationEventKey === verificationMetadata.verificationEventKey) {
-      const subscription = (await db.ref('streamerFanPageViewerSubscriptions/' + current.requesterUid).get()).val() || {};
-      return { ok: true, status: 'approved', expiresAt: Number(subscription.expiresAt) || 0 };
-    }
-    throw new HttpsError('failed-precondition', '구독 신청이 더 이상 자동 승인 대기 상태가 아닙니다.');
-  }
-
-  const item = claim.snapshot.val() || {};
-  const subscriptionRef = db.ref('streamerFanPageViewerSubscriptions/' + item.requesterUid);
-  try {
-    await db.ref('streamerFanPageViewerSubscriptionPending/' + requestId).update({ status: 'processing' });
-    const entitlement = await subscriptionRef.transaction((current) => {
-      const previous = current && typeof current === 'object' ? current : {};
-      if (previous.lastApprovedRequestId === requestId) return previous;
-      if (previous.pendingRequestId !== requestId) return;
-      const approvedAt = Date.now();
-      return Object.assign({}, previous, {
-        expiresAt: Math.max(approvedAt, Number(previous.expiresAt) || 0) + 30 * 24 * 60 * 60 * 1000,
-        lastApprovedAt: approvedAt,
-        lastApprovedRequestId: requestId,
-      });
-    });
-    const entitlementValue = entitlement.snapshot.val() || {};
-    if (!entitlement.committed && entitlementValue.lastApprovedRequestId !== requestId) {
-      throw new HttpsError('aborted', '구독 기간을 적용하지 못했습니다. 자동 확인을 다시 시도해 주세요.');
-    }
-    const expiresAt = Number(entitlementValue.expiresAt) || 0;
-    const finalized = await requestRef.transaction((current) => {
-      if (!current || current.status !== 'processing' || current.processingToken !== claimToken) return;
-      return Object.assign({}, current, verificationMetadata, {
-        status: 'approved',
-        reviewedAt: Date.now(),
-        reviewedBy: adminUid,
-        approvedUntil: expiresAt,
-        processingAt: null,
-        processingToken: null,
-      });
-    }, undefined, false);
-    const finalValue = finalized.snapshot.val() || {};
-    if (!finalized.committed && !(finalValue.status === 'approved' && finalValue.verificationEventKey === verificationMetadata.verificationEventKey)) {
-      throw new HttpsError('aborted', '신청 상태를 승인 완료로 저장하지 못했습니다. 관리자가 확인해야 합니다.');
-    }
-    await db.ref().update({
-      ['streamerFanPageViewerSubscriptionPending/' + requestId]: null,
-      ['streamerFanPageViewerSubscriptions/' + item.requesterUid + '/pendingRequestId']: null,
-    });
-    return { ok: true, status: 'approved', expiresAt };
-  } catch (error) {
-    const restored = await requestRef.transaction((current) => {
-      if (!current || current.status !== 'processing' || current.processingToken !== claimToken) return;
-      return Object.assign({}, current, { status: 'pending', processingAt: null, processingToken: null });
-    }, undefined, false).catch(() => null);
-    if (restored && restored.committed) {
-      const pending = restored.snapshot.val() || {};
-      await db.ref('streamerFanPageViewerSubscriptionPending/' + requestId).set({
-        status: 'pending',
-        requestedAt: Number(pending.requestedAt) || 0,
-        donorSoopId: String(pending.donorSoopId || ''),
-        balloonCost: Number(pending.balloonCost) || 0,
-        donationCompletedAt: Number(pending.donationCompletedAt) || 0,
-      }).catch(() => null);
-    }
-    throw error;
-  }
-}
 
 async function holdFreshRealtimeSnapshot(ref) {
   let listener = null;
@@ -4242,14 +4151,12 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     gameCandidates: [],
   };
   try {
-    const [onyuSnap, fanPagePendingSnap, fanPageSponsorSnap, ...otherGameSnaps] = await Promise.all([
+    const [onyuSnap, fanPageSponsorSnap, ...otherGameSnaps] = await Promise.all([
       db.ref('onyuVn/streamerGameGiftRequests').get(),
-      db.ref('streamerFanPageViewerSubscriptionPending').get(),
       db.ref(FANPAGE_SPONSOR_REQUESTS_PATH).get(),
       ...OTHER_GAME_DONATION_REQUEST_SOURCES.map((source) => db.ref(source.path).orderByChild('status').equalTo('pending').get()),
     ]);
     const onyuRequests = onyuSnap.val() || {};
-    const fanPagePendingRequests = fanPagePendingSnap.val() || {};
     const fanPageSponsorRequests = fanPageSponsorSnap.val() || {};
     const otherGameRequestMaps = {};
     OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source, index) => {
@@ -4257,34 +4164,6 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     });
     const onyuCandidates = Object.entries(onyuRequests).filter(([, item]) =>
       notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
-    const fanPageRequestIds = Object.entries(fanPagePendingRequests).filter(([, index]) => index &&
-      fanPageViewerSubscriptionDonationCanMatch(
-        Object.assign({}, index, { status: index.status || 'pending' }), senderSoopId, balloons,
-        observedAt,
-        [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS],
-      ))
-      .map(([requestId]) => requestId);
-    const fanPageRequests = await Promise.all(fanPageRequestIds.map(async (requestId) => {
-      const snapshot = await db.ref('streamerFanPageViewerSubscriptionRequests/' + requestId).get();
-      return [requestId, snapshot.val()];
-    }));
-    const fanPageCandidates = fanPageRequests.filter(([, item]) =>
-      fanPageViewerSubscriptionDonationCanMatch(
-        item, senderSoopId, balloons, observedAt,
-        [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS],
-      ));
-    const matchedFanPageRequestIds = new Set(fanPageCandidates.map(([requestId]) => requestId));
-    const fanPageOtherDonationCandidates = fanPageRequests.filter(([requestId, item]) => item && item.status === 'pending' &&
-      !matchedFanPageRequestIds.has(requestId) && normalizeSoopId(item.donorSoopId) === senderSoopId &&
-      Number(item.balloonCost) === balloons)
-      .map(([requestId, item]) => ({
-        gameKey: 'streamer-fanpage',
-        requestType: 'viewer-subscription',
-        requestId,
-        requestedAt: Number(item.requestedAt) || 0,
-        expectedBalloons: Number(item.balloonCost) || 0,
-        donorMatch: true,
-      }));
     const fanPageSponsorCandidates = Object.entries(fanPageSponsorRequests).filter(([, item]) =>
       fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt));
     const matchedFanPageSponsorRequestIds = new Set(fanPageSponsorCandidates.map(([requestId]) => requestId));
@@ -4305,12 +4184,10 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     }));
     const candidates = [
       ...onyuCandidates.map(([requestId, item]) => ({ game: 'onyu-vn', requestId, item })),
-      ...fanPageCandidates.map(([requestId, item]) => ({ game: 'streamer-fanpage', requestId, item })),
       ...fanPageSponsorCandidates.map(([requestId, item]) => ({ game: 'streamer-fanpage-sponsor', requestId, item })),
     ];
     const otherDonationCandidates = [
       ...findOtherGameDonationRequestCandidates(otherGameRequestMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax),
-      ...fanPageOtherDonationCandidates,
       ...fanPageSponsorOtherDonationCandidates,
     ];
     eventDetails.otherDonationCandidateCount = otherDonationCandidates.length;
@@ -4366,21 +4243,12 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
         targetNickname: String(candidate.item.targetNickname || ''),
       });
     } else {
-      if (candidate.game === 'streamer-fanpage-sponsor') {
-        result = await commitFanPageSponsorAdApproval(db, adminUid, candidate.requestId, senderSoopId,
-          balloons, observedAt, verificationEventMetadata);
-        result = Object.assign({}, result, {
-          gameKey: candidate.game,
-          targetNickname: String(candidate.item.nickname || ''),
-        });
-      } else {
-        result = await commitFanPageViewerSubscriptionApproval(db, adminUid, candidate.requestId, senderSoopId,
-          balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp, verificationEventMetadata);
-        result = Object.assign({}, result, {
-          gameKey: candidate.game,
-          targetNickname: String(candidate.item.nickname || ''),
-        });
-      }
+      result = await commitFanPageSponsorAdApproval(db, adminUid, candidate.requestId, senderSoopId,
+        balloons, observedAt, verificationEventMetadata);
+      result = Object.assign({}, result, {
+        gameKey: candidate.game,
+        targetNickname: String(candidate.item.nickname || ''),
+      });
     }
     await eventRef.update({ status: 'approved', requestId: candidate.requestId, gameKey: candidate.game, claimToken: null, approvedAt: Date.now() });
     if (candidate.game === 'streamer-fanpage-sponsor' || eventDetails.sponsorAdCandidateCount > 0) {
