@@ -930,6 +930,15 @@
       <button id="streamerPromoLinksRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <button id="streamerPromoClearCompletedBtn" class="perm-refresh-btn" type="button" style="margin-left:6px;">전체 체크 해제</button>
       <span id="streamerPromoLinksStatus" class="hint" style="margin-left:8px;"></span>
+      <div id="streamerPromoJobStatusPanel" style="margin-top:10px; padding:10px 12px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <strong>홍보 링크 백그라운드 작업</strong>
+          <span id="streamerPromoJobStatus" class="hint" style="margin:0;" role="status" aria-live="polite">최근 작업을 불러오는 중…</span>
+          <button id="streamerPromoJobRefreshBtn" class="perm-refresh-btn" type="button" style="margin-left:auto;">작업 상태 새로고침</button>
+        </div>
+        <p class="hint" style="margin:5px 0 0;">‘서버 접수’가 표시된 뒤에는 SOOP·관리자센터 탭을 닫아도 처리가 계속됩니다. 실패한 작업은 사유가 여기에 남습니다.</p>
+        <div id="streamerPromoJobList" style="margin-top:6px;"></div>
+      </div>
       <div id="streamerPromoUnlistedCard" style="margin-top:12px; padding:12px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <strong>주식시장 미상장 스트리머</strong>
@@ -1300,6 +1309,7 @@
   const removePromotedContentFn = httpsCallable(functions, 'removePromotedContent');
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
   const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
+  const listStreamerPromoJobsFn = httpsCallable(functions, 'listStreamerPromoJobs');
   const addStreamerPromoCandidateFn = httpsCallable(functions, 'addStreamerPromoCandidate');
   const removeStreamerPromoCandidateFn = httpsCallable(functions, 'removeStreamerPromoCandidate');
   const setStreamerPromoExclusionFn = httpsCallable(functions, 'setStreamerPromoExclusion');
@@ -1442,8 +1452,9 @@
     setStreamerPromoExclusionFn({ nickname: nickname, soopId: soopId, excluded: data.excluded }).then(function (result) {
       promoDuplicateListCache = null;
       promoDuplicateListExpiresAt = 0;
-      refreshStreamerPromoLinks();
-      reply({ ok: true, excluded: result.data && result.data.excluded === true, nickname: nickname, soopId: soopId });
+      const queued = result && result.data || {};
+      trackStreamerPromoJob(queued.jobId);
+      reply({ ok: true, queued: queued.queued === true, jobId: String(queued.jobId || ''), excluded: queued.excluded === true, nickname: nickname, soopId: soopId });
     }).catch(function (error) {
       const code = String(error && error.code || '');
       reply({ ok: false, reason: code || 'server-error', message: String(error && error.message || '제외 상태를 저장하지 못했습니다.') });
@@ -1466,9 +1477,9 @@
       const entry = result && result.data || {};
       promoDuplicateListCache = null;
       promoDuplicateListExpiresAt = 0;
-      console.info('[SOOP 홍보 진단]', JSON.stringify({ requestId: requestId, stage: 'promo-candidate-add-call-succeeded', at: new Date().toISOString(), details: { soopId: String(entry.soopId || '') } }));
-      refreshStreamerPromoLinks();
-      reply({ ok: true, nickname: String(entry.nickname || ''), soopId: String(entry.soopId || ''), writeUrl: String(entry.writeUrl || '') });
+      console.info('[SOOP 홍보 진단]', JSON.stringify({ requestId: requestId, stage: 'promo-candidate-add-queued', at: new Date().toISOString(), details: { soopId: String(entry.soopId || ''), jobId: String(entry.jobId || '') } }));
+      trackStreamerPromoJob(entry.jobId);
+      reply({ ok: true, queued: entry.queued === true, jobId: String(entry.jobId || ''), nickname: String(entry.nickname || ''), soopId: String(entry.soopId || ''), writeUrl: String(entry.writeUrl || '') });
     }).catch(function (error) {
       console.warn('[SOOP 홍보 진단]', JSON.stringify({ requestId: requestId, stage: 'promo-candidate-add-call-failed', at: new Date().toISOString(), details: { code: String(error && error.code || ''), message: String(error && error.message || error || '') } }));
       reply({ ok: false, reason: String(error && error.code || 'call-failed'), message: String(error && error.message || '홍보 리스트 추가에 실패했습니다.') });
@@ -1620,6 +1631,9 @@
   const streamerPromoUnlistedListEl = document.getElementById('streamerPromoUnlistedList');
   const streamerPromoClearCompletedBtn = document.getElementById('streamerPromoClearCompletedBtn');
   const streamerPromoLinksStatusEl = document.getElementById('streamerPromoLinksStatus');
+  const streamerPromoJobStatusEl = document.getElementById('streamerPromoJobStatus');
+  const streamerPromoJobListEl = document.getElementById('streamerPromoJobList');
+  const streamerPromoJobRefreshBtn = document.getElementById('streamerPromoJobRefreshBtn');
   const streamerPromoRecentListEl = document.getElementById('streamerPromoRecentList');
   const streamerPromoLinksListEl = document.getElementById('streamerPromoLinksList');
   const streamerPromoBatchCountEl = document.getElementById('streamerPromoBatchCount');
@@ -2023,7 +2037,7 @@
       } else if (sessionId === 'lifegame-player-uids') {
         jobs.push(refreshLifeGamePlayerUidList());
       } else if (sessionId === 'promotions') {
-        jobs.push(refreshStreamerPromoLinks());
+        jobs.push(refreshStreamerPromoLinks(), watchStreamerPromoJobs());
       } else if (sessionId === 'settings') {
         jobs.push(refreshDiscordWebhookStatus());
       } else if (sessionId === 'devbar') {
@@ -3300,6 +3314,92 @@
     });
   });
 
+  let promoJobPollTimer = null;
+  let promoJobPollUntil = 0;
+  let promoJobListRequest = null;
+  const trackedPromoJobIds = new Set();
+
+  function renderStreamerPromoJobs(jobs) {
+    streamerPromoJobListEl.replaceChildren();
+    if (!jobs.length) {
+      streamerPromoJobListEl.textContent = '최근 백그라운드 작업이 없습니다.';
+      return;
+    }
+    const labels = {
+      addCandidate: '홍보 후보 추가',
+      setExclusion: '미등록 스트리머 제외 상태 변경',
+      queued: '서버 접수',
+      processing: '처리 중',
+      completed: '완료',
+      failed: '실패',
+    };
+    jobs.slice(0, 10).forEach(function (job) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap; padding:6px 2px; border-top:1px solid rgba(20,20,22,0.08); font-size:12px;';
+      const name = document.createElement('span');
+      name.style.fontWeight = '700';
+      name.textContent = (labels[job.operation] || '홍보 작업') + ' · ' + (job.nickname || job.soopId || '스트리머');
+      const status = document.createElement('span');
+      status.textContent = labels[job.status] || job.status || '상태 확인 불가';
+      status.style.color = job.status === 'failed' ? '#c33b32' : job.status === 'completed' ? '#277448' : '#6b5b36';
+      const time = document.createElement('span');
+      time.className = 'hint';
+      time.style.margin = '0';
+      time.textContent = job.updatedAt ? new Date(job.updatedAt).toLocaleString('ko-KR') : '';
+      row.append(name, status, time);
+      const errorMessage = job.errorMessage || job.lastError || '';
+      if (errorMessage) {
+        const error = document.createElement('span');
+        error.style.cssText = 'flex-basis:100%; color:#a52c25; white-space:pre-wrap;';
+        error.textContent = errorMessage;
+        row.appendChild(error);
+      }
+      streamerPromoJobListEl.appendChild(row);
+    });
+  }
+
+  async function loadStreamerPromoJobs() {
+    if (promoJobListRequest) return promoJobListRequest;
+    streamerPromoJobStatusEl.textContent = '작업 상태 확인 중…';
+    promoJobListRequest = listStreamerPromoJobsFn().then(function (result) {
+      const jobs = result && result.data && Array.isArray(result.data.jobs) ? result.data.jobs : [];
+      renderStreamerPromoJobs(jobs);
+      const pending = jobs.filter(function (job) { return job.status === 'queued' || job.status === 'processing'; }).length;
+      const failed = jobs.filter(function (job) { return job.status === 'failed'; }).length;
+      streamerPromoJobStatusEl.textContent = pending ? '서버 처리 중 ' + pending + '건' : failed ? '실패 ' + failed + '건 · 상세 사유를 확인하세요' : '최근 작업 모두 처리됨';
+      const completedTracked = jobs.filter(function (job) { return trackedPromoJobIds.has(job.jobId) && (job.status === 'completed' || job.status === 'failed'); });
+      completedTracked.forEach(function (job) {
+        trackedPromoJobIds.delete(job.jobId);
+        promoDuplicateListCache = null;
+        promoDuplicateListExpiresAt = 0;
+        promoDuplicateListRequest = null;
+        if (job.status === 'completed') refreshStreamerPromoLinks();
+      });
+      if (pending && Date.now() < promoJobPollUntil) {
+        clearTimeout(promoJobPollTimer);
+        promoJobPollTimer = setTimeout(loadStreamerPromoJobs, 2000);
+      }
+      return jobs;
+    }).catch(function (error) {
+      streamerPromoJobStatusEl.textContent = '작업 상태를 불러오지 못했습니다: ' + String(error && error.message || error || '오류');
+      return [];
+    }).finally(function () { promoJobListRequest = null; });
+    return promoJobListRequest;
+  }
+
+  function watchStreamerPromoJobs() {
+    promoJobPollUntil = Date.now() + 60000;
+    clearTimeout(promoJobPollTimer);
+    return loadStreamerPromoJobs();
+  }
+
+  function trackStreamerPromoJob(jobId) {
+    const id = String(jobId || '');
+    if (!/^[A-Za-z0-9_-]{8,80}$/.test(id)) return;
+    trackedPromoJobIds.add(id);
+    watchStreamerPromoJobs();
+  }
+
   async function refreshStreamerPromoLinks() {
     streamerPromoLinksListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     streamerPromoLinksStatusEl.textContent = '';
@@ -4257,6 +4357,7 @@
 
   streamerPromoLinksRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
   streamerPromoUnlistedRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
+  streamerPromoJobRefreshBtn.addEventListener('click', watchStreamerPromoJobs);
   streamerPromoClearCompletedBtn.addEventListener('click', function () {
     if (!window.confirm('홍보 완료로 체크된 항목을 모두 해제할까요?')) return;
     streamerPromoClearCompletedBtn.disabled = true;

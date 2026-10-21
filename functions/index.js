@@ -1225,6 +1225,222 @@ const listStreamerPromoLinks = onCall(async (request) => {
   };
 });
 
+function promoJobActor(request, adminUid) {
+  const token = request.auth && request.auth.token || {};
+  return {
+    uid: adminUid,
+    name: String(token.name || token.email || adminUid).slice(0, 120),
+    email: String(token.email || '').slice(0, 200),
+  };
+}
+
+async function enqueueStreamerPromoJob(request, adminUid, operation, payload) {
+  const db = getDatabase();
+  const jobRef = db.ref('adminCenter/streamerPromoJobs').push();
+  const now = Date.now();
+  await jobRef.set(Object.assign({
+    operation: operation,
+    status: 'queued',
+    requestedBy: promoJobActor(request, adminUid),
+    createdAt: now,
+    updatedAt: now,
+    attempts: 0,
+  }, payload));
+  return { jobId: jobRef.key, createdAt: now };
+}
+
+function promoJobErrorMessage(error) {
+  return String(error && error.message || error || '홍보 작업을 처리하지 못했습니다.').slice(0, 500);
+}
+
+async function writeStreamerPromoJobAudit(db, jobId, job, action, detail) {
+  const actor = job.requestedBy || {};
+  const auditRef = db.ref('adminAuditLog/' + jobId);
+  await auditRef.transaction(function (current) {
+    if (current) return current;
+    return {
+      actorUid: String(actor.uid || ''),
+      actorName: String(actor.name || actor.email || actor.uid || '관리자'),
+      action: action,
+      detail: detail || '',
+      at: Date.now(),
+      source: 'streamerPromoJob',
+      jobId: jobId,
+    };
+  });
+  await trimAdminAuditLog(db);
+}
+
+async function runStreamerPromoJob(jobId) {
+  const db = getDatabase();
+  const jobRef = db.ref('adminCenter/streamerPromoJobs/' + jobId);
+  const job = (await jobRef.get()).val();
+  if (!job || (job.status !== 'queued' && job.status !== 'processing')) return;
+
+  const now = Date.now();
+  await jobRef.update({
+    status: 'processing',
+    startedAt: job.startedAt || now,
+    updatedAt: now,
+    attempts: Math.max(0, Number(job.attempts) || 0) + 1,
+  });
+
+  try {
+    let action = '';
+    let detail = '';
+    let result = {};
+    if (job.operation === 'addCandidate') {
+      const soopId = normalizeSoopId(job.soopId);
+      const nickname = String(job.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim();
+      const writeUrl = normalizePromoUrl(job.writeUrl);
+      const [verifiedSnap, candidatesSnap, seedSnap, removedPromoSnap] = await Promise.all([
+        db.ref('streamerVerifications').get(),
+        db.ref('adminCenter/streamerPromoCandidates').get(),
+        db.ref('adminCenter/streamerPromoSeed').get(),
+        db.ref('adminCenter/streamerPromoRemoved').get(),
+      ]);
+      const candidates = candidatesSnap.val() || {};
+      const ownCandidate = candidates[soopId];
+      const entries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidates)
+        .filter(function (entry) { return !isPromoEntryRemoved(entry, removedPromoSnap.val() || {}); });
+      const duplicate = entries.find(function (entry) {
+        return String(entry.soopId || '').toLowerCase() === soopId ||
+          String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === nickname.toLocaleLowerCase();
+      });
+      if (duplicate && (!ownCandidate || ownCandidate.lastPromoJobId !== jobId)) {
+        throw new HttpsError('already-exists', '이미 홍보 리스트에 등록된 닉네임 또는 SOOP 아이디입니다: ' + (duplicate.nickname || duplicate.soopId));
+      }
+
+      const candidateRef = db.ref('adminCenter/streamerPromoCandidates/' + soopId);
+      const candidate = {
+        nickname: nickname,
+        soopId: soopId,
+        writeUrl: writeUrl,
+        createdAt: ownCandidate && ownCandidate.createdAt || job.createdAt || now,
+        updatedAt: now,
+        createdBy: ownCandidate && ownCandidate.createdBy || String((job.requestedBy || {}).uid || ''),
+        updatedBy: String((job.requestedBy || {}).uid || ''),
+        lastPromoJobId: jobId,
+      };
+      const transaction = await candidateRef.transaction(function (current) {
+        if (current && current.lastPromoJobId !== jobId) return;
+        return Object.assign({}, current || {}, candidate);
+      }, undefined, false);
+      if (!transaction.committed) {
+        throw new HttpsError('already-exists', '같은 SOOP 아이디의 홍보 후보 추가 작업이 먼저 처리되었습니다. 목록을 새로고침해주세요.');
+      }
+      await db.ref().update({
+        ['adminCenter/streamerPromoRemoved/' + soopId]: null,
+        ['adminCenter/streamerPromoExcluded/' + soopId]: null,
+      });
+      action = '스트리머 홍보 후보 추가';
+      detail = nickname + ' (@' + soopId + ')';
+      result = { nickname: nickname, soopId: soopId, writeUrl: writeUrl };
+    } else if (job.operation === 'setExclusion') {
+      const nickname = String(job.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim();
+      const soopId = normalizeSoopId(job.soopId);
+      const excluded = job.excluded === true;
+      if (excluded) {
+        if (job.sideEffectApplied !== true) {
+          const [verifiedSnap, candidatesSnap, seedSnap, removedSnap] = await Promise.all([
+            db.ref('streamerVerifications').get(),
+            db.ref('adminCenter/streamerPromoCandidates').get(),
+            db.ref('adminCenter/streamerPromoSeed').get(),
+            db.ref('adminCenter/streamerPromoRemoved').get(),
+          ]);
+          const removed = removedSnap.val() || {};
+          const known = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val())
+            .filter(function (entry) { return !isPromoEntryRemoved(entry, removed); });
+          const registered = known.find(function (entry) {
+            return String(entry.soopId || '').toLowerCase() === soopId ||
+              String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === nickname.toLocaleLowerCase();
+          });
+          if (registered) {
+            throw new HttpsError('already-exists', '이미 홍보 리스트에 등록된 스트리머는 제외 목록에 추가할 수 없습니다.');
+          }
+        }
+        await db.ref().update({
+          ['adminCenter/streamerPromoExcluded/' + soopId]: true,
+          ['adminCenter/streamerPromoJobs/' + jobId + '/sideEffectApplied']: true,
+        });
+      } else {
+        await db.ref().update({
+          ['adminCenter/streamerPromoExcluded/' + soopId]: null,
+          ['adminCenter/streamerPromoJobs/' + jobId + '/sideEffectApplied']: true,
+        });
+      }
+      action = excluded ? '홍보 후보 스트리머 제외' : '홍보 후보 스트리머 제외 해제';
+      detail = nickname + ' (@' + soopId + ')';
+      result = { nickname: nickname, soopId: soopId, excluded: excluded };
+    } else {
+      throw new HttpsError('invalid-argument', '알 수 없는 홍보 작업입니다.');
+    }
+
+    await writeStreamerPromoJobAudit(db, jobId, job, action, detail);
+    await jobRef.update({
+      status: 'completed',
+      result: result,
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+      errorCode: null,
+      errorMessage: null,
+    });
+  } catch (error) {
+    const code = String(error && error.code || '');
+    if (error instanceof HttpsError || code.startsWith('functions/')) {
+      await jobRef.update({
+        status: 'failed',
+        errorCode: code || 'failed-precondition',
+        errorMessage: promoJobErrorMessage(error),
+        completedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+    await jobRef.update({
+      status: 'queued',
+      lastError: promoJobErrorMessage(error),
+      updatedAt: Date.now(),
+    });
+    throw error;
+  }
+}
+
+const processStreamerPromoJob = onValueCreated({
+  ref: '/adminCenter/streamerPromoJobs/{jobId}',
+  retry: true,
+  maxInstances: 3,
+  timeoutSeconds: 120,
+}, async (event) => {
+  const jobId = String(event.params.jobId || '');
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(jobId)) return;
+  await runStreamerPromoJob(jobId);
+});
+
+const listStreamerPromoJobs = onCall(async (request) => {
+  await requireAdmin(request);
+  const snapshot = await getDatabase().ref('adminCenter/streamerPromoJobs').orderByKey().limitToLast(20).get();
+  const jobs = Object.entries(snapshot.val() || {}).map(function ([jobId, job]) {
+    const row = job || {};
+    return {
+      jobId: jobId,
+      operation: String(row.operation || ''),
+      status: String(row.status || ''),
+      nickname: String(row.nickname || ''),
+      soopId: String(row.soopId || ''),
+      excluded: row.excluded === true,
+      errorCode: String(row.errorCode || ''),
+      errorMessage: String(row.errorMessage || ''),
+      lastError: String(row.lastError || ''),
+      attempts: Math.max(0, Number(row.attempts) || 0),
+      createdAt: Number(row.createdAt) || 0,
+      updatedAt: Number(row.updatedAt) || 0,
+      completedAt: Number(row.completedAt) || 0,
+    };
+  }).reverse();
+  return { jobs: jobs };
+});
+
 const addStreamerPromoCandidate = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const data = request.data || {};
@@ -1241,42 +1457,12 @@ const addStreamerPromoCandidate = onCall(async (request) => {
       !pathMatch || pathMatch[1].toLowerCase() !== soopId || parsedUrl.search || parsedUrl.hash) {
     throw new HttpsError('invalid-argument', '방송국 아이디와 일치하는 SOOP 글쓰기 주소만 등록할 수 있습니다.');
   }
-
-  const db = getDatabase();
-  const [verifiedSnap, candidatesSnap, seedSnap, removedPromoSnap] = await Promise.all([
-    db.ref('streamerVerifications').get(),
-    db.ref('adminCenter/streamerPromoCandidates').get(),
-    db.ref('adminCenter/streamerPromoSeed').get(),
-    db.ref('adminCenter/streamerPromoRemoved').get(),
-  ]);
-  const removedPromoIds = removedPromoSnap.val() || {};
-  const entries = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val())
-    .filter(function (entry) { return !isPromoEntryRemoved(entry, removedPromoIds); });
-  const normalizedNickname = nickname.toLocaleLowerCase();
-  const duplicate = entries.find(function (entry) {
-    return String(entry.soopId || '').toLowerCase() === soopId ||
-      String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === normalizedNickname;
-  });
-  if (duplicate) {
-    throw new HttpsError('already-exists', '이미 홍보 리스트에 등록된 닉네임 또는 SOOP 아이디입니다: ' + (duplicate.nickname || duplicate.soopId));
-  }
-
-  const now = Date.now();
-  const updates = {};
-  updates['adminCenter/streamerPromoCandidates/' + soopId] = {
+  const queued = await enqueueStreamerPromoJob(request, adminUid, 'addCandidate', {
     nickname: nickname,
     soopId: soopId,
     writeUrl: writeUrl,
-    createdAt: now,
-    updatedAt: now,
-    createdBy: adminUid,
-    updatedBy: adminUid,
-  };
-  updates['adminCenter/streamerPromoRemoved/' + soopId] = null;
-  updates['adminCenter/streamerPromoExcluded/' + soopId] = null;
-  await db.ref().update(updates);
-  await logToAdminAuditLog(db, request, '스트리머 홍보 후보 추가', nickname + ' (@' + soopId + ')');
-  return { ok: true, nickname: nickname, soopId: soopId, writeUrl: writeUrl };
+  });
+  return { ok: true, queued: true, jobId: queued.jobId, nickname: nickname, soopId: soopId, writeUrl: writeUrl };
 });
 
 const removeStreamerPromoCandidate = onCall(async (request) => {
@@ -1343,7 +1529,7 @@ const removeStreamerPromoCandidate = onCall(async (request) => {
 });
 
 const setStreamerPromoExclusion = onCall(async (request) => {
-  await requireAdmin(request);
+  const adminUid = await requireAdmin(request);
   const data = request.data || {};
   const nickname = String(data.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim();
   const soopId = normalizeSoopId(data.soopId);
@@ -1352,31 +1538,12 @@ const setStreamerPromoExclusion = onCall(async (request) => {
     throw new HttpsError('invalid-argument', '스트리머 닉네임과 SOOP 아이디를 확인해주세요.');
   }
 
-  const db = getDatabase();
-  const exclusionRef = db.ref('adminCenter/streamerPromoExcluded/' + soopId);
-  if (excluded) {
-    const [verifiedSnap, candidatesSnap, seedSnap, removedSnap] = await Promise.all([
-      db.ref('streamerVerifications').get(),
-      db.ref('adminCenter/streamerPromoCandidates').get(),
-      db.ref('adminCenter/streamerPromoSeed').get(),
-      db.ref('adminCenter/streamerPromoRemoved').get(),
-    ]);
-    const removed = removedSnap.val() || {};
-    const known = getKnownPromoEntries(seedSnap.val(), verifiedSnap.val(), candidatesSnap.val())
-      .filter(function (entry) { return !isPromoEntryRemoved(entry, removed); });
-    const registered = known.find(function (entry) {
-      return String(entry.soopId || '').toLowerCase() === soopId ||
-        String(entry.nickname || '').normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() === nickname.toLocaleLowerCase();
-    });
-    if (registered) {
-      throw new HttpsError('already-exists', '이미 홍보 리스트에 등록된 스트리머는 제외 목록에 추가할 수 없습니다.');
-    }
-    await exclusionRef.set(true);
-  } else {
-    await exclusionRef.remove();
-  }
-  await logToAdminAuditLog(db, request, excluded ? '홍보 후보 스트리머 제외' : '홍보 후보 스트리머 제외 해제', nickname + ' (@' + soopId + ')');
-  return { ok: true, excluded: excluded, nickname: nickname, soopId: soopId };
+  const queued = await enqueueStreamerPromoJob(request, adminUid, 'setExclusion', {
+    nickname: nickname,
+    soopId: soopId,
+    excluded: excluded,
+  });
+  return { ok: true, queued: true, jobId: queued.jobId, excluded: excluded, nickname: nickname, soopId: soopId };
 });
 
 const saveStreamerPromoLink = onCall(async (request) => {
@@ -4675,7 +4842,9 @@ module.exports = {
   removePromotedContent,
   migratePromotedStreamers,
   listStreamerPromoLinks,
+  listStreamerPromoJobs,
   addStreamerPromoCandidate,
+  processStreamerPromoJob,
   removeStreamerPromoCandidate,
   setStreamerPromoExclusion,
   saveStreamerPromoLink,
