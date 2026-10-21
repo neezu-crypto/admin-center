@@ -2922,20 +2922,13 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
 
   let closed = false;
   const db = getDatabase();
-  const requestRef = db.ref('onyuVn/streamerGameGiftRequests');
   const adminRef = db.ref('adminCenter/adminUids/' + adminUid);
   const writeEvent = (name, data) => {
     if (closed || response.destroyed) return;
     response.write('event: ' + name + '\ndata: ' + JSON.stringify(data || {}) + '\n\n');
   };
-  const onRequestValue = (snapshot) => {
-    const value = snapshot.val() || {};
-    const requests = Object.keys(value).map((id) => Object.assign({}, value[id] || {}, { requestId: id }))
-      .sort((a, b) => (Number(b.updatedAt || b.requestedAt) || 0) - (Number(a.updatedAt || a.requestedAt) || 0));
-    writeEvent('requests', { requests });
-  };
-  const onRequestError = (error) => {
-    console.error('SOOP 후원 자동 검증 백그라운드 실시간 구독 실패:', String(error && error.message || error).slice(0, 160));
+  const onAdminError = (error) => {
+    console.error('온이유 백그라운드 세션 관리자 권한 구독 실패:', String(error && error.message || error).slice(0, 160));
     writeEvent('stream-error', { reason: 'database-subscription-failed' });
     cleanup();
   };
@@ -2956,15 +2949,13 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     closed = true;
     clearInterval(heartbeat);
     clearTimeout(maxDuration);
-    requestRef.off('value', onRequestValue);
     adminRef.off('value', onAdminValue);
     if (!response.destroyed) response.end();
   }
   response.on('close', cleanup);
-  adminRef.on('value', onAdminValue, onRequestError);
-  // Onyu no longer accepts new gift requests. Keep legacy history available only
-  // to a directly authenticated admin. Background donation monitoring is disabled.
-  requestRef.on('value', onRequestValue, onRequestError);
+  adminRef.on('value', onAdminValue, onAdminError);
+  // 과거 신청 이력은 관리자가 필요할 때 onyuListStreamerGameGifts로 단건 조회한다.
+  // 신규 신청이 종료됐으므로 이 피드는 신청 목록을 실시간 구독하지 않는다.
 });
 
 const getLifeGameSponsorAutoVerificationDiagnostics = onCall(async (request) => {
