@@ -2875,12 +2875,6 @@ const onyuCreateGiftBackgroundMonitorSession = onCall(async (request) => {
   return { customToken: await auth.createCustomToken(monitorUid, monitorClaims) };
 });
 
-function onyuGiftHasEligibleBackgroundRequest(requests, now) {
-  return Object.values(requests || {}).some((gift) => gift && gift.status === 'pending' &&
-    normalizeSoopId(gift.donorSoopId) && Number(gift.balloons) === ONYU_STREAMER_GIFT_BALLOONS &&
-    Number(gift.donationCompletedAt) > 0 && Number(gift.requestedAt) > now - 24 * 60 * 60 * 1000);
-}
-
 const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB' }, async (request, response) => {
   const origin = String(request.get('Origin') || '');
   const allowedOrigin = origin === 'https://neezu-crypto.github.io' || /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
@@ -2961,7 +2955,6 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   let closed = false;
   let active = false;
   let activeSources = [];
-  let onyuRequests = {};
   let lifeGameRequests = {};
   let fanPagePendingRequests = {};
   let fanPageSponsorRequests = {};
@@ -2980,7 +2973,6 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   const sendMonitorState = (eventName = 'watch-state') => {
     const now = Date.now();
     activeSources = [];
-    if (onyuGiftHasEligibleBackgroundRequest(onyuRequests, now)) activeSources.push('onyu-vn');
     if (lifeGameSponsorHasEligibleBackgroundRequest(lifeGameRequests, now)) activeSources.push('streamer-life-game');
     if (fanPageViewerSubscriptionHasEligibleBackgroundRequest(fanPagePendingRequests, now,
       [LEGACY_FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS, FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS])) activeSources.push('streamer-fanpage');
@@ -2996,12 +2988,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     monitorStatusRef.update(statusUpdate).catch(() => null);
   };
   const onRequestValue = (snapshot) => {
-    onyuRequests = snapshot.val() || {};
-    if (accessMode === 'monitor') {
-      sendMonitorState();
-      return;
-    }
-    const value = onyuRequests;
+    const value = snapshot.val() || {};
     const requests = Object.keys(value).map((id) => Object.assign({}, value[id] || {}, { requestId: id }))
       .sort((a, b) => (Number(b.updatedAt || b.requestedAt) || 0) - (Number(a.updatedAt || a.requestedAt) || 0));
     writeEvent('requests', { requests });
@@ -3044,7 +3031,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     closed = true;
     clearInterval(heartbeat);
     clearTimeout(maxDuration);
-    requestRef.off('value', onRequestValue);
+    if (accessMode !== 'monitor') requestRef.off('value', onRequestValue);
     lifeGameRequestRef.off('value', onLifeGameRequestValue);
     fanPagePendingRef.off('value', onFanPagePendingValue);
     fanPageSponsorRequestRef.off('value', onFanPageSponsorRequestValue);
@@ -3060,7 +3047,9 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     fanPageSponsorRequestRef.on('value', onFanPageSponsorRequestValue, onRequestError);
   }
   adminRef.on('value', onAdminValue, onRequestError);
-  requestRef.on('value', onRequestValue, onRequestError);
+  // Onyu no longer accepts new gift requests. Keep this stream for the legacy
+  // admin history screen, but exclude it from the persistent donation monitor.
+  if (accessMode !== 'monitor') requestRef.on('value', onRequestValue, onRequestError);
 });
 
 const getLifeGameSponsorAutoVerificationDiagnostics = onCall(async (request) => {
