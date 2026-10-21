@@ -7,9 +7,6 @@ const { getDatabase } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
-  fanPageSponsorAdDonationCanMatch,
-  describeFanPageSponsorDonationCandidate,
-  fanPageSponsorAdHasEligibleBackgroundRequest,
   notificationFallsInDonationRequestWindow,
 } = require('./donation-verification');
 
@@ -2797,17 +2794,13 @@ const onyuGetViewerAccess = onCall(async (request) => {
 
 // 과거 신청의 후원 대조·검수 경로가 사용하는 기록 형식. 신규 구매·선물 신청은 받지 않는다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
-const FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS = 33;
 const FANPAGE_SPONSOR_ADS_PATH = 'streamerFanPageSponsorAds';
 const FANPAGE_SPONSOR_REQUESTS_PATH = 'streamerFanPageSponsorRequests';
 const FANPAGE_SPONSOR_PENDING_PATH = 'streamerFanPageSponsorPending';
 const FANPAGE_SPONSOR_CLAIMS_PATH = 'streamerFanPageSponsorPlacementClaims';
 const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_PATH = 'adminCenter/fanPageSponsorDonationDiagnostics';
-const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
-const FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS = 500;
 const FANPAGE_SPONSOR_MAX_ADS_PER_RAIL = 5;
 const FANPAGE_SPONSOR_MAX_ACTIVE_ADS = FANPAGE_SPONSOR_MAX_ADS_PER_RAIL * 2;
-const FANPAGE_SPONSOR_AD_WATCH_MS = 60 * 60 * 1000;
 const FANPAGE_SPONSOR_MAX_CAMPAIGN_MS = 30 * 24 * 60 * 60 * 1000;
 const ONYU_GIFT_MONITOR_UID_PREFIX = 'onyu_gift_monitor_';
 
@@ -2848,27 +2841,8 @@ async function resolveOnyuGiftReviewActor(request) {
 }
 
 const onyuCreateGiftBackgroundMonitorSession = onCall(async (request) => {
-  const adminUid = await requireAdmin(request);
-  // Background access is intentionally unavailable to the temporary email fallback:
-  // its owner must have an explicit adminCenter/adminUids registration.
-  if (!(await isAdminUid(adminUid))) {
-    throw new HttpsError('failed-precondition', '관리자 UID 등록을 마친 뒤 백그라운드 모니터링을 시작할 수 있습니다.');
-  }
-  const monitorUid = onyuGiftMonitorUid(adminUid);
-  const auth = getAuth();
-  try {
-    await auth.getUser(monitorUid);
-  } catch (error) {
-    if (!error || error.code !== 'auth/user-not-found') throw error;
-    try {
-      await auth.createUser({ uid: monitorUid });
-    } catch (createError) {
-      if (!createError || createError.code !== 'auth/uid-already-exists') throw createError;
-    }
-  }
-  const monitorClaims = { onyuGiftMonitor: true, onyuGiftAdminUid: adminUid };
-  await auth.setCustomUserClaims(monitorUid, monitorClaims);
-  return { customToken: await auth.createCustomToken(monitorUid, monitorClaims) };
+  await requireAdmin(request);
+  throw new HttpsError('failed-precondition', '고점체크 후원 백그라운드 감시가 중단되어 새 모니터링 세션을 만들 수 없습니다.');
 });
 
 const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB' }, async (request, response) => {
@@ -2900,7 +2874,6 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   }
 
   let decoded;
-  let accessMode;
   let adminUid;
   try {
     decoded = await getAuth().verifyIdToken(bearer[1]);
@@ -2914,11 +2887,10 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   }
   try {
     if (decoded.onyuGiftMonitor === true) {
-      adminUid = await requireOnyuGiftMonitorAdmin({ auth: { uid: decoded.uid, token: decoded } });
-      accessMode = 'monitor';
+      response.status(403).json({ reason: 'background-monitor-disabled', message: '고점체크 후원 백그라운드 감시는 중단되었습니다.' });
+      return;
     } else if (await isAdminUid(decoded.uid)) {
       adminUid = decoded.uid;
-      accessMode = 'admin';
     } else {
       console.warn('온이유 이용권 백그라운드 권한 거부:', {
         reason: 'admin-required',
@@ -2949,42 +2921,18 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
   response.flushHeaders();
 
   let closed = false;
-  let active = false;
-  let activeSources = [];
-  let fanPageSponsorRequests = {};
   const db = getDatabase();
   const requestRef = db.ref('onyuVn/streamerGameGiftRequests');
-  const fanPageSponsorRequestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH);
   const adminRef = db.ref('adminCenter/adminUids/' + adminUid);
-  const connectionId = require('node:crypto').randomBytes(12).toString('hex');
-  const monitorStatusRef = db.ref('adminCenter/donationVerificationMonitorStatus/' + adminUid + '/' + connectionId);
   const writeEvent = (name, data) => {
     if (closed || response.destroyed) return;
     response.write('event: ' + name + '\ndata: ' + JSON.stringify(data || {}) + '\n\n');
-  };
-  const sendMonitorState = (eventName = 'watch-state') => {
-    const now = Date.now();
-    activeSources = [];
-    if (fanPageSponsorAdHasEligibleBackgroundRequest(fanPageSponsorRequests, now)) activeSources.push('streamer-fanpage-sponsor');
-    active = activeSources.length > 0;
-    const expiresAt = active ? now + 60000 : 0;
-    writeEvent(eventName, { active, activeSources, expiresAt });
-    const statusUpdate = { watching: active, activeSources, lastWatchStateAt: now };
-    if (eventName === 'heartbeat') {
-      statusUpdate.active = true;
-      statusUpdate.lastHeartbeatAt = now;
-    }
-    monitorStatusRef.update(statusUpdate).catch(() => null);
   };
   const onRequestValue = (snapshot) => {
     const value = snapshot.val() || {};
     const requests = Object.keys(value).map((id) => Object.assign({}, value[id] || {}, { requestId: id }))
       .sort((a, b) => (Number(b.updatedAt || b.requestedAt) || 0) - (Number(a.updatedAt || a.requestedAt) || 0));
     writeEvent('requests', { requests });
-  };
-  const onFanPageSponsorRequestValue = (snapshot) => {
-    fanPageSponsorRequests = snapshot.val() || {};
-    if (accessMode === 'monitor') sendMonitorState();
   };
   const onRequestError = (error) => {
     console.error('SOOP 후원 자동 검증 백그라운드 실시간 구독 실패:', String(error && error.message || error).slice(0, 160));
@@ -2997,11 +2945,7 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     cleanup();
   };
   const heartbeat = setInterval(() => {
-    if (accessMode === 'monitor') {
-      // Recheck request windows while the feed stays open so expired sources stop without a new RTDB update.
-      sendMonitorState('heartbeat');
-    }
-    else writeEvent('heartbeat', { at: Date.now() });
+    writeEvent('heartbeat', { at: Date.now() });
   }, 20000);
   const maxDuration = setTimeout(() => {
     writeEvent('session-expiring', {});
@@ -3012,22 +2956,15 @@ const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB
     closed = true;
     clearInterval(heartbeat);
     clearTimeout(maxDuration);
-    if (accessMode !== 'monitor') requestRef.off('value', onRequestValue);
-    fanPageSponsorRequestRef.off('value', onFanPageSponsorRequestValue);
+    requestRef.off('value', onRequestValue);
     adminRef.off('value', onAdminValue);
-    if (accessMode === 'monitor') monitorStatusRef.remove().catch(() => null);
     if (!response.destroyed) response.end();
   }
   response.on('close', cleanup);
-  if (accessMode === 'monitor') {
-    monitorStatusRef.set({ connectedAt: Date.now(), lastHeartbeatAt: Date.now(), active: true, watching: false, activeSources: [], connectionId }).catch(() => null);
-    fanPageSponsorRequestRef.on('value', onFanPageSponsorRequestValue, onRequestError);
-  }
   adminRef.on('value', onAdminValue, onRequestError);
   // Onyu no longer accepts new gift requests. Keep legacy history available only
-  // to a directly authenticated admin; the restricted background monitor does
-  // not subscribe to Onyu, LifeGame, or fanpage viewer-subscription requests.
-  if (accessMode !== 'monitor') requestRef.on('value', onRequestValue, onRequestError);
+  // to a directly authenticated admin. Background donation monitoring is disabled.
+  requestRef.on('value', onRequestValue, onRequestError);
 });
 
 const getLifeGameSponsorAutoVerificationDiagnostics = onCall(async (request) => {
@@ -3548,187 +3485,6 @@ const OTHER_GAME_DONATION_REQUEST_SOURCES = [
 ];
 const OTHER_GAME_DONATION_REQUEST_WINDOW_MS = 20 * 60 * 1000;
 
-async function holdFreshRealtimeSnapshot(ref) {
-  let listener = null;
-  const snapshot = await new Promise((resolve, reject) => {
-    listener = (value) => resolve(value);
-    ref.on('value', listener, reject);
-  });
-  return { snapshot, release: () => ref.off('value', listener) };
-}
-
-async function commitFanPageSponsorAdApproval(db, adminUid, requestId, senderSoopId, balloons, observedAt, verificationMetadata) {
-  const requestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH + '/' + requestId);
-  const claimRef = db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId);
-  const adsRef = db.ref(FANPAGE_SPONSOR_ADS_PATH);
-  const claimToken = require('node:crypto').randomBytes(16).toString('hex');
-  const verifiedAt = Number(verificationMetadata.verifiedAt) || Date.now();
-  const held = [];
-  let claimPrepared = false;
-  let adCreatedByAttempt = false;
-  let adExpiresAt = 0;
-  let pendingRecord = null;
-  try {
-    for (const ref of [requestRef, claimRef, adsRef]) held.push(await holdFreshRealtimeSnapshot(ref));
-    pendingRecord = held[0].snapshot.val() || {};
-    if (pendingRecord.status === 'approved' && pendingRecord.verificationEventKey === verificationMetadata.verificationEventKey) {
-      const existingAd = pendingRecord.campaignId
-        ? (await db.ref(FANPAGE_SPONSOR_ADS_PATH + '/' + pendingRecord.campaignId).get()).val()
-        : null;
-      return { ok: true, status: 'approved', expiresAt: Number(existingAd && existingAd.expiresAt) || Number(pendingRecord.approvedUntil) || 0 };
-    }
-
-    const claimed = await requestRef.transaction((current) => {
-      if (!fanPageSponsorAdDonationCanMatch(current, senderSoopId, balloons, observedAt)) return;
-      const now = Date.now();
-      if (current.status === 'pending' && current.processingToken &&
-          now - Number(current.processingAt || now) < 2 * 60 * 1000) return;
-      return Object.assign({}, current, {
-        status: 'processing',
-        processingAt: now,
-        processingToken: claimToken,
-        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
-      });
-    }, undefined, false);
-    if (!claimed.committed) {
-      const current = claimed.snapshot.val() || {};
-      if (current.status === 'approved' && current.verificationEventKey === verificationMetadata.verificationEventKey) {
-        return { ok: true, status: 'approved', expiresAt: Number(current.approvedUntil) || 0 };
-      }
-      throw new HttpsError('failed-precondition', '홍보 신청이 더 이상 자동 승인 대기 상태가 아닙니다.');
-    }
-    pendingRecord = claimed.snapshot.val() || {};
-
-    const requestSoopId = normalizeSoopId(pendingRecord.soopId);
-    const rail = pendingRecord.rail === 'right' ? 'right' : pendingRecord.rail === 'left' ? 'left' : '';
-    const days = Number(pendingRecord.days);
-    if (!requestSoopId || !rail || !Number.isInteger(days) || days < 1 || days > 30 || days * 10 !== balloons) {
-      throw new HttpsError('failed-precondition', '홍보 신청의 스트리머·위치·기간 정보가 올바르지 않습니다.');
-    }
-
-    const requestClaim = await claimRef.transaction((current) => {
-      const now = Date.now();
-      if (!current || current.status !== 'pending' || normalizeSoopId(current.soopId) !== requestSoopId ||
-          current.rail !== rail || (current.verificationProcessingToken &&
-            now - Number(current.verificationProcessingAt || now) < 2 * 60 * 1000)) return;
-      return Object.assign({}, current, {
-        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
-        verificationProcessingAt: now,
-        verificationProcessingToken: claimToken,
-      });
-    }, undefined, false);
-    if (!requestClaim.committed) throw new HttpsError('failed-precondition', '홍보 자리 예약을 확인하지 못했습니다.');
-    claimPrepared = true;
-
-    const campaignId = requestId;
-    const now = Date.now();
-    adExpiresAt = now + days * 24 * 60 * 60 * 1000;
-    const savedAd = {
-      campaignId,
-      soopId: requestSoopId,
-      rail,
-      nickname: String(pendingRecord.nickname || '').slice(0, 40),
-      status: 'active',
-      startsAt: now,
-      expiresAt: adExpiresAt,
-      requestId,
-    };
-    const capacity = await adsRef.transaction((current) => {
-      const next = { ...(current && typeof current === 'object' ? current : {}) };
-      for (const [id, ad] of Object.entries(next)) {
-        if (!ad || ad.status !== 'active' || Number(ad.expiresAt) <= now) delete next[id];
-      }
-      const existing = next[campaignId];
-      if (existing && existing.status === 'active' && existing.requestId === requestId && existing.soopId === requestSoopId) return next;
-      if (Object.values(next).some((ad) => normalizeSoopId(ad && ad.soopId) === requestSoopId) ||
-          Object.keys(next).length >= FANPAGE_SPONSOR_MAX_ACTIVE_ADS ||
-          Object.values(next).filter((ad) => ad && ad.rail === rail).length >= FANPAGE_SPONSOR_MAX_ADS_PER_RAIL) return;
-      next[campaignId] = savedAd;
-      return next;
-    }, undefined, false);
-    const committedAd = (capacity.snapshot.val() || {})[campaignId];
-    if (!capacity.committed && !(committedAd && committedAd.status === 'active' && committedAd.requestId === requestId && committedAd.soopId === requestSoopId)) {
-      throw new HttpsError('resource-exhausted', '현재 홍보 칸이 모두 찼습니다. 운영자가 신청을 확인해야 합니다.');
-    }
-    const preexistingAd = (held[2].snapshot.val() || {})[campaignId];
-    adCreatedByAttempt = !!capacity.committed && !preexistingAd && committedAd && committedAd.requestId === requestId;
-    if (committedAd && Number(committedAd.expiresAt) > 0) adExpiresAt = Number(committedAd.expiresAt);
-
-    const activation = await claimRef.transaction((current) => {
-      if (!current || current.status !== 'pending' || current.verificationProcessingToken !== claimToken ||
-          normalizeSoopId(current.soopId) !== requestSoopId || current.rail !== rail) return;
-      return Object.assign({}, current, {
-        status: 'active',
-        expiresAt: adExpiresAt,
-        campaignId,
-        verificationEventKey: verificationMetadata.verificationEventKey,
-        verificationProcessingAt: null,
-        verificationProcessingToken: null,
-      });
-    }, undefined, false);
-    if (!activation.committed && !((activation.snapshot.val() || {}).status === 'active' &&
-        (activation.snapshot.val() || {}).campaignId === campaignId)) {
-      throw new HttpsError('aborted', '홍보 자리 예약을 노출 상태로 전환하지 못했습니다.');
-    }
-
-    const finalized = await requestRef.transaction((current) => {
-      if (!current || current.status !== 'processing' || current.processingToken !== claimToken) return;
-      return Object.assign({}, current, verificationMetadata, {
-        status: 'approved',
-        reviewedAt: Date.now(),
-        reviewedBy: adminUid,
-        campaignId,
-        approvedUntil: adExpiresAt,
-        processingAt: null,
-        processingToken: null,
-        verificationProcessingAt: null,
-        verificationProcessingToken: null,
-        updatedAt: Date.now(),
-      });
-    }, undefined, false);
-    const finalValue = finalized.snapshot.val() || {};
-    if (!finalized.committed && !(finalValue.status === 'approved' && finalValue.verificationEventKey === verificationMetadata.verificationEventKey)) {
-      throw new HttpsError('aborted', '신청 승인 결과를 저장하지 못했습니다. 운영자가 확인해야 합니다.');
-    }
-    await db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove().catch((error) => {
-      console.error('고점체크 후원 스트리머 대기 인덱스 정리 실패:', String(error && error.message || error).slice(0, 120));
-    });
-    return { ok: true, status: 'approved', expiresAt: adExpiresAt };
-  } catch (error) {
-    if (adCreatedByAttempt) await adsRef.child(requestId).transaction((current) =>
-      current && current.requestId === requestId && current.soopId === normalizeSoopId(pendingRecord && pendingRecord.soopId) ? null : current,
-    undefined, false).catch(() => null);
-    if (claimPrepared) await claimRef.transaction((current) => {
-      if (!current || (current.verificationProcessingToken !== claimToken &&
-          !(current.status === 'active' && current.campaignId === requestId &&
-            current.verificationEventKey === verificationMetadata.verificationEventKey))) return;
-      return Object.assign({}, current, {
-        status: 'pending',
-        expiresAt: Number(pendingRecord && pendingRecord.expiresAt) || Number(current.expiresAt) || Date.now(),
-        campaignId: null,
-        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
-        verificationProcessingAt: null,
-        verificationProcessingToken: null,
-      });
-    }, undefined, false).catch(() => null);
-    await requestRef.transaction((current) => {
-      if (!current || current.status !== 'processing' || current.processingToken !== claimToken) return;
-      return Object.assign({}, current, {
-        status: 'pending',
-        processingAt: null,
-        processingToken: null,
-        donationCompletedAt: Number(current.donationCompletedAt) || verifiedAt,
-        verificationProcessingAt: null,
-        verificationProcessingToken: null,
-        updatedAt: Date.now(),
-      });
-    }, undefined, false).catch(() => null);
-    throw error;
-  } finally {
-    held.forEach((item) => item.release());
-  }
-}
-
 function findOtherGameDonationRequestCandidates(sourceMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax) {
   const candidates = [];
   OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source) => {
@@ -3756,31 +3512,6 @@ function findOtherGameDonationRequestCandidates(sourceMaps, senderSoopId, balloo
   return candidates;
 }
 
-async function writeFanPageSponsorDonationDiagnostic(db, eventKey, details) {
-  if (!/^[a-f0-9]{40}$/.test(String(eventKey || ''))) return;
-  const now = Date.now();
-  const diagnosticsRef = db.ref(FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_PATH);
-  const recordRef = diagnosticsRef.child(eventKey);
-  await recordRef.transaction((current) => Object.assign({}, current || {}, details || {}, {
-    eventKey,
-    createdAt: Number(current && current.createdAt) || now,
-    updatedAt: now,
-  }), undefined, false);
-
-  // Admin-only diagnostic data is bounded even if SOOP notifications keep arriving.
-  // Keep at most 500 records from the last 90 days; no raw notification text or token is stored.
-  const allSnapshot = await diagnosticsRef.get();
-  const entries = Object.entries(allSnapshot.val() || {})
-    .sort((a, b) => (Number(a[1] && a[1].createdAt) || 0) - (Number(b[1] && b[1].createdAt) || 0));
-  const cutoff = now - FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_RETENTION_MS;
-  const removeCount = Math.max(0, entries.length - FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS);
-  const updates = {};
-  entries.forEach(([key, value], index) => {
-    if ((Number(value && value.createdAt) || 0) < cutoff || index < removeCount) updates[key] = null;
-  });
-  if (Object.keys(updates).length) await diagnosticsRef.update(updates);
-}
-
 const listFanPageSponsorDonationDiagnostics = onCall(async (request) => {
   await requireAdmin(request);
   const snapshot = await getDatabase().ref(FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_PATH).get();
@@ -3788,7 +3519,7 @@ const listFanPageSponsorDonationDiagnostics = onCall(async (request) => {
     .map(([eventKey, value]) => Object.assign({ eventKey }, value || {}))
     .sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
     .slice(0, 100);
-  return { ok: true, events, checkedAt: Date.now(), retentionDays: 90, maxRecords: FANPAGE_SPONSOR_DONATION_DIAGNOSTICS_MAX_RECORDS };
+  return { ok: true, events, checkedAt: Date.now(), legacyRecordsOnly: true };
 });
 
 function validFanPageSponsorRequestId(value) {
@@ -4121,7 +3852,7 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
   const exactTimestamp = request.data && request.data.exactTimestamp === true;
   const now = Date.now();
   if (!senderSoopId || !Number.isInteger(balloons) ||
-      !(balloons === FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS || (balloons >= 10 && balloons <= 300 && balloons % 10 === 0)) ||
+      !(balloons >= 10 && balloons <= 300 && balloons % 10 === 0) ||
       !Number.isFinite(observedAt) || observedAt < now - 2 * 60 * 1000 || observedAt > now + 30000 ||
       !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) || eventAtMin > eventAtMax ||
       eventAtMin < observedAt - 24 * 60 * 60 * 1000 || eventAtMax > observedAt + 30000 ||
@@ -4151,57 +3882,24 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     gameCandidates: [],
   };
   try {
-    const [onyuSnap, fanPageSponsorSnap, ...otherGameSnaps] = await Promise.all([
+    const [onyuSnap, ...otherGameSnaps] = await Promise.all([
       db.ref('onyuVn/streamerGameGiftRequests').get(),
-      db.ref(FANPAGE_SPONSOR_REQUESTS_PATH).get(),
       ...OTHER_GAME_DONATION_REQUEST_SOURCES.map((source) => db.ref(source.path).orderByChild('status').equalTo('pending').get()),
     ]);
     const onyuRequests = onyuSnap.val() || {};
-    const fanPageSponsorRequests = fanPageSponsorSnap.val() || {};
     const otherGameRequestMaps = {};
     OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source, index) => {
       otherGameRequestMaps[source.path] = otherGameSnaps[index].val() || {};
     });
     const onyuCandidates = Object.entries(onyuRequests).filter(([, item]) =>
       notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
-    const fanPageSponsorCandidates = Object.entries(fanPageSponsorRequests).filter(([, item]) =>
-      fanPageSponsorAdDonationCanMatch(item, senderSoopId, balloons, observedAt));
-    const matchedFanPageSponsorRequestIds = new Set(fanPageSponsorCandidates.map(([requestId]) => requestId));
-    const fanPageSponsorOtherDonationCandidates = Object.entries(fanPageSponsorRequests).filter(([requestId, item]) => {
-      if (!item || item.status !== 'pending' || matchedFanPageSponsorRequestIds.has(requestId) ||
-          normalizeSoopId(item.donorSoopId) !== senderSoopId) return false;
-      const requestedAt = Number(item.requestedAt) || 0;
-      const amountCouldMatch = Number(item.balloonCost) === balloons || Number(item.days) * 10 === balloons;
-      return amountCouldMatch && requestedAt > 0 && requestedAt <= observedAt &&
-        observedAt - requestedAt < FANPAGE_SPONSOR_AD_WATCH_MS;
-    }).map(([requestId, item]) => ({
-      gameKey: 'streamer-fanpage-sponsor',
-      requestType: 'sponsored-ad',
-      requestId,
-      requestedAt: Number(item.requestedAt) || 0,
-      expectedBalloons: Number(item.balloonCost) || 0,
-      donorMatch: true,
-    }));
-    const candidates = [
-      ...onyuCandidates.map(([requestId, item]) => ({ game: 'onyu-vn', requestId, item })),
-      ...fanPageSponsorCandidates.map(([requestId, item]) => ({ game: 'streamer-fanpage-sponsor', requestId, item })),
-    ];
-    const otherDonationCandidates = [
-      ...findOtherGameDonationRequestCandidates(otherGameRequestMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax),
-      ...fanPageSponsorOtherDonationCandidates,
-    ];
+    const candidates = onyuCandidates.map(([requestId, item]) => ({ game: 'onyu-vn', requestId, item }));
+    const otherDonationCandidates = findOtherGameDonationRequestCandidates(
+      otherGameRequestMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax,
+    );
     eventDetails.otherDonationCandidateCount = otherDonationCandidates.length;
     eventDetails.otherDonationCandidates = otherDonationCandidates.slice(0, 20);
     eventDetails.otherDonationCandidatesOmitted = Math.max(0, otherDonationCandidates.length - 20);
-    const fanPageSponsorDiagnosticCandidates = Object.entries(fanPageSponsorRequests)
-      .map(([requestId, item]) => describeFanPageSponsorDonationCandidate(
-        requestId, item, senderSoopId, balloons, observedAt,
-      ))
-      .filter(Boolean)
-      .sort((a, b) => (Number(b.requestedAt) || 0) - (Number(a.requestedAt) || 0));
-    eventDetails.sponsorAdCandidateCount = fanPageSponsorDiagnosticCandidates.length;
-    eventDetails.sponsorAdCandidates = fanPageSponsorDiagnosticCandidates.slice(0, 20);
-    eventDetails.sponsorAdCandidatesOmitted = Math.max(0, fanPageSponsorDiagnosticCandidates.length - 20);
     eventDetails.gameCandidateCount = candidates.length;
     eventDetails.gameCandidates = candidates.slice(0, 20).map((candidate) => ({
       game: candidate.game,
@@ -4213,11 +3911,6 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
       const reason = candidates.length > 1 || (candidates.length === 1 && otherDonationCandidates.length > 0)
         ? 'ambiguous-across-game-requests'
         : 'no-matching-pending-request';
-      if (eventDetails.sponsorAdCandidateCount > 0 || candidates.some((candidate) => candidate.game === 'streamer-fanpage-sponsor')) {
-        await writeFanPageSponsorDonationDiagnostic(db, eventKey, Object.assign({}, eventDetails, {
-          outcome: reason === 'ambiguous-across-game-requests' ? 'ambiguous' : 'not-matched', reason,
-        })).catch((error) => console.warn('고점체크 후원 자동검증 진단 저장 실패:', error && (error.code || error.message) || error));
-      }
       if (reason === 'ambiguous-across-game-requests') {
         await eventRef.update({ status: 'ambiguous', completedAt: Date.now(), claimToken: null, reason });
       } else {
@@ -4235,35 +3928,17 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
       verificationEventKey: eventKey,
       verifiedAt,
     };
-    let result;
-    if (candidate.game === 'onyu-vn') {
-      result = await processOnyuStreamerGameGiftReview(request, adminUid, candidate.requestId, 'approve', verificationEventMetadata);
-      result = Object.assign({}, result, {
-        gameKey: candidate.game,
-        targetNickname: String(candidate.item.targetNickname || ''),
-      });
-    } else {
-      result = await commitFanPageSponsorAdApproval(db, adminUid, candidate.requestId, senderSoopId,
-        balloons, observedAt, verificationEventMetadata);
-      result = Object.assign({}, result, {
-        gameKey: candidate.game,
-        targetNickname: String(candidate.item.nickname || ''),
-      });
-    }
+    const result = await processOnyuStreamerGameGiftReview(
+      request, adminUid, candidate.requestId, 'approve', verificationEventMetadata,
+    );
+    Object.assign(result, {
+      gameKey: candidate.game,
+      targetNickname: String(candidate.item.targetNickname || ''),
+    });
     await eventRef.update({ status: 'approved', requestId: candidate.requestId, gameKey: candidate.game, claimToken: null, approvedAt: Date.now() });
-    if (candidate.game === 'streamer-fanpage-sponsor' || eventDetails.sponsorAdCandidateCount > 0) {
-      await writeFanPageSponsorDonationDiagnostic(db, eventKey, Object.assign({}, eventDetails, {
-        outcome: 'approved', reason: '', matchedGame: candidate.game, matchedRequestId: candidate.requestId,
-      })).catch((error) => console.warn('고점체크 후원 자동검증 진단 저장 실패:', error && (error.code || error.message) || error));
-    }
     return Object.assign({}, result, { ok: true, eventKey, verificationSource: 'soop-donation-notification' });
   } catch (error) {
     await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false).catch(() => null);
-    if (Number(eventDetails.sponsorAdCandidateCount) > 0) {
-      await writeFanPageSponsorDonationDiagnostic(db, eventKey, Object.assign({}, eventDetails, {
-        outcome: 'error', reason: String(error && (error.code || error.message) || 'server-error').slice(0, 120),
-      })).catch(() => null);
-    }
     if (error instanceof HttpsError && ['failed-precondition', 'already-exists'].includes(error.code)) {
       return { ok: false, reason: 'request-no-longer-pending', eventKey };
     }
