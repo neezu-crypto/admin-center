@@ -2596,57 +2596,10 @@ const removeLifeGamePlayedStreamer = onCall(async (request) => {
   return { ok: true };
 });
 
-// 인생게임 관리형 봇(2026-08-30, streamer-life-game 62장) — 봇 수·1턴당 초·성향
-// 분포를 관리자가 조절하는 설정 화면. 실제 실행(턴 진행)은 streamer-life-game
-// 저장소의 예약 함수(runBotTurns)가 서버에서 알아서 도는 방식이라, 여기 설정
-// 화면은 lifeGame/botConfig 노드를 읽고/쓰기만 한다 — 페이지를 열어둘 필요 없음.
-const LIFEGAME_BOT_PERSONALITIES = ['wholesome', 'villain', 'explorer', 'gambler', 'romantic', 'workaholic'];
-
-const getLifeGameBotConfig = onCall(async (request) => {
-  await requireAdmin(request);
-  const db = getDatabase();
-  const [configSnap, botsSnap] = await Promise.all([
-    db.ref('lifeGame/botConfig').get(),
-    db.ref('lifeGame/bots').get()
-  ]);
-  const config = configSnap.val() || {};
-  const bots = botsSnap.val() || {};
-  const personalityWeights = {};
-  LIFEGAME_BOT_PERSONALITIES.forEach(function (p) {
-    personalityWeights[p] = (config.personalityWeights && Number(config.personalityWeights[p])) || 1;
-  });
-  return {
-    enabled: !!config.enabled,
-    botCount: config.botCount || 0,
-    secondsPerTurn: config.secondsPerTurn || 30,
-    personalityWeights: personalityWeights,
-    bots: Object.keys(bots).map(function (uid) {
-      return { uid: uid, personality: bots[uid].personality, createdAt: bots[uid].createdAt || null, lastTurnAt: bots[uid].lastTurnAt || null };
-    })
-  };
-});
-
-const setLifeGameBotConfig = onCall(async (request) => {
-  await requireAdmin(request);
-  const data = request.data || {};
-  const enabled = !!data.enabled;
-  const botCount = Math.max(0, Math.min(50, Math.round(Number(data.botCount) || 0)));
-  const secondsPerTurn = Math.max(5, Math.min(600, Math.round(Number(data.secondsPerTurn) || 30)));
-  const personalityWeights = {};
-  LIFEGAME_BOT_PERSONALITIES.forEach(function (p) {
-    const raw = data.personalityWeights && data.personalityWeights[p];
-    personalityWeights[p] = Math.max(0, Number(raw) || 0);
-  });
-  const db = getDatabase();
-  await db.ref('lifeGame/botConfig').set({ enabled: enabled, botCount: botCount, secondsPerTurn: secondsPerTurn, personalityWeights: personalityWeights, updatedAt: Date.now() });
-  await logToAdminAuditLog(db, request, '인생게임 봇 설정 변경', 'enabled=' + enabled + ', botCount=' + botCount + ', secondsPerTurn=' + secondsPerTurn + 's');
-  return { ok: true };
-});
-
 // 인생게임 후원 스트리머 배너(2026-09-09) — soop-stock-market의 배너 신청
 // 승인/거절과 동일 원칙(후원창 후원 확인 → 승인)이지만, streamer-life-game은
-// adminAction 같은 단일 디스패처가 없어(06번 원칙 - 각 게임 관례를 따름) 봇
-// 설정과 동일하게 admin-center가 직접 lifeGame/currentSponsor를 조작한다.
+// adminAction 같은 단일 디스패처가 없어(06번 원칙 - 각 게임 관례를 따름)
+// admin-center가 lifeGame/currentSponsor를 직접 조작한다.
 // 검색화면·엔딩화면·멀티플레이 참가·모바일 하단배너 네 자리 전부가 이 단일
 // 노드를 구독하므로 슬롯은 1개뿐 — 이미 진행 중인 후원이 있으면(soop-stock-
 // market 배너와 동일하게) 남은 기간에 이어서 연장한다.
@@ -4818,8 +4771,6 @@ module.exports = {
   listLifeGamePlayedStreamers,
   addLifeGamePlayedStreamer,
   removeLifeGamePlayedStreamer,
-  getLifeGameBotConfig,
-  setLifeGameBotConfig,
   lifeGameApproveSponsorRequest,
   getLifeGameSponsorAutoVerificationDiagnostics,
   listFanPageSponsorDonationDiagnostics,
