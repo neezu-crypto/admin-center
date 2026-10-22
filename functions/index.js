@@ -2094,7 +2094,7 @@ const notifyFanPageViewerSubscriptionRequest = onValueCreated('/streamerFanPageV
     '후원자 닉네임: ' + nickname + (donorSoopId ? ' · SOOP 아이디: @' + donorSoopId : '') +
     ' · 별풍선 ' + (Number(data.balloonCost) || FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS) + '개 / 30일\n' +
     '신청 시각: ' + requestedAtText + '\n' +
-    '후원 완료 신호 후 자동 대조하며, 일치하지 않거나 여러 신청과 겹치는 경우 팬페이지 관리자 통계에서 확인해 주세요.\n' +
+    '후원 완료 알리기는 참고용 신청자 신호입니다. 자동 감시·자동 검증·자동 승인은 하지 않으며, 팬페이지 관리자 화면에서 후원 내역을 확인한 뒤 수동 승인해 주세요.\n' +
     'https://neezu-crypto.github.io/streamer-fanpage/'
   );
 });
