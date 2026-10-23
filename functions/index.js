@@ -1450,27 +1450,20 @@ const deleteStreamerPromoJob = onCall(async (request) => {
 
   const db = getDatabase();
   const jobRef = db.ref('adminCenter/streamerPromoJobs/' + jobId);
-  let removedJob = null;
-  let activeStatus = '';
-  const transaction = await jobRef.transaction(function (current) {
-    removedJob = null;
-    activeStatus = '';
-    if (!current) return;
-    const status = String(current.status || '');
-    if (status !== 'completed' && status !== 'failed') {
-      activeStatus = status;
-      return;
-    }
-    removedJob = current;
-    return null;
-  }, undefined, false);
-
-  if (!transaction.committed) {
-    if (activeStatus) {
-      throw new HttpsError('failed-precondition', '처리 중인 작업은 삭제할 수 없습니다. 완료 후 다시 시도해주세요.');
-    }
-    throw new HttpsError('not-found', '삭제할 작업을 찾을 수 없습니다. 목록을 새로고침해주세요.');
+  const jobSnapshot = await jobRef.get();
+  const removedJob = jobSnapshot.val();
+  if (!removedJob) {
+    // Allow duplicate/stale delete clicks to complete cleanly; the client refreshes the list.
+    return { ok: true, alreadyDeleted: true, jobId: jobId };
   }
+  const status = String(removedJob.status || '');
+  if (status !== 'completed' && status !== 'failed') {
+    throw new HttpsError('failed-precondition', '처리 중인 작업은 삭제할 수 없습니다. 완료 후 다시 시도해주세요.');
+  }
+
+  // Terminal job statuses do not transition back to active, so a direct remove avoids
+  // transaction retries incorrectly reporting a still-visible job as missing.
+  await jobRef.remove();
 
   const label = String(removedJob.operation || '홍보 작업') + ' · ' +
     String(removedJob.nickname || removedJob.soopId || '스트리머') + ' · ' + jobId;
