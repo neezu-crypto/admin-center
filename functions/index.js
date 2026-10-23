@@ -1441,6 +1441,47 @@ const listStreamerPromoJobs = onCall(async (request) => {
   return { jobs: jobs };
 });
 
+const deleteStreamerPromoJob = onCall(async (request) => {
+  await requireAdmin(request);
+  const jobId = String((request.data || {}).jobId || '');
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(jobId)) {
+    throw new HttpsError('invalid-argument', '삭제할 홍보 작업 ID가 올바르지 않습니다.');
+  }
+
+  const db = getDatabase();
+  const jobRef = db.ref('adminCenter/streamerPromoJobs/' + jobId);
+  let removedJob = null;
+  let activeStatus = '';
+  const transaction = await jobRef.transaction(function (current) {
+    removedJob = null;
+    activeStatus = '';
+    if (!current) return;
+    const status = String(current.status || '');
+    if (status !== 'completed' && status !== 'failed') {
+      activeStatus = status;
+      return;
+    }
+    removedJob = current;
+    return null;
+  }, undefined, false);
+
+  if (!transaction.committed) {
+    if (activeStatus) {
+      throw new HttpsError('failed-precondition', '처리 중인 작업은 삭제할 수 없습니다. 완료 후 다시 시도해주세요.');
+    }
+    throw new HttpsError('not-found', '삭제할 작업을 찾을 수 없습니다. 목록을 새로고침해주세요.');
+  }
+
+  const label = String(removedJob.operation || '홍보 작업') + ' · ' +
+    String(removedJob.nickname || removedJob.soopId || '스트리머') + ' · ' + jobId;
+  try {
+    await logToAdminAuditLog(db, request, '홍보 백그라운드 작업 기록 삭제', label);
+  } catch (error) {
+    console.error('홍보 백그라운드 작업 삭제 감사 로그 기록 실패:', error);
+  }
+  return { ok: true, jobId: jobId };
+});
+
 const addStreamerPromoCandidate = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const data = request.data || {};
@@ -4794,6 +4835,7 @@ module.exports = {
   migratePromotedStreamers,
   listStreamerPromoLinks,
   listStreamerPromoJobs,
+  deleteStreamerPromoJob,
   addStreamerPromoCandidate,
   processStreamerPromoJob,
   removeStreamerPromoCandidate,

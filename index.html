@@ -881,7 +881,7 @@
           <span id="streamerPromoJobStatus" class="hint" style="margin:0;" role="status" aria-live="polite">최근 작업을 불러오는 중…</span>
           <button id="streamerPromoJobRefreshBtn" class="perm-refresh-btn" type="button" style="margin-left:auto;">작업 상태 새로고침</button>
         </div>
-        <p class="hint" style="margin:5px 0 0;">‘서버 접수’가 표시된 뒤에는 SOOP·관리자센터 탭을 닫아도 처리가 계속됩니다. 실패한 작업은 사유가 여기에 남습니다.</p>
+        <p class="hint" style="margin:5px 0 0;">‘서버 접수’가 표시된 뒤에는 SOOP·관리자센터 탭을 닫아도 처리가 계속됩니다. 실패한 작업은 사유가 여기에 남으며, 완료·실패 작업 기록은 삭제할 수 있습니다.</p>
         <div id="streamerPromoJobList" style="margin-top:6px;"></div>
       </div>
       <div id="streamerPromoUnlistedCard" style="margin-top:12px; padding:12px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
@@ -1255,6 +1255,7 @@
   const migratePromotedStreamersFn = httpsCallable(functions, 'migratePromotedStreamers');
   const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
   const listStreamerPromoJobsFn = httpsCallable(functions, 'listStreamerPromoJobs');
+  const deleteStreamerPromoJobFn = httpsCallable(functions, 'deleteStreamerPromoJob');
   const addStreamerPromoCandidateFn = httpsCallable(functions, 'addStreamerPromoCandidate');
   const removeStreamerPromoCandidateFn = httpsCallable(functions, 'removeStreamerPromoCandidate');
   const setStreamerPromoExclusionFn = httpsCallable(functions, 'setStreamerPromoExclusion');
@@ -3283,6 +3284,29 @@
       time.style.margin = '0';
       time.textContent = job.updatedAt ? new Date(job.updatedAt).toLocaleString('ko-KR') : '';
       row.append(name, status, time);
+      if (job.status === 'completed' || job.status === 'failed') {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'perm-refresh-btn';
+        deleteBtn.style.cssText = 'margin-left:auto; padding:4px 9px; font-size:11px;';
+        deleteBtn.textContent = '삭제';
+        deleteBtn.setAttribute('aria-label', (name.textContent || '홍보 작업') + ' 기록 삭제');
+        deleteBtn.addEventListener('click', async function () {
+          if (!job.jobId || !window.confirm((name.textContent || '홍보 작업') + ' 기록을 삭제할까요?')) return;
+          deleteBtn.disabled = true;
+          deleteBtn.textContent = '삭제 중…';
+          try {
+            await deleteStreamerPromoJobFn({ jobId: job.jobId });
+            await loadStreamerPromoJobs();
+          } catch (error) {
+            console.error('홍보 백그라운드 작업 기록 삭제 실패:', error);
+            deleteBtn.disabled = false;
+            deleteBtn.textContent = '삭제';
+            window.alert('작업 기록 삭제에 실패했습니다: ' + String(error && error.message || error || '오류'));
+          }
+        });
+        row.appendChild(deleteBtn);
+      }
       const errorMessage = job.errorMessage || job.lastError || '';
       if (errorMessage) {
         const error = document.createElement('span');
