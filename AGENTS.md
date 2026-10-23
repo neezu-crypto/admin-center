@@ -157,6 +157,16 @@
 함수명을 지정한다.
 Firebase Functions 배포 시 `codebase: admincenter`, 함수명 지정 필수
 (`firebase deploy --only functions:admincenter:<함수명>,...`).
+- **홍보 백그라운드 작업 삭제**: 원본은 RTDB `adminCenter/streamerPromoJobs/{jobId}`이며,
+  실제 writer(`enqueueStreamerPromoJob`, `runStreamerPromoJob`)의 키와 상태값을 확인한다.
+  목록 화면의 항목만 믿지 말고 서버에서 현재 레코드를 다시 읽는다. `completed`/`failed`만
+  삭제하고 `queued`/`processing` 작업은 보존한다. 단건 삭제는 이미 사라진 키도 멱등 성공으로
+  처리하고, 클라이언트는 성공·실패 뒤 서버 목록을 다시 불러온다. 전체 삭제는 서버에서 모든
+  레코드를 검사해 완료·실패만 삭제하고 삭제·보존 건수를 반환하며 감사 로그를 남긴다.
+- 이 경로의 RTDB 삭제에 transaction 결과를 존재 여부 판정으로 사용하지 않는다. 작업 레코드가
+  남아 있는데 transaction이 `not-found`를 반환하는 문제가 재현됐으므로, 현재값을 직접 읽고
+  상태를 확인한 뒤 삭제한다. 새 callable은 전역 함수명 충돌을 먼저 확인하고 정확한 함수명만
+  `admincenter` codebase에서 배포한다.
 
 ### 2.2 interior-3d-viewer (스트리머 배경시장)
 Three.js 기반 OBS 방송 배경 화면 모음. 번들러 없는 정적 HTML, 페이지별 독립 파일.

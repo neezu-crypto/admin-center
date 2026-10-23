@@ -880,8 +880,9 @@
           <strong>홍보 링크 백그라운드 작업</strong>
           <span id="streamerPromoJobStatus" class="hint" style="margin:0;" role="status" aria-live="polite">최근 작업을 불러오는 중…</span>
           <button id="streamerPromoJobRefreshBtn" class="perm-refresh-btn" type="button" style="margin-left:auto;">작업 상태 새로고침</button>
+          <button id="streamerPromoJobsDeleteAllBtn" class="perm-refresh-btn" type="button" style="border-color:#d9422b;color:#bd3d36;">완료·실패 전체 삭제</button>
         </div>
-        <p class="hint" style="margin:5px 0 0;">‘서버 접수’가 표시된 뒤에는 SOOP·관리자센터 탭을 닫아도 처리가 계속됩니다. 실패한 작업은 사유가 여기에 남으며, 완료·실패 작업 기록은 삭제할 수 있습니다.</p>
+        <p class="hint" style="margin:5px 0 0;">‘서버 접수’가 표시된 뒤에는 SOOP·관리자센터 탭을 닫아도 처리가 계속됩니다. 실패한 작업은 사유가 여기에 남으며, 완료·실패 작업 기록은 개별 또는 전체 삭제할 수 있습니다. 서버 접수·처리 중 작업은 전체 삭제에서 보존됩니다.</p>
         <div id="streamerPromoJobList" style="margin-top:6px;"></div>
       </div>
       <div id="streamerPromoUnlistedCard" style="margin-top:12px; padding:12px; border:1px solid rgba(20,20,22,0.12); border-radius:10px; background:rgba(20,20,22,0.025);">
@@ -1256,6 +1257,7 @@
   const listStreamerPromoLinksFn = httpsCallable(functions, 'listStreamerPromoLinks');
   const listStreamerPromoJobsFn = httpsCallable(functions, 'listStreamerPromoJobs');
   const deleteStreamerPromoJobFn = httpsCallable(functions, 'deleteStreamerPromoJob');
+  const deleteCompletedStreamerPromoJobsFn = httpsCallable(functions, 'deleteCompletedStreamerPromoJobs');
   const addStreamerPromoCandidateFn = httpsCallable(functions, 'addStreamerPromoCandidate');
   const removeStreamerPromoCandidateFn = httpsCallable(functions, 'removeStreamerPromoCandidate');
   const setStreamerPromoExclusionFn = httpsCallable(functions, 'setStreamerPromoExclusion');
@@ -1571,6 +1573,7 @@
   const streamerPromoJobStatusEl = document.getElementById('streamerPromoJobStatus');
   const streamerPromoJobListEl = document.getElementById('streamerPromoJobList');
   const streamerPromoJobRefreshBtn = document.getElementById('streamerPromoJobRefreshBtn');
+  const streamerPromoJobsDeleteAllBtn = document.getElementById('streamerPromoJobsDeleteAllBtn');
   const streamerPromoRecentListEl = document.getElementById('streamerPromoRecentList');
   const streamerPromoLinksListEl = document.getElementById('streamerPromoLinksList');
   const streamerPromoBatchCountEl = document.getElementById('streamerPromoBatchCount');
@@ -3302,6 +3305,7 @@
             console.error('홍보 백그라운드 작업 기록 삭제 실패:', error);
             deleteBtn.disabled = false;
             deleteBtn.textContent = '삭제';
+            await loadStreamerPromoJobs();
             window.alert('작업 기록 삭제에 실패했습니다: ' + String(error && error.message || error || '오류'));
           }
         });
@@ -4318,6 +4322,25 @@
   streamerPromoLinksRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
   streamerPromoUnlistedRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
   streamerPromoJobRefreshBtn.addEventListener('click', watchStreamerPromoJobs);
+  streamerPromoJobsDeleteAllBtn.addEventListener('click', async function () {
+    if (!window.confirm('완료 또는 실패한 홍보 백그라운드 작업 기록을 전부 삭제할까요? 서버 접수·처리 중 작업은 보존됩니다.')) return;
+    streamerPromoJobsDeleteAllBtn.disabled = true;
+    const originalText = streamerPromoJobsDeleteAllBtn.textContent;
+    streamerPromoJobsDeleteAllBtn.textContent = '삭제 중…';
+    try {
+      const result = await deleteCompletedStreamerPromoJobsFn();
+      const data = result && result.data || {};
+      await loadStreamerPromoJobs();
+      streamerPromoJobStatusEl.textContent = '완료·실패 ' + (Number(data.deletedCount) || 0) + '건 삭제 · 삭제 대상 외 ' + (Number(data.preservedCount) || 0) + '건 보존';
+    } catch (error) {
+      console.error('홍보 백그라운드 작업 전체 삭제 실패:', error);
+      await loadStreamerPromoJobs();
+      window.alert('작업 기록 전체 삭제에 실패했습니다: ' + String(error && error.message || error || '오류'));
+    } finally {
+      streamerPromoJobsDeleteAllBtn.disabled = false;
+      streamerPromoJobsDeleteAllBtn.textContent = originalText;
+    }
+  });
   streamerPromoClearCompletedBtn.addEventListener('click', function () {
     if (!window.confirm('홍보 완료로 체크된 항목을 모두 해제할까요?')) return;
     streamerPromoClearCompletedBtn.disabled = true;

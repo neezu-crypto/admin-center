@@ -1475,6 +1475,37 @@ const deleteStreamerPromoJob = onCall(async (request) => {
   return { ok: true, jobId: jobId };
 });
 
+const deleteCompletedStreamerPromoJobs = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const jobsRef = db.ref('adminCenter/streamerPromoJobs');
+  const snapshot = await jobsRef.get();
+  const updates = {};
+  let deletedCount = 0;
+  let preservedCount = 0;
+
+  Object.entries(snapshot.val() || {}).forEach(function ([jobId, job]) {
+    const status = String(job && job.status || '');
+    if ((status === 'completed' || status === 'failed') && /^[A-Za-z0-9_-]{8,80}$/.test(jobId)) {
+      updates[jobId] = null;
+      deletedCount += 1;
+    } else {
+      preservedCount += 1;
+    }
+  });
+
+  if (deletedCount) {
+    await jobsRef.update(updates);
+    try {
+      await logToAdminAuditLog(db, request, '홍보 백그라운드 작업 기록 전체 삭제',
+        '완료·실패 ' + deletedCount + '건 삭제, 미완료 ' + preservedCount + '건 보존');
+    } catch (error) {
+      console.error('홍보 백그라운드 작업 전체 삭제 감사 로그 기록 실패:', error);
+    }
+  }
+  return { ok: true, deletedCount: deletedCount, preservedCount: preservedCount };
+});
+
 const addStreamerPromoCandidate = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const data = request.data || {};
@@ -4829,6 +4860,7 @@ module.exports = {
   listStreamerPromoLinks,
   listStreamerPromoJobs,
   deleteStreamerPromoJob,
+  deleteCompletedStreamerPromoJobs,
   addStreamerPromoCandidate,
   processStreamerPromoJob,
   removeStreamerPromoCandidate,
