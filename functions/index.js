@@ -2290,13 +2290,8 @@ const notifyVerifiedStreamerVisit = onValueCreated('/verifiedStreamerVisits/{ent
     ? data.nickname + (data.soopId ? ' (@' + data.soopId + ')' : '')
     : 'uid: ' + (data.uid || '(알 수 없음)');
   const liveUrl = streamerLiveUrlForData(data);
-  const visitedAt = Number(data.visitedAt);
-  const visitTime = Number.isFinite(visitedAt) && visitedAt > 0
-    ? new Date(visitedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })
-    : '시각 정보 없음';
   await sendDiscordNotification(
     '👋 **인증 스트리머 접속 — ' + marketLabel + '**\n' + name +
-    '\n접속 시각: ' + visitTime +
     (liveUrl ? '\n라이브: ' + liveUrl : '') + '\n오늘 첫 접속입니다.'
   );
 });
