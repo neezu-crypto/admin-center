@@ -1914,6 +1914,7 @@ const STREAMER_VERIFY_SOURCE_LABELS = {
   'streamer-fanpage': '팬페이지',
   'streamer-gallery': '갤러리',
   'streamer-messenger': '스트리머 메신저',
+  'streamer-webtoon': '스트리머 웹툰',
   'onyu-vn': '온 이유',
 };
 const notifyStockVerifyRequest = onValueCreated('/streamerVerificationRequests/{id}', async (event) => {
