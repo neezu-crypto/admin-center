@@ -190,7 +190,55 @@
     if (reply) reply({ ok: data.ok === true, reason: String(data.reason || ''), targetNickname: String(data.targetNickname || '') });
   });
 
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__streamerFanPageSubscriptionRequestWatch !== true) return;
+    const requestId = String(data.requestId || '').trim();
+    const active = data.active === true;
+    const soopId = String(data.soopId || '').trim().toLowerCase();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(requestId) || (active && !/^[a-z0-9]{2,20}$/.test(soopId))) return;
+    if (extensionContextUnavailable || !hasValidExtensionContext()) {
+      extensionContextUnavailable = true;
+      trace(requestId, 'fanpage-subscription-watch-skipped-context-unavailable', { active: active });
+      return;
+    }
+    chrome.runtime.sendMessage({
+      type: 'watchFanpageSubscriptionComment',
+      active: active,
+      requestId: requestId,
+      soopId: active ? soopId : '',
+      requestedAt: Number(data.requestedAt) || Date.now(),
+      expiresAt: Number(data.expiresAt) || 0,
+    }).then(function (result) {
+      trace(requestId, result && result.ok ? 'fanpage-subscription-watch-updated' : 'fanpage-subscription-watch-failed', {
+        active: active,
+        deliveredCount: Number(result && result.deliveredCount) || 0,
+        tabCount: Number(result && result.tabCount) || 0,
+        reason: String(result && result.reason || ''),
+      });
+    }).catch(function (error) {
+      const invalidated = /Extension context invalidated/i.test(String(error && error.message || error));
+      if (invalidated) extensionContextUnavailable = true;
+      trace(requestId, invalidated ? 'fanpage-subscription-watch-skipped-context-unavailable' : 'fanpage-subscription-watch-failed', {
+        active: active,
+        error: String(error && error.message || error).slice(0, 120),
+      });
+    });
+  });
+
   chrome.runtime.onMessage.addListener(function (message, sender, sendResponse) {
+    if (message && message.type === 'fanpageSubscriptionCommentCandidate') {
+      window.postMessage({
+        __streamerFanPageSubscriptionCommentCandidate: true,
+        requestId: String(message.requestId || ''),
+        code: String(message.code || ''),
+        soopId: String(message.soopId || ''),
+        postUrl: String(message.postUrl || ''),
+      }, location.origin);
+      sendResponse({ ok: true });
+      return false;
+    }
     if (message && message.type === 'promoBatchStatusUpdate') {
       window.postMessage({ __soopPromoBatchStatus: true, state: message.state || {} }, location.origin);
       return false;

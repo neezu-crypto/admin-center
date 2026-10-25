@@ -17,6 +17,8 @@ const diagnosticCheckLogKeys = new Set();
 const ONYU_GIFT_WATCH_KEY = 'soopOnyuGameGiftNotificationWatch';
 const ONYU_GIFT_MONITOR_SESSION_KEY = 'onyuGiftBackgroundMonitorSession';
 const ONYU_GIFT_MONITOR_ALARM = 'onyuGiftBackgroundMonitorReconnect';
+const FANPAGE_SUBSCRIPTION_WATCHES_KEY = 'fanpageSubscriptionCommentWatches';
+const FANPAGE_SUBSCRIPTION_WATCH_TTL_MS = 30 * 60 * 1000;
 const ONYU_GIFT_MONITOR_API_KEY = 'AIzaSyAZcjQPHphENs-Bb7IfdL2qTtOMhJrRP54';
 const ONYU_GIFT_MONITOR_AUTH_URL = 'https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=' + ONYU_GIFT_MONITOR_API_KEY;
 const ONYU_GIFT_MONITOR_REFRESH_URL = 'https://securetoken.googleapis.com/v1/token?key=' + ONYU_GIFT_MONITOR_API_KEY;
@@ -825,6 +827,106 @@ async function handlePromoBatchWriterMessage(message, sender, sendResponse) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message.type !== 'string') return false;
+
+  if (message.type === 'getFanpageSubscriptionCommentWatches') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
+    const isSoopPost = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
+      ['sooplive.com', 'www.sooplive.com'].includes(sourceUrl.hostname) && /^\/station\/[a-z0-9]{2,20}\/post\//i.test(sourceUrl.pathname);
+    if (!isSoopPost) {
+      sendResponse({ ok: false, watches: [] });
+      return false;
+    }
+    chrome.storage.local.get(FANPAGE_SUBSCRIPTION_WATCHES_KEY).then(async (saved) => {
+      const all = saved[FANPAGE_SUBSCRIPTION_WATCHES_KEY] || {};
+      const now = Date.now();
+      const watches = Object.keys(all).filter((requestId) => Number(all[requestId] && all[requestId].expiresAt) > now)
+        .map((requestId) => ({ requestId, soopId: all[requestId].soopId, expiresAt: Number(all[requestId].expiresAt) }));
+      Object.keys(all).forEach((requestId) => {
+        if (Number(all[requestId] && all[requestId].expiresAt) <= now) delete all[requestId];
+      });
+      await chrome.storage.local.set({ [FANPAGE_SUBSCRIPTION_WATCHES_KEY]: all });
+      sendResponse({ ok: true, watches });
+    }).catch((error) => sendResponse({ ok: false, watches: [], reason: String(error && error.message || error).slice(0, 100) }));
+    return true;
+  }
+
+  if (message.type === 'watchFanpageSubscriptionComment') {
+    const requestId = String(message.requestId || '').trim();
+    const active = message.active === true;
+    const soopId = String(message.soopId || '').trim().toLowerCase();
+    const requestedAt = Number(message.requestedAt) || Date.now();
+    if (!isAllowedAdminSender(sender) || !/^[A-Za-z0-9_-]{8,64}$/.test(requestId) ||
+        (active && !/^[a-z0-9]{2,20}$/.test(soopId))) {
+      sendResponse({ ok: false, reason: 'invalid-admin-subscription-watch' });
+      return false;
+    }
+    chrome.storage.local.get(FANPAGE_SUBSCRIPTION_WATCHES_KEY).then(async (saved) => {
+      const watches = saved[FANPAGE_SUBSCRIPTION_WATCHES_KEY] || {};
+      let expiresAt = 0;
+      if (active) {
+        const suppliedExpiry = Number(message.expiresAt) || (requestedAt + FANPAGE_SUBSCRIPTION_WATCH_TTL_MS);
+        expiresAt = Math.min(suppliedExpiry, Date.now() + FANPAGE_SUBSCRIPTION_WATCH_TTL_MS);
+        if (expiresAt <= Date.now()) {
+          delete watches[requestId];
+          await chrome.storage.local.set({ [FANPAGE_SUBSCRIPTION_WATCHES_KEY]: watches });
+          sendResponse({ ok: false, requestId, reason: 'subscription-code-expired' });
+          return;
+        }
+        watches[requestId] = { soopId, expiresAt };
+      } else {
+        delete watches[requestId];
+      }
+      await chrome.storage.local.set({ [FANPAGE_SUBSCRIPTION_WATCHES_KEY]: watches });
+      const tabs = await chrome.tabs.query({ url: ['https://sooplive.com/station/*/post/*', 'https://www.sooplive.com/station/*/post/*'] });
+      const results = await Promise.all((tabs || []).filter((tab) => Number.isInteger(tab.id)).map(async (tab) => {
+        try {
+          const result = await chrome.tabs.sendMessage(tab.id, {
+            type: 'setFanpageSubscriptionCommentWatch', active, requestId,
+            soopId: active ? soopId : '', expiresAt: active ? expiresAt : 0,
+          });
+          return result && result.ok === true;
+        } catch (_) { return false; }
+      }));
+      const deliveredCount = results.filter(Boolean).length;
+      sendResponse({ ok: true, requestId, tabCount: (tabs || []).length, deliveredCount, reason: active && !deliveredCount ? 'subscriber-post-tab-not-open' : '' });
+    }).catch((error) => sendResponse({ ok: false, requestId, reason: String(error && error.message || error).slice(0, 100) }));
+    return true;
+  }
+
+  if (message.type === 'fanpageSubscriptionCommentCandidate') {
+    let sourceUrl;
+    try { sourceUrl = new URL(sender.url || (sender.tab && sender.tab.url) || ''); } catch (_) { sourceUrl = null; }
+    const requestId = String(message.requestId || '').trim();
+    const code = String(message.code || '').trim().toUpperCase();
+    const soopId = String(message.soopId || '').trim().toLowerCase();
+    const postUrl = String(message.postUrl || '');
+    const sourceIsPost = Number.isInteger(sender.tab && sender.tab.id) && sourceUrl && sourceUrl.protocol === 'https:' &&
+      ['sooplive.com', 'www.sooplive.com'].includes(sourceUrl.hostname) && /^\/station\/[a-z0-9]{2,20}\/post\//i.test(sourceUrl.pathname);
+    if (!sourceIsPost || !/^[A-Za-z0-9_-]{8,64}$/.test(requestId) || !/^[A-F0-9]{10}$/.test(code) || !/^[a-z0-9]{2,20}$/.test(soopId)) {
+      sendResponse({ ok: false, reason: 'invalid-subscription-comment-candidate' });
+      return false;
+    }
+    chrome.storage.local.get(FANPAGE_SUBSCRIPTION_WATCHES_KEY).then(async (saved) => {
+      const watches = saved[FANPAGE_SUBSCRIPTION_WATCHES_KEY] || {};
+      const watch = watches[requestId];
+      if (!watch || watch.soopId !== soopId || Number(watch.expiresAt) <= Date.now()) {
+        sendResponse({ ok: false, reason: 'subscription-watch-not-active' });
+        return;
+      }
+      const adminTabs = await findAdminTabs();
+      const deliveries = await Promise.all((adminTabs || []).filter((tab) => Number.isInteger(tab.id)).map(async (tab) => {
+        try {
+          const result = await chrome.tabs.sendMessage(tab.id, {
+            type: 'fanpageSubscriptionCommentCandidate', requestId, code, soopId, postUrl,
+          });
+          return !!(result && result.ok);
+        } catch (_) { return false; }
+      }));
+      sendResponse({ ok: deliveries.some(Boolean), requestId, deliveredCount: deliveries.filter(Boolean).length, reason: deliveries.length ? '' : 'admin-center-not-open' });
+    }).catch((error) => sendResponse({ ok: false, reason: String(error && error.message || error).slice(0, 100) }));
+    return true;
+  }
 
   if (message.type === 'promoBatchControl') {
     if (!isAllowedAdminSender(sender)) return false;

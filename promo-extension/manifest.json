@@ -70,6 +70,14 @@
         "https://sooplive.com/station/*/post/*",
         "https://www.sooplive.com/station/*/post/*"
       ],
+      "js": ["fanpage-subscription-comment-watcher.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://sooplive.com/station/*/post/*",
+        "https://www.sooplive.com/station/*/post/*"
+      ],
       "js": ["soop-writer.js"],
       "run_at": "document_idle"
     }
