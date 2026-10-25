@@ -2249,6 +2249,32 @@ const notifyFanPageDesignFeedback = onValueCreated('/streamerFanPageDesignFeedba
     'https://neezu-crypto.github.io/streamer-fanpage/'
   );
 });
+// 인증 스트리머가 다마고치 디자인 신청을 저장하면 관리자 화면으로 바로 연결한다.
+// 신청 내용과 Firebase UID는 공유하지 않고, 공개 스트리머 신원과 검토 링크만 알린다.
+const notifyFanPageTamagotchiApplication = onValueCreated(
+  '/streamerFanPageTamagotchiApplications/{streamerId}/{applicationId}',
+  async (event) => {
+    const data = event.data.val() || {};
+    const streamerId = /^[A-Za-z0-9]{2,20}$/.test(String(event.params.streamerId || ''))
+      ? String(event.params.streamerId).toLowerCase()
+      : '';
+    const nickname = String(data.streamerNickname || '')
+      .replace(/[@<>\r\n`]/g, ' ')
+      .trim()
+      .slice(0, 60);
+    if (!streamerId || !nickname || data.status !== 'pending') return null;
+    const adminUrl = 'https://neezu-crypto.github.io/streamer-fanpage/?admin=tamagotchi#/p/' + encodeURIComponent(streamerId);
+    const requestedAt = Number(data.createdAt) || Date.now();
+    const requestedAtText = new Date(requestedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    await sendDiscordNotification(
+      '🔔 **새 다마고치 디자인 신청 (스트리머 팬페이지)**\n' +
+      '인증 스트리머: ' + nickname + ' (@' + streamerId + ')\n' +
+      '신청 시각: ' + requestedAtText + '\n' +
+      '신청 내용은 관리자 전용 화면에서 확인해 주세요.\n' + adminUrl
+    );
+    return null;
+  },
+);
 // 이미지 업로드 알림(2026-09-06 추가) — formatRequestSummary는 streamerName/
 // category 필드를 모르므로(streamerId를 이름으로 착각해 내부 id 문자열을
 // 그대로 보여줄 위험) 위 해금 신청과 동일하게 직접 문구를 구성한다. 썸네일
@@ -4909,6 +4935,7 @@ module.exports = {
   notifyFanPageViewerSubscriptionRequest,
   notifyFanPageSponsorAdRequest,
   notifyFanPageDesignFeedback,
+  notifyFanPageTamagotchiApplication,
   notifyGalleryImageUpload,
   notifyVerifiedStreamerVisit,
   onyuVnLogVerifiedStreamerVisit,
