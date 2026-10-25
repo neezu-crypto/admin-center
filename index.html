@@ -1152,6 +1152,13 @@
 
   <!-- 페이지별 검수 카드는 관리자 전용 독립 래퍼다. -->
   <div id="reviewQueueShell" hidden>
+    <div class="card" id="section-fanpage-subscriptions">
+      <h2>스트리머 시리즈 통합 구독 인증</h2>
+      <p class="hint">신청 신호만 실시간으로 수신합니다. 각 신청은 댓글 코드·댓글 작성자 SOOP 아이디·현재 구독 상태·실제 만료일을 확인한 뒤 승인하세요. 승인된 권한은 팬페이지의 모든 구독자 전용 콘텐츠에 적용됩니다.</p>
+      <button id="fanpageSubscriptionRefreshBtn" class="perm-refresh-btn" type="button">신청 새로고침</button>
+      <div id="fanpageSubscriptionStatus" class="hint" style="margin-top:10px;" role="status" aria-live="polite">검수 세션을 열면 대기 신청을 불러옵니다.</div>
+      <div id="fanpageSubscriptionList" style="margin-top:10px;"></div>
+    </div>
     <div class="card" id="section-review-queue">
       <h2>페이지별 검수 <span id="reviewQueueCountTag" class="role-badge" style="background:rgba(226,85,79,0.14); color:#e2554f; border:1px solid rgba(226,85,79,0.4);" hidden></span></h2>
       <p class="hint">
@@ -1211,12 +1218,10 @@
   import {
     getFunctions, httpsCallable,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-functions.js';
-  // Firebase RTDB를 사용하는 다른 관리 화면과 달리 이 페이지는 권한 있는 데이터도
-  // 브라우저에서 직접 읽지 않는다. 온이유 이용권 신청 스트림은 admincenter의
-  // Cloud Function이 Admin SDK onValue로 구독하고, 관리자 또는 제한된 확장 세션에
-  // 필요한 데이터만 SSE로 전달한다.
+  // 운영 데이터는 계속 callable로만 읽는다. 예외로 팬페이지 구독 신청은 접수 시
+  // requestId·시각만 담은 단일 신호를 관리자 권한으로 구독하고, 상세 내용은 callable로 읽는다.
   import {
-    getDatabase, ref, onValue, get, query, limitToLast, orderByChild, equalTo,
+    getDatabase, ref, onValue, onChildAdded, onChildRemoved, get, query, limitToLast, orderByChild, equalTo,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
 
   // 07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
@@ -1246,6 +1251,7 @@
   // httpsCallable로 부른다(06번 원칙 — codebase가 달라도 같은 프로젝트 안에서는
   // 함수 이름만 맞으면 호출 가능, 24번에서 재확인된 사실).
   const sendAdminChatMessageFn = httpsCallable(functions, 'sendAdminChatMessage');
+  const streamerFanPageAdminViewerSubscriptionRequestsFn = httpsCallable(functions, 'streamerFanPageAdminViewerSubscriptionRequests');
   const setDevbarLinkFn = httpsCallable(functions, 'setDevbarLink');
   const deleteDevbarLinkFn = httpsCallable(functions, 'deleteDevbarLink');
   const getAdultImageGeneratorLinksFn = httpsCallable(functions, 'getAdultImageGeneratorLinks');
@@ -1700,7 +1706,7 @@
     },
     {
       id: 'review', label: '검수·승인', icon: '🔎', role: 'admin',
-      sections: ['section-review-queue', 'section-onyu-reviews', 'section-onyu-production-inquiries', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
+      sections: ['section-fanpage-subscriptions', 'section-review-queue', 'section-onyu-reviews', 'section-onyu-production-inquiries', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
     },
     {
       id: 'content', label: '콘텐츠·현황', icon: '📦', role: 'admin',
@@ -1967,7 +1973,7 @@
       } else if (sessionId === 'review') {
         if (role === 'admin') startMarketManagementSubscription();
         startReviewQueueSubscriptions();
-        jobs.push(refreshOnyuPlayerReviews(true), refreshOnyuProductionInquiries(), refreshFanPageSponsorDonationDiagnostics());
+        jobs.push(refreshFanpageSubscriptionRequests(), refreshOnyuPlayerReviews(true), refreshOnyuProductionInquiries(), refreshFanPageSponsorDonationDiagnostics());
       } else if (sessionId === 'content') {
         jobs.push(refreshSeriesConfig(), refreshPromotedContent());
       } else if (sessionId === 'played-streamers') {
@@ -2040,6 +2046,198 @@
   window.addEventListener('popstate', handleHistoryNavigation);
   window.addEventListener('hashchange', handleHistoryNavigation);
   window.addEventListener('load', function () { revealCardsOnScroll(); });
+
+  const fanpageSubscriptionStatusEl = document.getElementById('fanpageSubscriptionStatus');
+  const fanpageSubscriptionListEl = document.getElementById('fanpageSubscriptionList');
+  const fanpageSubscriptionRefreshBtnEl = document.getElementById('fanpageSubscriptionRefreshBtn');
+  let fanpageSubscriptionSignalsUnsubscribe = [];
+  let fanpageSubscriptionSignalSeen = new Set();
+  let fanpageSubscriptionSignalNotified = new Set();
+  let fanpageSubscriptionSignalStartedAt = 0;
+
+  function localDateTimeInputValue(timestamp) {
+    const date = new Date(Number(timestamp) || Date.now());
+    date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+    return date.toISOString().slice(0, 16);
+  }
+
+  function createSubscriptionAdminField(labelText, type, value, attrs) {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:grid;gap:5px;min-width:180px;flex:1;font-size:12px;font-weight:600;';
+    label.appendChild(document.createTextNode(labelText));
+    const input = document.createElement('input');
+    input.type = type;
+    if (value) input.value = value;
+    input.style.cssText = 'width:100%;min-height:38px;padding:7px 9px;border:1px solid rgba(20,20,22,.18);border-radius:7px;background:#fff;color:#202432;';
+    Object.keys(attrs || {}).forEach((key) => {
+      if (key === 'checked') input.checked = true;
+      else input[key] = attrs[key];
+    });
+    label.appendChild(input);
+    return { label, input };
+  }
+
+  function renderFanpageSubscriptionRequests(requests, truncated) {
+    fanpageSubscriptionListEl.replaceChildren();
+    if (!requests.length) {
+      fanpageSubscriptionListEl.textContent = '검토할 통합 구독 인증 신청이 없습니다.';
+      if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = truncated ? '최근 대기 신청 일부를 표시하고 있습니다.' : '대기 신청 0건';
+      return;
+    }
+    if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = `대기 신청 ${requests.length}건${truncated ? ' · 최신 200건 표시' : ''}`;
+    requests.forEach((item) => {
+      const card = document.createElement('article');
+      card.style.cssText = 'margin:10px 0;padding:13px;border:1px solid rgba(20,20,22,.15);border-radius:10px;background:#fff;';
+      const heading = document.createElement('div');
+      heading.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+      const title = document.createElement('strong');
+      title.textContent = `${item.soopId || 'SOOP 아이디 확인 필요'} · ${item.verificationMethod === 'subscriber-comment-code' ? '게시판 코드 인증' : '기존 별풍선 신청'}`;
+      heading.appendChild(title);
+      const submittedAt = document.createElement('span');
+      submittedAt.className = 'hint';
+      submittedAt.textContent = item.requestedAt ? new Date(item.requestedAt).toLocaleString('ko-KR') : '';
+      heading.appendChild(submittedAt);
+      card.appendChild(heading);
+      const uid = document.createElement('p');
+      uid.className = 'hint';
+      uid.style.margin = '5px 0 10px';
+      uid.textContent = `요청 계정 UID · ${item.requesterUid || '확인 불가'}`;
+      card.appendChild(uid);
+
+      if (item.verificationMethod === 'subscriber-comment-code') {
+        const controls = document.createElement('div');
+        controls.style.cssText = 'display:flex;gap:9px;flex-wrap:wrap;align-items:end;';
+        const code = createSubscriptionAdminField('댓글에 적힌 일회용 코드', 'text', '', { maxLength: 10, autocomplete: 'off', placeholder: '댓글 코드 입력' });
+        code.input.style.textTransform = 'uppercase';
+        const commenter = createSubscriptionAdminField('댓글 작성자 SOOP 아이디', 'text', item.soopId || '', { maxLength: 20, autocomplete: 'off', placeholder: '댓글 프로필 링크에서 확인' });
+        const expiry = createSubscriptionAdminField('확인한 구독 만료 시각 (한국시간)', 'datetime-local', localDateTimeInputValue(Date.now() + 30 * 24 * 60 * 60 * 1000), {});
+        controls.append(code.label, commenter.label, expiry.label);
+        const confirmation = document.createElement('label');
+        confirmation.style.cssText = 'display:flex;align-items:center;gap:7px;flex-basis:100%;font-size:12px;';
+        const activeCheck = document.createElement('input');
+        activeCheck.type = 'checkbox';
+        confirmation.append(activeCheck, document.createTextNode('SOOP 방송국에서 댓글 작성자와 현재 구독 상태를 직접 확인했습니다.'));
+        controls.appendChild(confirmation);
+        card.appendChild(controls);
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;justify-content:flex-end;gap:7px;margin-top:10px;';
+        const reject = document.createElement('button');
+        reject.type = 'button';
+        reject.className = 'perm-refresh-btn';
+        reject.textContent = '반려';
+        const approve = document.createElement('button');
+        approve.type = 'button';
+        approve.className = 'perm-refresh-btn';
+        approve.textContent = '확인 후 승인';
+        approve.style.cssText += ';border-color:#4d6fe0;background:#4d6fe0;color:#fff;';
+        reject.addEventListener('click', () => reviewFanpageSubscription(item.requestId, 'reject', {}));
+        approve.addEventListener('click', () => {
+          if (!activeCheck.checked) { alert('SOOP에서 실제 구독 상태를 확인한 뒤 체크해 주세요.'); return; }
+          if (!code.input.value.trim() || !commenter.input.value.trim() || !expiry.input.value) { alert('댓글 코드, 작성자 아이디, 구독 만료 시각을 모두 입력해 주세요.'); return; }
+          reviewFanpageSubscription(item.requestId, 'approve', {
+            verificationCode: code.input.value.trim().toUpperCase(),
+            commenterSoopId: commenter.input.value.trim().toLowerCase(),
+            approvedUntil: new Date(expiry.input.value).getTime(),
+            activeSubscriptionConfirmed: true,
+          });
+        });
+        actions.append(reject, approve);
+        card.appendChild(actions);
+      } else {
+        const note = document.createElement('p');
+        note.className = 'hint';
+        note.textContent = '이 신청은 구방식으로 접수됐습니다. 기존 후원 내역을 확인한 뒤 아래 승인 버튼으로 30일을 부여할 수 있습니다.';
+        card.appendChild(note);
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;justify-content:flex-end;gap:7px;margin-top:10px;';
+        ['reject', 'approve'].forEach((action) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'perm-refresh-btn';
+          button.textContent = action === 'approve' ? '기존 신청 승인' : '반려';
+          if (action === 'approve') button.style.cssText += ';border-color:#4d6fe0;background:#4d6fe0;color:#fff;';
+          button.addEventListener('click', () => reviewFanpageSubscription(item.requestId, action, {}));
+          actions.appendChild(button);
+        });
+        card.appendChild(actions);
+      }
+      fanpageSubscriptionListEl.appendChild(card);
+    });
+  }
+
+  async function refreshFanpageSubscriptionRequests() {
+    if (role !== 'admin') return;
+    if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = '신청을 불러오는 중…';
+    if (fanpageSubscriptionRefreshBtnEl) fanpageSubscriptionRefreshBtnEl.disabled = true;
+    try {
+      const response = await streamerFanPageAdminViewerSubscriptionRequestsFn({ action: 'list' });
+      const data = response.data || {};
+      renderFanpageSubscriptionRequests(Array.isArray(data.requests) ? data.requests : [], data.truncated === true);
+    } catch (error) {
+      console.error('팬페이지 통합 구독 신청 조회 실패:', error);
+      if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = error.message || '신청 목록을 불러오지 못했습니다.';
+    } finally {
+      if (fanpageSubscriptionRefreshBtnEl) fanpageSubscriptionRefreshBtnEl.disabled = false;
+    }
+  }
+
+  async function reviewFanpageSubscription(requestId, action, fields) {
+    if (action === 'reject' && !confirm('이 구독 인증 신청을 반려할까요?')) return;
+    try {
+      await streamerFanPageAdminViewerSubscriptionRequestsFn(Object.assign({ action, requestId }, fields || {}));
+      if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = action === 'approve' ? '신청을 승인했습니다.' : '신청을 반려했습니다.';
+      await refreshFanpageSubscriptionRequests();
+    } catch (error) {
+      alert(error.message || '구독 신청을 처리하지 못했습니다. 신청 상태를 새로고침해 주세요.');
+    }
+  }
+
+  if (fanpageSubscriptionRefreshBtnEl) fanpageSubscriptionRefreshBtnEl.addEventListener('click', refreshFanpageSubscriptionRequests);
+
+  function stopFanpageSubscriptionSignalSubscription() {
+    fanpageSubscriptionSignalsUnsubscribe.forEach(function (unsubscribe) {
+      try { unsubscribe(); } catch (error) { console.warn('팬페이지 구독 신청 감시 해제 실패:', error); }
+    });
+    fanpageSubscriptionSignalsUnsubscribe = [];
+    fanpageSubscriptionSignalSeen = new Set();
+    fanpageSubscriptionSignalNotified = new Set();
+    fanpageSubscriptionSignalStartedAt = 0;
+    window.postMessage({ __streamerFanPageSubscriptionRequestWatch: true, active: false }, location.origin);
+  }
+
+  async function startFanpageSubscriptionSignalSubscription() {
+    if (role !== 'admin' || !currentUser || fanpageSubscriptionSignalsUnsubscribe.length) return;
+    fanpageSubscriptionSignalStartedAt = Date.now();
+    try {
+      const initial = await get(ref(db, 'streamerFanPageAdminSubscriptionSignals'));
+      const notifyNewSignal = function (requestId, signal) {
+        const requestedAt = Number(signal && signal.requestedAt) || 0;
+        if (!requestId || requestedAt < fanpageSubscriptionSignalStartedAt || fanpageSubscriptionSignalNotified.has(requestId)) return;
+        fanpageSubscriptionSignalNotified.add(requestId);
+        window.postMessage({ __streamerFanPageSubscriptionRequestWatch: true, active: true, requestId, requestedAt }, location.origin);
+        if (activeSessionId === 'review') refreshFanpageSubscriptionRequests();
+      };
+      initial.forEach(function (child) {
+        fanpageSubscriptionSignalSeen.add(child.key);
+        notifyNewSignal(child.key, child.val() || {});
+      });
+      if (role !== 'admin' || !currentUser || fanpageSubscriptionSignalsUnsubscribe.length) return;
+      const signalRef = ref(db, 'streamerFanPageAdminSubscriptionSignals');
+      fanpageSubscriptionSignalsUnsubscribe.push(onChildAdded(signalRef, function (snapshot) {
+        const signal = snapshot.val() || {};
+        const isNew = !fanpageSubscriptionSignalSeen.has(snapshot.key);
+        fanpageSubscriptionSignalSeen.add(snapshot.key);
+        if (isNew) notifyNewSignal(snapshot.key, signal);
+      }, function (error) { console.error('팬페이지 구독 신청 신호 수신 실패:', error); }));
+      fanpageSubscriptionSignalsUnsubscribe.push(onChildRemoved(signalRef, function (snapshot) {
+        fanpageSubscriptionSignalSeen.delete(snapshot.key);
+        fanpageSubscriptionSignalNotified.delete(snapshot.key);
+        window.postMessage({ __streamerFanPageSubscriptionRequestWatch: true, active: false, requestId: snapshot.key }, location.origin);
+      }, function (error) { console.error('팬페이지 구독 신청 신호 변경 수신 실패:', error); }));
+    } catch (error) {
+      console.error('팬페이지 구독 신청 신호 초기화 실패:', error);
+    }
+  }
 
   let pendingRequests = [];
   let verifiedStreamers = [];
@@ -6424,6 +6622,7 @@
     if (currentUser && (!nextUser || currentUser.uid !== nextUser.uid)) {
       window.postMessage({ __onyuGiftBackgroundMonitorStop: true }, location.origin);
       stopStreamerVerificationRequestSubscription();
+      stopFanpageSubscriptionSignalSubscription();
       resetSessionRuntime();
     }
     currentUser = nextUser;
@@ -6431,6 +6630,7 @@
 
     if (!currentUser) {
       stopStreamerVerificationRequestSubscription();
+      stopFanpageSubscriptionSignalSubscription();
       resetSessionRuntime();
       authStatusEl.textContent = '로그인이 필요합니다';
       authBtnEl.textContent = 'Google 로그인';
@@ -6444,8 +6644,10 @@
     await refreshAdminCenterState();
     if (role === 'admin') {
       startStreamerVerificationRequestSubscription();
+      startFanpageSubscriptionSignalSubscription();
     } else {
       stopStreamerVerificationRequestSubscription();
+      stopFanpageSubscriptionSignalSubscription();
     }
     // 인증 신청 감시는 관리자 로그인 단계에서 시작하고, 세션별 상세 데이터는
     // 딥링크 또는 사용자의 세션 선택에 따라 로드한다.
