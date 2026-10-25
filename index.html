@@ -2050,6 +2050,7 @@
   const fanpageSubscriptionStatusEl = document.getElementById('fanpageSubscriptionStatus');
   const fanpageSubscriptionListEl = document.getElementById('fanpageSubscriptionList');
   const fanpageSubscriptionRefreshBtnEl = document.getElementById('fanpageSubscriptionRefreshBtn');
+  const pendingFanpageSubscriptionCandidates = new Map();
   let fanpageSubscriptionSignalsUnsubscribe = [];
   let fanpageSubscriptionSignalSeen = new Set();
   let fanpageSubscriptionSignalNotified = new Set();
@@ -2087,6 +2088,7 @@
     if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = `대기 신청 ${requests.length}건${truncated ? ' · 최신 200건 표시' : ''}`;
     requests.forEach((item) => {
       const card = document.createElement('article');
+      card.dataset.requestId = item.requestId;
       card.style.cssText = 'margin:10px 0;padding:13px;border:1px solid rgba(20,20,22,.15);border-radius:10px;background:#fff;';
       const heading = document.createElement('div');
       heading.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
@@ -2108,8 +2110,10 @@
         const controls = document.createElement('div');
         controls.style.cssText = 'display:flex;gap:9px;flex-wrap:wrap;align-items:end;';
         const code = createSubscriptionAdminField('댓글에 적힌 일회용 코드', 'text', '', { maxLength: 10, autocomplete: 'off', placeholder: '댓글 코드 입력' });
+        code.input.dataset.subscriptionField = 'code';
         code.input.style.textTransform = 'uppercase';
         const commenter = createSubscriptionAdminField('댓글 작성자 SOOP 아이디', 'text', item.soopId || '', { maxLength: 20, autocomplete: 'off', placeholder: '댓글 프로필 링크에서 확인' });
+        commenter.input.dataset.subscriptionField = 'soopId';
         const expiry = createSubscriptionAdminField('확인한 구독 만료 시각 (한국시간)', 'datetime-local', localDateTimeInputValue(Date.now() + 30 * 24 * 60 * 60 * 1000), {});
         controls.append(code.label, commenter.label, expiry.label);
         const confirmation = document.createElement('label');
@@ -2162,17 +2166,80 @@
         card.appendChild(actions);
       }
       fanpageSubscriptionListEl.appendChild(card);
+      const pendingCandidate = pendingFanpageSubscriptionCandidates.get(item.requestId);
+      if (pendingCandidate) applyFanpageSubscriptionCandidate(pendingCandidate);
     });
   }
 
-  async function refreshFanpageSubscriptionRequests() {
+  function applyFanpageSubscriptionCandidate(candidate) {
+    const card = Array.from(fanpageSubscriptionListEl.querySelectorAll('[data-request-id]'))
+      .find((item) => item.dataset.requestId === candidate.requestId);
+    if (!card) return false;
+    const codeInput = card.querySelector('[data-subscription-field="code"]');
+    const soopIdInput = card.querySelector('[data-subscription-field="soopId"]');
+    if (!codeInput || !soopIdInput) return false;
+    codeInput.value = candidate.code;
+    soopIdInput.value = candidate.soopId;
+    if (candidate.postUrl) {
+      let url;
+      try { url = new URL(candidate.postUrl); } catch (_) { url = null; }
+      if (url && url.protocol === 'https:' && ['sooplive.com', 'www.sooplive.com'].includes(url.hostname)) {
+        let link = card.querySelector('[data-subscription-post-link]');
+        if (!link) {
+          link = document.createElement('a');
+          link.dataset.subscriptionPostLink = 'true';
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.style.cssText = 'display:inline-block;margin-top:8px;font-size:12px;';
+          card.appendChild(link);
+        }
+        link.href = url.href;
+        link.textContent = '확장프로그램이 찾은 댓글 게시글 열기 ↗';
+      }
+    }
+    if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = '확장프로그램이 댓글 코드 후보를 찾았습니다. 게시글·작성자 방송국·현재 구독 상태를 직접 확인한 뒤 승인하세요.';
+    pendingFanpageSubscriptionCandidates.delete(candidate.requestId);
+    return true;
+  }
+
+  window.addEventListener('message', function (event) {
+    const data = event.data;
+    if (event.source !== window || event.origin !== location.origin || !data ||
+        data.__streamerFanPageSubscriptionCommentCandidate !== true) return;
+    const candidate = {
+      requestId: String(data.requestId || ''),
+      code: String(data.code || '').trim().toUpperCase(),
+      soopId: String(data.soopId || '').trim().toLowerCase(),
+      postUrl: String(data.postUrl || ''),
+    };
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(candidate.requestId) || !/^[A-F0-9]{10}$/.test(candidate.code) ||
+        !/^[a-z0-9]{2,20}$/.test(candidate.soopId)) return;
+    pendingFanpageSubscriptionCandidates.set(candidate.requestId, candidate);
+    if (!applyFanpageSubscriptionCandidate(candidate)) activateSession('review');
+  });
+
+  async function refreshFanpageSubscriptionRequests(signalRequestId) {
     if (role !== 'admin') return;
     if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = '신청을 불러오는 중…';
     if (fanpageSubscriptionRefreshBtnEl) fanpageSubscriptionRefreshBtnEl.disabled = true;
     try {
       const response = await streamerFanPageAdminViewerSubscriptionRequestsFn({ action: 'list' });
       const data = response.data || {};
-      renderFanpageSubscriptionRequests(Array.isArray(data.requests) ? data.requests : [], data.truncated === true);
+      const requests = Array.isArray(data.requests) ? data.requests : [];
+      renderFanpageSubscriptionRequests(requests, data.truncated === true);
+      if (signalRequestId) {
+        const request = requests.find((item) => item.requestId === signalRequestId);
+        if (request && request.verificationMethod === 'subscriber-comment-code' && request.soopId) {
+          window.postMessage({
+            __streamerFanPageSubscriptionRequestWatch: true,
+            active: true,
+            requestId: request.requestId,
+            soopId: request.soopId,
+            requestedAt: request.requestedAt,
+            expiresAt: request.codeExpiresAt,
+          }, location.origin);
+        }
+      }
     } catch (error) {
       console.error('팬페이지 통합 구독 신청 조회 실패:', error);
       if (fanpageSubscriptionStatusEl) fanpageSubscriptionStatusEl.textContent = error.message || '신청 목록을 불러오지 못했습니다.';
@@ -2214,8 +2281,7 @@
         const requestedAt = Number(signal && signal.requestedAt) || 0;
         if (!requestId || requestedAt < fanpageSubscriptionSignalStartedAt || fanpageSubscriptionSignalNotified.has(requestId)) return;
         fanpageSubscriptionSignalNotified.add(requestId);
-        window.postMessage({ __streamerFanPageSubscriptionRequestWatch: true, active: true, requestId, requestedAt }, location.origin);
-        if (activeSessionId === 'review') refreshFanpageSubscriptionRequests();
+        refreshFanpageSubscriptionRequests(requestId);
       };
       initial.forEach(function (child) {
         fanpageSubscriptionSignalSeen.add(child.key);
