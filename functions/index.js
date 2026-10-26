@@ -1852,6 +1852,14 @@ function deepLink(anchorId) {
   return ADMIN_CENTER_URL + '#' + anchorId;
 }
 
+async function sendFanPageViewerSubscriptionAlert(text) {
+  const result = await sendDiscordNotification(text);
+  if (!result.sent) {
+    throw new Error('고점체크 구독 인증 디스코드 알림 전송 실패: ' + result.reason);
+  }
+  console.info('고점체크 구독 인증 디스코드 알림 전송 완료');
+}
+
 const notifyPresetMergeFailure = onValueCreated('/presetMergeFailures/{entryId}', async (event) => {
   const data = event.data.val() || {};
   const oldUid = data.oldUid || '(알 수 없음)';
@@ -2141,28 +2149,77 @@ const notifyGalleryUnlockRequest = onValueCreated('/gallery/unlockRequests/{id}'
   );
 });
 // 스트리머 고점체크 계정 구독 신청은 팬페이지 함수가 서버 전용 pending 큐에
-// 요청 ID를 기록한다. Discord에는 SOOP 아이디만 공유하고 Firebase UID는 보내지 않는다.
-const notifyFanPageViewerSubscriptionRequest = onValueCreated('/streamerFanPageViewerSubscriptionPending/{requestId}', async (event) => {
+// 요청 ID를 기록한다. Discord에는 SOOP 아이디만 공유하고 Firebase UID·인증 코드·해시는 보내지 않는다.
+const notifyFanPageViewerSubscriptionRequest = onValueCreated({
+  ref: '/streamerFanPageViewerSubscriptionPending/{requestId}',
+  retry: true,
+}, async (event) => {
   const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
-  if (!requestId) return;
+  if (!requestId) return null;
   const requestSnapshot = await getDatabase()
     .ref('streamerFanPageViewerSubscriptionRequests/' + requestId)
     .get();
   const data = requestSnapshot.val() || {};
+  if (!Object.keys(data).length) {
+    console.warn('고점체크 구독 신청 디스코드 알림: 연결된 신청 데이터가 없습니다.', requestId);
+    return null;
+  }
+  const soopId = normalizeSoopId(data.soopId || data.donorSoopId);
+  const requestedAt = Number(data.requestedAt) || Date.now();
+  const requestedAtText = new Date(requestedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+
+  if (data.verificationMethod === 'subscriber-comment-code') {
+    await sendFanPageViewerSubscriptionAlert(
+      '🔔 **새 통합 구독 인증 신청 (고점체크)**\n' +
+      '신청자 SOOP 아이디: ' + (soopId ? '@' + soopId : '(확인 필요)') + '\n' +
+      '인증 방식: 구독자 전용 게시글 댓글 코드\n' +
+      '인증 코드가 발급되었습니다. 코드·Firebase UID는 이 알림에 포함하지 않습니다. 댓글 작성자와 실제 구독 상태를 확인한 뒤 승인해 주세요.\n' +
+      '신청 시각: ' + requestedAtText + '\n' +
+      deepLink('section-fanpage-subscriptions')
+    );
+    return null;
+  }
+
   const nickname = String(data.nickname || '(닉네임 없음)')
     .replace(/[@<>\r\n`]/g, ' ')
     .slice(0, 60);
-  const donorSoopId = normalizeSoopId(data.donorSoopId);
-  const requestedAt = Number(data.requestedAt) || Date.now();
-  const requestedAtText = new Date(requestedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-  await sendDiscordNotification(
+  const donorSoopId = normalizeSoopId(data.donorSoopId || data.soopId);
+  await sendFanPageViewerSubscriptionAlert(
     '🔔 **새 구독 신청 (스트리머 고점체크)**\n' +
     '후원자 닉네임: ' + nickname + (donorSoopId ? ' · SOOP 아이디: @' + donorSoopId : '') +
-    ' · 별풍선 ' + (Number(data.balloonCost) || FANPAGE_VIEWER_SUBSCRIPTION_BALLOONS) + '개 / 30일\n' +
+    ' · 별풍선 ' + (Number(data.balloonCost) || 33) + '개 / 30일\n' +
     '신청 시각: ' + requestedAtText + '\n' +
     '후원 완료 알리기는 참고용 신청자 신호입니다. 자동 감시·자동 검증·자동 승인은 하지 않으며, 팬페이지 관리자 화면에서 후원 내역을 확인한 뒤 수동 승인해 주세요.\n' +
     'https://neezu-crypto.github.io/streamer-fanpage/'
   );
+});
+// 코드 재발급은 기존 신청 레코드의 codeIssuedAt과 해시를 바꾸므로, pending 큐의
+// 생성 트리거 대신 요청 레코드 업데이트에서만 감지한다. 인증 코드와 해시는 알림에 포함하지 않는다.
+const notifyFanPageViewerSubscriptionCodeRenewal = onValueUpdated({
+  ref: '/streamerFanPageViewerSubscriptionRequests/{requestId}',
+  retry: true,
+}, async (event) => {
+  const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+  if (!requestId) return null;
+  const before = event.data.before.val() || {};
+  const after = event.data.after.val() || {};
+  const beforeIssuedAt = Number(before.codeIssuedAt) || 0;
+  const afterIssuedAt = Number(after.codeIssuedAt) || 0;
+  if (after.verificationMethod !== 'subscriber-comment-code' ||
+      after.status !== 'pending' || afterIssuedAt <= beforeIssuedAt ||
+      !after.verificationCodeHash || after.verificationCodeHash === before.verificationCodeHash) {
+    return null;
+  }
+  const soopId = normalizeSoopId(after.soopId);
+  const requestedAtText = new Date(afterIssuedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+  await sendFanPageViewerSubscriptionAlert(
+    '🔁 **통합 구독 인증 코드 재발급 (고점체크)**\n' +
+    '신청자 SOOP 아이디: ' + (soopId ? '@' + soopId : '(확인 필요)') + '\n' +
+    '새 인증 코드가 발급되었습니다. 이전 코드는 사용할 수 없습니다. 코드·Firebase UID는 이 알림에 포함하지 않습니다.\n' +
+    '재발급 시각: ' + requestedAtText + '\n' +
+    deepLink('section-fanpage-subscriptions')
+  );
+  return null;
 });
 // 고점체크 후원 스트리머 신청도 새 대기 인덱스가 생성되면 Discord로 알린다.
 // 요청 본문은 server-only 요청 노드에서 읽고, Firebase UID는 알림에 포함하지 않는다.
@@ -4933,6 +4990,7 @@ module.exports = {
   notifyGalleryCommentReport,
   notifyGalleryUnlockRequest,
   notifyFanPageViewerSubscriptionRequest,
+  notifyFanPageViewerSubscriptionCodeRenewal,
   notifyFanPageSponsorAdRequest,
   notifyFanPageDesignFeedback,
   notifyFanPageTamagotchiApplication,
