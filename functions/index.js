@@ -2170,11 +2170,8 @@ const notifyFanPageViewerSubscriptionRequest = onValueCreated({
 
   if (data.verificationMethod === 'subscriber-comment-code') {
     await sendFanPageViewerSubscriptionAlert(
-      '🔔 **새 통합 구독 인증 신청 (고점체크)**\n' +
-      '신청자 SOOP 아이디: ' + (soopId ? '@' + soopId : '(확인 필요)') + '\n' +
-      '인증 방식: 구독자 전용 게시글 댓글 코드\n' +
-      '인증 코드가 발급되었습니다. 코드·Firebase UID는 이 알림에 포함하지 않습니다. 댓글 작성자와 실제 구독 상태를 확인한 뒤 승인해 주세요.\n' +
-      '신청 시각: ' + requestedAtText + '\n' +
+      '🔔 **고점체크 구독 인증 신청**\n' +
+      'SOOP: ' + (soopId ? '@' + soopId : '(확인 필요)') + '\n' +
       deepLink('section-fanpage-subscriptions')
     );
     return null;
@@ -2211,12 +2208,9 @@ const notifyFanPageViewerSubscriptionCodeRenewal = onValueUpdated({
     return null;
   }
   const soopId = normalizeSoopId(after.soopId);
-  const requestedAtText = new Date(afterIssuedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
   await sendFanPageViewerSubscriptionAlert(
-    '🔁 **통합 구독 인증 코드 재발급 (고점체크)**\n' +
-    '신청자 SOOP 아이디: ' + (soopId ? '@' + soopId : '(확인 필요)') + '\n' +
-    '새 인증 코드가 발급되었습니다. 이전 코드는 사용할 수 없습니다. 코드·Firebase UID는 이 알림에 포함하지 않습니다.\n' +
-    '재발급 시각: ' + requestedAtText + '\n' +
+    '🔁 **고점체크 인증 코드 재발급**\n' +
+    'SOOP: ' + (soopId ? '@' + soopId : '(확인 필요)') + '\n' +
     deepLink('section-fanpage-subscriptions')
   );
   return null;
