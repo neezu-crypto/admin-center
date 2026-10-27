@@ -3060,6 +3060,66 @@ const onyuGetViewerAccess = onCall(async (request) => {
   return Object.assign({ ok: true, uid }, await getOnyuAccessState(uid, request));
 });
 
+// SOOP Chat SDK 심사 전에는 OAuth 토큰·채팅·후원 이벤트를 전혀 받지 않는다.
+// 인증 스트리머의 사전 동의와 승인 뒤에만 쓸 의상 선택 세션의 서버 전용 골격이다.
+const ONYU_DONATION_INTEGRATIONS_PATH = 'onyuVn/donationIntegrations';
+const ONYU_OUTFIT_DONATION_SESSIONS_PATH = 'onyuVn/outfitDonationSessions';
+
+async function getOnyuDonationStreamer(uid) {
+  const db = getDatabase();
+  const [flagSnap, profileSnap] = await Promise.all([
+    db.ref('users/' + uid + '/streamerVerified').get(),
+    db.ref('streamerVerifications').orderByChild('uid').equalTo(uid).limitToFirst(1).get(),
+  ]);
+  const profile = profileSnap.exists() ? Object.values(profileSnap.val() || {})[0] : null;
+  if (flagSnap.val() !== true && !profile) throw new HttpsError('permission-denied', '인증 스트리머만 방송 후원 연동을 준비할 수 있습니다.');
+  const soopId = normalizeSoopId(profile && profile.soopId);
+  if (!soopId) throw new HttpsError('failed-precondition', '인증된 SOOP 아이디를 찾을 수 없습니다.');
+  return { db, soopId, nickname: String(profile && profile.nickname || '').trim().slice(0, 20) };
+}
+
+const onyuGetDonationIntegrationStatus = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const streamer = await getOnyuDonationStreamer(uid);
+  const data = (await streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid).get()).val() || {};
+  return { ok: true, status: data.status === 'preparing' ? 'preparing' : 'not-prepared', soopId: streamer.soopId, consentedAt: Number(data.consentedAt) || null, sdkApproved: false };
+});
+
+const onyuSetDonationIntegrationPreparation = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const streamer = await getOnyuDonationStreamer(uid);
+  const ref = streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid);
+  if (!(request.data && request.data.enabled === true)) { await ref.remove(); return { ok: true, status: 'not-prepared', sdkApproved: false }; }
+  const now = Date.now();
+  const existing = (await ref.get()).val() || {};
+  await ref.set({ status: 'preparing', soopId: streamer.soopId, nickname: streamer.nickname, consentedAt: Number(existing.consentedAt) || now, updatedAt: now, consentVersion: 1 });
+  return { ok: true, status: 'preparing', sdkApproved: false };
+});
+
+const onyuRegisterOutfitDonationSession = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const chapterId = String(request.data && request.data.chapterId || '');
+  if (!/^ch\d{1,2}$/.test(chapterId)) throw new HttpsError('invalid-argument', '의상 선택 챕터 정보가 올바르지 않습니다.');
+  const streamer = await getOnyuDonationStreamer(uid);
+  const integration = (await streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid).get()).val() || {};
+  // 준비 상태에서는 실시간 감지나 세션 저장을 실행하지 않는다.
+  if (integration.status !== 'active') return { ok: true, enabled: false, reason: integration.status === 'preparing' ? 'soop-approval-pending' : 'not-prepared' };
+  const now = Date.now();
+  const ref = streamer.db.ref(ONYU_OUTFIT_DONATION_SESSIONS_PATH).push();
+  await ref.set({ uid, soopId: streamer.soopId, chapterId, status: 'waiting', openedAt: now, expiresAt: now + 600000 });
+  return { ok: true, enabled: true, sessionId: ref.key, expiresAt: now + 600000 };
+});
+
+const onyuCloseOutfitDonationSession = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const sessionId = String(request.data && request.data.sessionId || '');
+  if (!/^[A-Za-z0-9_-]{10,128}$/.test(sessionId)) return { ok: true, closed: false };
+  const ref = getDatabase().ref(ONYU_OUTFIT_DONATION_SESSIONS_PATH + '/' + sessionId);
+  const snap = await ref.get();
+  if (snap.exists() && snap.val().uid === uid) { await ref.remove(); return { ok: true, closed: true }; }
+  return { ok: true, closed: false };
+});
+
 // 과거 신청의 후원 대조·검수 경로가 사용하는 기록 형식. 신규 구매·선물 신청은 받지 않는다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
 const FANPAGE_SPONSOR_ADS_PATH = 'streamerFanPageSponsorAds';
@@ -5008,6 +5068,10 @@ module.exports = {
   notifyOnyuProductionInquiry,
   notifyOnyuStreamerGameGiftAutoApproval,
   onyuGetViewerAccess,
+  onyuGetDonationIntegrationStatus,
+  onyuSetDonationIntegrationPreparation,
+  onyuRegisterOutfitDonationSession,
+  onyuCloseOutfitDonationSession,
   onyuListStreamerGiftTargets,
   onyuSubmitStreamerGameGift,
   onyuMarkStreamerGameGiftDonationComplete,
