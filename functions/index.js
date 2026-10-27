@@ -3120,6 +3120,30 @@ const onyuCloseOutfitDonationSession = onCall(async (request) => {
   return { ok: true, closed: false };
 });
 
+// SOOP Chat SDK Consent 승인 뒤 사용할 OAuth 반환 주소다. 승인 전에는 인증 코드와
+// 토큰을 교환·저장하지 않고, 브라우저에 코드 원문도 노출하지 않는다. 실제 연동을 켤 때
+// state 검증과 서버 측 토큰 교환을 이 엔드포인트에 추가한다.
+const onyuSoopOAuthCallback = onRequest({ memory: '256MiB' }, async (request, response) => {
+  response.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  response.set('Referrer-Policy', 'no-referrer');
+  response.set('X-Content-Type-Options', 'nosniff');
+  response.set('X-Frame-Options', 'DENY');
+  response.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+  if (request.method !== 'GET') {
+    response.status(405).set('Allow', 'GET').send('Method Not Allowed');
+    return;
+  }
+  const hasError = Boolean(String(request.query && request.query.error || '').trim());
+  const hasCode = Boolean(String(request.query && request.query.code || '').trim());
+  const title = hasError ? 'SOOP 연동이 완료되지 않았습니다' : hasCode ? 'SOOP 인증 응답을 받았습니다' : 'SOOP 연동 준비 페이지';
+  const message = hasError
+    ? '인증 또는 동의가 취소되었습니다. 심사 승인 뒤 온이유 게임에서 다시 시도할 수 있습니다.'
+    : hasCode
+      ? 'SOOP Chat SDK 심사 승인 전이므로 인증 코드나 토큰을 저장하거나 사용하지 않았습니다.'
+      : '이 주소는 온이유 방송 후원 자동연동의 OAuth 반환 주소입니다. 심사 승인 전에는 연동이 활성화되지 않습니다.';
+  response.status(200).type('html').send(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#f4f0fa;color:#272033;font:16px/1.65 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}.card{width:min(520px,100%);padding:32px;border:1px solid #d8cde8;border-radius:20px;background:#fff;box-shadow:0 18px 50px #3e27601a}h1{margin:0 0 12px;font-size:25px;line-height:1.3}p{margin:0;color:#5e566b}.note{margin-top:20px;padding:14px 16px;border-radius:12px;background:#f5f0fb;color:#55466d;font-size:14px}</style></head><body><main class="card"><h1>${title}</h1><p>${message}</p><div class="note">온이유 · 방송 후원 자동연동</div></main></body></html>`);
+});
+
 // 과거 신청의 후원 대조·검수 경로가 사용하는 기록 형식. 신규 구매·선물 신청은 받지 않는다.
 const ONYU_STREAMER_GIFT_BALLOONS = 50;
 const FANPAGE_SPONSOR_ADS_PATH = 'streamerFanPageSponsorAds';
@@ -5072,6 +5096,7 @@ module.exports = {
   onyuSetDonationIntegrationPreparation,
   onyuRegisterOutfitDonationSession,
   onyuCloseOutfitDonationSession,
+  onyuSoopOAuthCallback,
   onyuListStreamerGiftTargets,
   onyuSubmitStreamerGameGift,
   onyuMarkStreamerGameGiftDonationComplete,
