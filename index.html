@@ -855,8 +855,8 @@
     </div>
 
     <div class="card" id="section-lifegame-player-uids">
-      <h2>인생게임 플레이 유저 UID 집계</h2>
-      <p class="hint">주인공 이름을 정하고 0세 플레이가 시작된 시점(startPlaythrough 성공)을 집계합니다. UID별 최초 시작 시각·최근 시작 시각·게임 시작 횟수를 표시합니다. 집계는 기능 배포 이후 시작부터 누적됩니다.</p>
+      <h2>인생게임 플레이 유저 UID 기록 (신규 수집 중단)</h2>
+      <p class="hint">표시되는 내용은 수집 중단 전에 저장된 기록입니다. UID별 플레이 시작 기록은 더 이상 저장하지 않으며, 기존 기록은 열람용으로 보존됩니다.</p>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:10px 0;">
         <input id="lifeGamePlayerUidSearch" type="search" placeholder="UID 검색" autocomplete="off" style="min-width:220px; flex:1;">
         <button id="lifeGamePlayerUidRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
@@ -1721,7 +1721,7 @@
       sections: ['section-lifegame-current-sponsor', 'section-fanpage-sponsor-ads'],
     },
     {
-      id: 'lifegame-player-uids', label: '인생게임 플레이 유저 UID 집계', icon: '🧾', role: 'admin',
+      id: 'lifegame-player-uids', label: '인생게임 UID 기록 (신규 수집 중단)', icon: '🧾', role: 'admin',
       sections: ['section-lifegame-player-uids'],
     },
     {
@@ -6584,7 +6584,7 @@
     { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-played-streamers', label: '🎮 인생게임 스트리머 검수 목록', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-current-sponsor', label: '📢 오늘의 후원 스트리머 광고', role: 'admin', group: '콘텐츠·현황' },
-    { id: 'section-lifegame-player-uids', label: '🧾 인생게임 플레이 유저 UID 집계', role: 'admin', group: '콘텐츠·현황' },
+    { id: 'section-lifegame-player-uids', label: '🧾 인생게임 UID 기록 (신규 수집 중단)', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },

@@ -2657,8 +2657,8 @@ const getLifeGameStats = onCall(async (request) => {
   };
 });
 
-// 인생게임 이름 확정 후 0세 판이 시작된 UID 집계. UID별 첫 시작/최근 시작과
-// 시작 횟수는 streamer-life-game의 서버 함수가 lifeGame/playerStartRecords에 기록한다.
+// 인생게임 UID 시작 기록은 신규 수집이 중단됐다. 이 함수는 수집 중단 전의
+// 기록을 관리자에게 조회하는 용도로만 유지한다.
 const listLifeGamePlayerStartRecords = onCall(async (request) => {
   await requireAdmin(request);
   const snap = await getDatabase().ref('lifeGame/playerStartRecords').get();
