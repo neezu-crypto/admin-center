@@ -2537,6 +2537,13 @@ const getPurchaseOverview = onCall(async (request) => {
         nickname: rec.nickname || '',
         label: src.labelField ? (rec[src.labelField] || '') : '',
         amount: src.amountField ? (rec[src.amountField] || 0) : null,
+        paymentMethod: rec.paymentMethod || '',
+        benefitMonth: rec.benefitMonth || '',
+        benefitUnits: rec.benefitUnits || 0,
+        benefitUnit: rec.benefitUnit || '',
+        refundStatus: rec.refundStatus || '',
+        refundUnits: rec.refundUnits || 0,
+        status: rec.status || '',
         at: rec.purchasedAt || rec.requestedAt || rec.openedAt || rec.createdAt || 0,
       });
     });

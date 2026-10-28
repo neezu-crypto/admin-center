@@ -1154,7 +1154,7 @@
   <div id="reviewQueueShell" hidden>
     <div class="card" id="section-fanpage-subscriptions">
       <h2>스트리머 시리즈 통합 구독 인증</h2>
-      <p class="hint">신청 신호만 실시간으로 수신합니다. 각 신청은 댓글 코드·댓글 작성자 SOOP 아이디·현재 구독 상태·실제 만료일을 확인한 뒤 승인하세요. 승인된 권한은 팬페이지의 모든 구독자 전용 콘텐츠에 적용됩니다.</p>
+      <p class="hint">신청 신호만 실시간으로 수신합니다. 각 신청은 댓글 코드·댓글 작성자 SOOP 아이디·현재 구독 상태·실제 만료일을 확인한 뒤 승인하세요. 승인된 통합 구독은 고점체크와 갤러리, 주식시장의 출석·복권·월 홍보 이용권 5종·월 무료 보물상자 등 모든 구독자 전용 서비스에 적용됩니다.</p>
       <button id="fanpageSubscriptionRefreshBtn" class="perm-refresh-btn" type="button">신청 새로고침</button>
       <div id="fanpageSubscriptionStatus" class="hint" style="margin-top:10px;" role="status" aria-live="polite">검수 세션을 열면 대기 신청을 불러옵니다.</div>
       <div id="fanpageSubscriptionList" style="margin-top:10px;"></div>
@@ -1915,6 +1915,7 @@
       presetMergeFailures = {};
       listingRequests = {};
       Object.keys(purchaseQueueData).forEach(function (path) { delete purchaseQueueData[path]; });
+      Object.keys(purchaseQueueStatusData).forEach(function (path) { delete purchaseQueueStatusData[path]; });
       updateReviewAlertBadge();
       clearMarketCountdowns();
     }
@@ -4929,10 +4930,13 @@
       row.className = 'audit-row';
       const timeText = e.at ? new Date(e.at).toLocaleString('ko-KR') : '';
       const unitSuffix = PURCHASE_ITEM_DONATION_TYPES.has(e.itemType) ? '개' : '원';
+      const benefitDetail = e.paymentMethod === 'subscription-entitlement'
+        ? '통합 구독 이용권 · ' + (e.benefitMonth || '-') + ' · ' + (e.benefitUnits || 0) + (e.benefitUnit || '') + (e.refundStatus === 'returned' ? ' · 같은 달 반환 ' + (e.refundUnits || 0) + (e.benefitUnit || '') : e.refundStatus === 'expired' ? ' · 신청 월 만료로 미반환' : '')
+        : '';
       row.innerHTML =
         '<div class="audit-main"><b>' + escapeHtml(PURCHASE_ITEM_LABEL[e.itemType] || e.itemType) + '</b>' +
         '<span class="source-tag ' + e.gameId + '">' + escapeHtml(SOURCE_LABEL[e.gameId] || e.gameId) + '</span></div>' +
-        (e.label ? '<span class="audit-detail">' + escapeHtml(e.label) + (e.amount ? ' · ' + Math.round(e.amount).toLocaleString('ko-KR') + unitSuffix : '') + '</span>' : '') +
+        (e.label || benefitDetail ? '<span class="audit-detail">' + escapeHtml([e.label, benefitDetail].filter(Boolean).join(' · ')) + (e.amount ? ' · ' + Math.round(e.amount).toLocaleString('ko-KR') + unitSuffix : '') + '</span>' : '') +
         '<span class="audit-time">' + timeText + '</span>';
       userDetailPurchasesEl.appendChild(row);
     });
@@ -5585,10 +5589,10 @@
   let presetMergeFailures = {};
   let listingRequests = {};
   const purchaseQueueData = {}; // path -> RTDB raw object
+  const purchaseQueueStatusData = {}; // path -> status -> RTDB raw object
 
-  // 배너/카드배너/차트배너/고정/중계방 5종은 2026-09-09부터 게임자산 즉시차감
-  // 방식에서 원래의 방송 후원 확인 방식(status: "pending" → 관리자 승인)으로
-  // 되돌아갔다 — 이 큐에 실제로 나타난다.
+  // 신규 배너/카드배너/차트배너/고정/중계방 신청은 통합 구독 이용권이며,
+  // 과거 별풍선 신청도 같은 큐에서 결제 방식과 함께 검수한다.
   const PURCHASE_QUEUE_SOURCES = [
     { path: 'bettingMarket/chestPurchaseRequests', label: '보물상자 구매(배팅시장)', kind: 'bmChest' },
     { path: 'chartBannerRequests', label: '차트 배너 신청', kind: 'chartBanner' },
@@ -5644,10 +5648,16 @@
       { key: 'listingRequests', query: query(ref(db, 'listingRequests'), orderByChild('status'), equalTo('pending'), limitToLast(1)) },
     ];
     PURCHASE_QUEUE_SOURCES.forEach(function (src) {
-      const queueQuery = src.kind === 'bmChest'
-        ? query(ref(db, src.path), limitToLast(1))
-        : query(ref(db, src.path), orderByChild('status'), equalTo('pending'), limitToLast(1));
-      sources.push({ key: 'purchase:' + src.path, query: queueQuery });
+      if (src.kind === 'bmChest') {
+        sources.push({ key: 'purchase:' + src.path, query: query(ref(db, src.path), limitToLast(1)) });
+      } else {
+        ['pending', 'approving', 'rejecting'].forEach(function (status) {
+          sources.push({
+            key: 'purchase:' + src.path + ':' + status,
+            query: query(ref(db, src.path), orderByChild('status'), equalTo(status), limitToLast(1)),
+          });
+        });
+      }
     });
     ['pendingValidation', 'closed', 'pendingSettlement'].forEach(function (status) {
       sources.push({
@@ -6002,14 +6012,27 @@
       updateReviewAlertBadge();
     }));
     PURCHASE_QUEUE_SOURCES.forEach(function (src) {
-      const queueQuery = src.kind === 'bmChest'
-        ? query(ref(db, src.path), limitToLast(200))
-        : query(ref(db, src.path), orderByChild('status'), equalTo('pending'), limitToLast(200));
-      registerSessionUnsubscriber('review', onValue(queueQuery, function (snap) {
-        purchaseQueueData[src.path] = snap.val() || {};
-        renderPurchaseApprovalList();
-        updateReviewAlertBadge();
-      }));
+      if (src.kind === 'bmChest') {
+        registerSessionUnsubscriber('review', onValue(query(ref(db, src.path), limitToLast(200)), function (snap) {
+          purchaseQueueData[src.path] = snap.val() || {};
+          renderPurchaseApprovalList();
+          updateReviewAlertBadge();
+        }));
+        return;
+      }
+      purchaseQueueStatusData[src.path] = {};
+      ['pending', 'approving', 'rejecting'].forEach(function (status) {
+        const queueQuery = query(ref(db, src.path), orderByChild('status'), equalTo(status), limitToLast(200));
+        registerSessionUnsubscriber('review', onValue(queueQuery, function (snap) {
+          purchaseQueueStatusData[src.path][status] = snap.val() || {};
+          purchaseQueueData[src.path] = Object.assign({},
+            purchaseQueueStatusData[src.path].pending || {},
+            purchaseQueueStatusData[src.path].approving || {},
+            purchaseQueueStatusData[src.path].rejecting || {});
+          renderPurchaseApprovalList();
+          updateReviewAlertBadge();
+        }));
+      });
     });
   }
 
@@ -6180,8 +6203,19 @@
   }
 
   // ─── 상품 구매 승인 검수 ───
+  function isSubscriptionBenefitRequest(e) {
+    return e.paymentMethod === 'subscription-entitlement';
+  }
+  function formatPromoPayment(e, units, unit) {
+    if (isSubscriptionBenefitRequest(e)) {
+      return '통합 구독 이용권 · ' + (e.benefitMonth || '-') + ' · ' + (e.benefitUnits || units || 0) + (e.benefitUnit || unit);
+    }
+    return '기존 별풍선 신청 · ' + (e.starBalloons || 0).toLocaleString() + '개';
+  }
   function formatPurchaseEntryDetail(e) {
     const bits = [];
+    if (e.status === 'approving') bits.push('승인 처리 중');
+    if (e.status === 'rejecting') bits.push('거절 처리 중');
     switch (e._kind) {
       case 'bmChest':
         bits.push('수량 ' + e.qty + (e.bonusQty ? '(+보너스 ' + e.bonusQty + ')' : ''));
@@ -6189,13 +6223,11 @@
         break;
       case 'chartBanner':
         bits.push('종목: ' + (e.stockName || e.stockId));
-        bits.push((e.days || 0) + '일');
-        bits.push('별풍선 ' + (e.starBalloons || 0).toLocaleString());
+        bits.push(formatPromoPayment(e, e.days, '일'));
         break;
       case 'cardBanner':
         bits.push('종목: ' + (e.nickname || e.stockId));
-        bits.push((e.days || 0) + '일');
-        bits.push('별풍선 ' + (e.starBalloons || 0).toLocaleString());
+        bits.push(formatPromoPayment(e, e.days, '일'));
         break;
       case 'treasureChest':
         bits.push('상자 ' + e.chestCount + (e.bonusChestCount ? '(+보너스 ' + e.bonusChestCount + ')' : ''));
@@ -6209,13 +6241,13 @@
         bits.push('soopId: ' + e.soopId);
         break;
       case 'banner':
-        bits.push((e.days || 0) + '일 · 별풍선 ' + (e.starBalloons || 0).toLocaleString());
+        bits.push(formatPromoPayment(e, e.days, '일'));
         break;
       case 'pin':
-        bits.push('종목: ' + e.stockName + ' · ' + (e.hours || 0) + '시간 · 별풍선 ' + (e.starBalloons || 0).toLocaleString());
+        bits.push('종목: ' + e.stockName + ' · ' + formatPromoPayment(e, e.hours, '시간'));
         break;
       case 'relayRoom':
-        bits.push((e.hours || 0) + '시간 · 별풍선 ' + (e.starBalloons || 0).toLocaleString());
+        bits.push(formatPromoPayment(e, e.hours, '시간'));
         break;
       case 'lifeGameSponsor':
         bits.push('@' + (e.soopId || '?'));
@@ -6233,7 +6265,7 @@
       const data = purchaseQueueData[src.path] || {};
       Object.keys(data).forEach(function (id) {
         const rec = data[id];
-        if (src.kind !== 'bmChest' && rec.status !== 'pending') return;
+        if (src.kind !== 'bmChest' && ['pending', 'approving', 'rejecting'].indexOf(rec.status) < 0) return;
         entries.push(Object.assign({ id: id, _kind: src.kind, _label: src.label }, rec));
       });
     });
@@ -6443,13 +6475,13 @@
     if (e._kind === 'bmChest') {
       call = bmApproveChestPurchaseFn({ requestId: e.id });
     } else if (e._kind === 'banner') {
-      const days = window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
+      const days = isSubscriptionBenefitRequest(e) ? String(e.days || 7) : window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
       if (days === null) return;
       const nickname = window.prompt('닉네임(오타 수정 시에만 변경):', e.nickname || '');
       if (nickname === null) return;
       call = smAdminActionFn({ action: 'approveBannerRequest', payload: { requestId: e.id, days: days, nickname: nickname } });
     } else if (e._kind === 'chartBanner') {
-      const days = window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
+      const days = isSubscriptionBenefitRequest(e) ? String(e.days || 7) : window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
       if (days === null) return;
       const nickname = window.prompt('닉네임(오타 수정 시에만 변경):', e.nickname || '');
       if (nickname === null) return;
@@ -6459,19 +6491,19 @@
       if (promoLink === null) return;
       call = smAdminActionFn({ action: 'approveChartBannerRequest', payload: { requestId: e.id, days: days, nickname: nickname, bannerImg: bannerImg, promoLink: promoLink } });
     } else if (e._kind === 'cardBanner') {
-      const days = window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
+      const days = isSubscriptionBenefitRequest(e) ? String(e.days || 7) : window.prompt('노출 기간(일)을 입력하세요:', String(e.days || 7));
       if (days === null) return;
       const nickname = window.prompt('종목명(오타 수정 시에만 변경):', e.nickname || '');
       if (nickname === null) return;
       call = smAdminActionFn({ action: 'approveCardBannerRequest', payload: { requestId: e.id, days: days, nickname: nickname } });
     } else if (e._kind === 'pin') {
-      const hours = window.prompt('고정노출 시간(시간 단위)을 입력하세요:', String(e.hours || 24));
+      const hours = isSubscriptionBenefitRequest(e) ? String(e.hours || 12) : window.prompt('고정노출 시간(시간 단위)을 입력하세요:', String(e.hours || 24));
       if (hours === null) return;
       const stockName = window.prompt('종목명(오타 수정 시에만 변경):', e.stockName || '');
       if (stockName === null) return;
       call = smAdminActionFn({ action: 'approvePinRequest', payload: { requestId: e.id, hours: hours, stockName: stockName } });
     } else if (e._kind === 'relayRoom') {
-      const hours = window.prompt('중계방 홍보 시간(시간 단위)을 입력하세요:', String(e.hours || 24));
+      const hours = isSubscriptionBenefitRequest(e) ? String(e.hours || 8) : window.prompt('중계방 홍보 시간(시간 단위)을 입력하세요:', String(e.hours || 24));
       if (hours === null) return;
       const nickname = window.prompt('닉네임(오타 수정 시에만 변경):', e.nickname || '');
       if (nickname === null) return;
