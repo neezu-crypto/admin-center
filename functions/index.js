@@ -3,7 +3,7 @@ const { onValueCreated, onValueUpdated, onValueWritten } = require('firebase-fun
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
-const { getDatabase } = require('firebase-admin/database');
+const { getDatabase, getDatabaseWithUrl } = require('firebase-admin/database');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
@@ -13,7 +13,7 @@ const {
 const app = initializeApp();
 const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
 const MESSENGER_DATABASE_INSTANCE = 'streamer-messenger-rtdb';
-const messengerDatabase = () => getDatabase(app, MESSENGER_DATABASE_URL);
+const messengerDatabase = () => getDatabaseWithUrl(MESSENGER_DATABASE_URL, app);
 let messengerMigrationStateCache = { paused: false, expiresAt: 0 };
 async function isMessengerDatabaseMigrationPaused() {
   if (Date.now() < messengerMigrationStateCache.expiresAt) return messengerMigrationStateCache.paused;
@@ -536,9 +536,9 @@ const listAuditLogOverview = onCall(async (request) => {
   const messengerDb = messengerDatabase();
   const [bmLogSnap, smLogSnap, galLogSnap, messengerLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
-    db.ref('adminAuditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
-    db.ref('gallery/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
-    messengerDb.ref('streamerMessenger/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    db.ref('adminAuditLog').orderByKey().limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    db.ref('gallery/auditLog').orderByKey().limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    messengerDb.ref('streamerMessenger/auditLog').orderByKey().limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
   ]);
 
   const bmLog = bmLogSnap.val() || {};
