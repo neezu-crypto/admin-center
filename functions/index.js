@@ -10,7 +10,20 @@ const {
   notificationFallsInDonationRequestWindow,
 } = require('./donation-verification');
 
-initializeApp();
+const app = initializeApp();
+const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
+const MESSENGER_DATABASE_INSTANCE = 'streamer-messenger-rtdb';
+const messengerDatabase = () => getDatabase(app, MESSENGER_DATABASE_URL);
+let messengerMigrationStateCache = { paused: false, expiresAt: 0 };
+async function isMessengerDatabaseMigrationPaused() {
+  if (Date.now() < messengerMigrationStateCache.expiresAt) return messengerMigrationStateCache.paused;
+  const state = (await getDatabase().ref('messengerDatabaseMigration/state').get()).val() || {};
+  messengerMigrationStateCache = {
+    paused: !!state.phase && state.phase !== 'ready',
+    expiresAt: Date.now() + 3000,
+  };
+  return messengerMigrationStateCache.paused;
+}
 
 // 07번 — 주식시장·배팅시장과 같은 관리자 이메일. uid 위변조 검증 원칙(그 두 저장소와 동일):
 // 대상 uid는 항상 request.auth.uid에서만 가져오고, 클라이언트가 보낸 값은 신뢰하지 않는다.
@@ -518,12 +531,14 @@ const listStreamerVerificationOverview = onCall(async (request) => {
 const AUDIT_OVERVIEW_LIMIT = 100;
 const listAuditLogOverview = onCall(async (request) => {
   await requireAdmin(request);
+  if (await isMessengerDatabaseMigrationPaused()) throw new HttpsError('unavailable', '메신저 데이터베이스 전환 중이므로 잠시 후 다시 시도해 주세요.');
   const db = getDatabase();
+  const messengerDb = messengerDatabase();
   const [bmLogSnap, smLogSnap, galLogSnap, messengerLogSnap] = await Promise.all([
     db.ref('bettingMarket/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('adminAuditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
     db.ref('gallery/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
-    db.ref('streamerMessenger/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
+    messengerDb.ref('streamerMessenger/auditLog').orderByChild('at').limitToLast(AUDIT_OVERVIEW_LIMIT).get(),
   ]);
 
   const bmLog = bmLogSnap.val() || {};
@@ -1982,7 +1997,11 @@ const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}'
 const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval');
 const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval');
 const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
-const notifyMessengerReport = onValueCreated('/streamerMessenger/reports/{id}', async (event) => {
+const notifyMessengerReport = onValueCreated({
+  ref: '/streamerMessenger/reports/{id}',
+  instance: MESSENGER_DATABASE_INSTANCE,
+  region: 'us-central1',
+}, async (event) => {
   const reportId = String(event.params.id || '').replace(/[\r\n`]/g, '').slice(0, 100);
   const data = event.data.val() || {};
   const at = Number(data.createdAt) || Date.now();
@@ -2554,24 +2573,28 @@ async function trimOldPresenceHourly(db, appId) {
 // Cloud Scheduler 콘솔이나 firebase functions:log로 확인할 것.
 const sampleConcurrentUsers = onSchedule('every 5 minutes', async function () {
   const db = getDatabase();
+  const messengerDb = messengerDatabase();
+  const messengerMigrationPaused = await isMessengerDatabaseMigrationPaused();
   const now = Date.now();
   const hourKey = new Date(now).toISOString().slice(0, 13); // YYYY-MM-DDTHH (UTC 기준 — 관리 도구용이라 KST 변환 없이 단순화)
 
   await Promise.all(PRESENCE_APPS.map(async function (appId) {
-    const snap = await db.ref('presence/' + appId).get();
+    if (appId === 'streamerMessenger' && messengerMigrationPaused) return;
+    const appDb = appId === 'streamerMessenger' ? messengerDb : db;
+    const snap = await appDb.ref('presence/' + appId).get();
     const users = snap.val() || {};
     let activeCount = 0;
     Object.values(users).forEach(function (u) {
       if (u && typeof u.lastSeen === 'number' && now - u.lastSeen <= PRESENCE_GRACE_MS) activeCount++;
     });
 
-    const bucketRef = db.ref('analytics/presenceHourly/' + appId + '/' + hourKey);
+    const bucketRef = appDb.ref('analytics/presenceHourly/' + appId + '/' + hourKey);
     const bucketSnap = await bucketRef.get();
     const currentPeak = (bucketSnap.val() && bucketSnap.val().peak) || 0;
     if (activeCount > currentPeak) {
       await bucketRef.set({ peak: activeCount, sampledAt: now });
     }
-    await trimOldPresenceHourly(db, appId);
+    await trimOldPresenceHourly(appDb, appId);
   }));
 });
 
@@ -2581,6 +2604,8 @@ const getVisitorAnalytics = onCall(async (request) => {
   await requireAdmin(request);
   const hours = Math.min(Math.max(parseInt((request.data || {}).hours, 10) || 24, 1), 168);
   const db = getDatabase();
+  const messengerDb = messengerDatabase();
+  const messengerMigrationPaused = await isMessengerDatabaseMigrationPaused();
   const now = Date.now();
   const bucketKeys = [];
   for (let i = hours - 1; i >= 0; i--) {
@@ -2589,7 +2614,12 @@ const getVisitorAnalytics = onCall(async (request) => {
 
   const results = {};
   await Promise.all(PRESENCE_APPS.map(async function (appId) {
-    const ref = db.ref('analytics/presenceHourly/' + appId);
+    if (appId === 'streamerMessenger' && messengerMigrationPaused) {
+      results[appId] = bucketKeys.map(function (hour) { return { hour, peak: 0 }; });
+      return;
+    }
+    const appDb = appId === 'streamerMessenger' ? messengerDb : db;
+    const ref = appDb.ref('analytics/presenceHourly/' + appId);
     const snap = bucketKeys.length
       ? await ref.orderByKey().startAt(bucketKeys[0]).endAt(bucketKeys[bucketKeys.length - 1]).get()
       : await ref.get();
