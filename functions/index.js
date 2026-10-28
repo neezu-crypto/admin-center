@@ -2360,7 +2360,7 @@ const notifyGalleryImageUpload = onValueCreated('/gallery/images/{id}', async (e
 // 그대로 보여줘서, 새 앱이 이 매핑에 등록되는 걸 잊었을 때도 조용히
 // "주식시장"으로 오표시되지 않고 눈에 띄게 한다(2026-09-06, lifeGame/gallery
 // 추가 전엔 betting이 아니면 전부 "주식시장"으로 잘못 표시되는 버그가 있었음).
-const VISIT_MARKET_LABELS = { betting: '배팅시장', stock: '주식시장', lifeGame: '인생게임', gallery: '갤러리', onyuVn: '온이유', streamerFanPage: '팬페이지', viewerStats: '고점체크' };
+const VISIT_MARKET_LABELS = { betting: '배팅시장', stock: '주식시장', lifeGame: '인생게임', gallery: '갤러리', onyuVn: '온이유', streamerFanPage: '팬페이지', viewerStats: '고점체크', streamerMessenger: '메신저' };
 const notifyVerifiedStreamerVisit = onValueCreated('/verifiedStreamerVisits/{entryId}', async (event) => {
   const data = event.data.val() || {};
   const marketLabel = VISIT_MARKET_LABELS[data.market] || (data.market || '알 수 없는 앱');
