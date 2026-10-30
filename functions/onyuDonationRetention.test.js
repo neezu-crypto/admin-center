@@ -5,7 +5,7 @@ const {
   integrationExpiresAt,
   isIntegrationExpired,
   isOutfitSessionExpired,
-  removeExpiredRecords,
+  removeExpiredRecordIfMatches,
 } = require('./onyuDonationRetention');
 
 test('preparation consent expires 24 hours after consent', () => {
@@ -28,25 +28,27 @@ test('outfit sessions expire at their own shorter expiry', () => {
   assert.equal(isOutfitSessionExpired({}, 1000), false);
 });
 
-test('cleanup transaction preserves renewed records and removes only expired ones', async () => {
-  const records = { old: { expiresAt: 10 }, renewed: { expiresAt: 100 } };
+test('scheduled task removes its expired record only if it has not been renewed', async () => {
+  const records = { consent: { expiresAt: 100 }, session: { expiresAt: 100 } };
   const db = {
     ref(path) {
       const key = path.split('/').at(-1);
-      return {
-        async get() {
-          return { val: () => records };
-        },
-        async transaction(update) {
-          const next = update(records[key]);
-          if (next !== records[key]) records[key] = next;
-          return { committed: true, snapshot: { val: () => records[key] ?? null } };
-        },
-      };
+      return { async transaction(update) {
+        const next = update(records[key]);
+        if (next !== records[key]) records[key] = next;
+        return { committed: true, snapshot: { val: () => records[key] ?? null } };
+      } };
     },
   };
 
-  assert.equal(await removeExpiredRecords(db, 'integrations', (record, now) => record.expiresAt <= now, 50), 1);
-  assert.equal(records.old, null);
-  assert.deepEqual(records.renewed, { expiresAt: 100 });
+  assert.equal(await removeExpiredRecordIfMatches(db, 'integrations', 'consent', integrationExpiresAt, 100, 100), true);
+  assert.equal(records.consent, null);
+  assert.equal(await removeExpiredRecordIfMatches(db, 'sessions', 'session', record => Number(record.expiresAt), 100, 100), true);
+  assert.equal(records.session, null);
+
+  records.consent = { expiresAt: 200 };
+  assert.equal(await removeExpiredRecordIfMatches(db, 'integrations', 'consent', integrationExpiresAt, 200, 199), false);
+  assert.deepEqual(records.consent, { expiresAt: 200 });
+  assert.equal(await removeExpiredRecordIfMatches(db, 'integrations', 'consent', integrationExpiresAt, 100, 200), false);
+  assert.deepEqual(records.consent, { expiresAt: 200 });
 });

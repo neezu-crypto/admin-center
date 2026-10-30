@@ -19,20 +19,14 @@ function isOutfitSessionExpired(record, now = Date.now()) {
   return expiry > 0 && expiry <= now;
 }
 
-async function removeExpiredRecords(db, path, isExpired, now = Date.now()) {
-  const snapshot = await db.ref(path).get();
-  const records = snapshot.val() || {};
-  const keys = Object.keys(records);
-  let removed = 0;
-
-  for (const key of keys) {
-    const result = await db.ref(`${path}/${key}`).transaction((current) => {
-      if (!current || !isExpired(current, now)) return current;
-      return null;
-    });
-    if (result.committed && result.snapshot.val() === null) removed += 1;
-  }
-  return removed;
+async function removeExpiredRecordIfMatches(db, path, key, getExpiry, expectedExpiry, now = Date.now()) {
+  const expected = Number(expectedExpiry) || 0;
+  if (!expected || expected > now) return false;
+  const result = await db.ref(`${path}/${key}`).transaction((current) => {
+    if (!current || Number(getExpiry(current)) !== expected || Number(getExpiry(current)) > now) return current;
+    return null;
+  });
+  return result.committed && result.snapshot.val() === null;
 }
 
 module.exports = {
@@ -40,5 +34,5 @@ module.exports = {
   integrationExpiresAt,
   isIntegrationExpired,
   isOutfitSessionExpired,
-  removeExpiredRecords,
+  removeExpiredRecordIfMatches,
 };

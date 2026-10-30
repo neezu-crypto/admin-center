@@ -1,9 +1,11 @@
 const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https');
 const { onValueCreated, onValueUpdated, onValueWritten } = require('firebase-functions/v2/database');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onTaskDispatched } = require('firebase-functions/tasks');
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getDatabase, getDatabaseWithUrl } = require('firebase-admin/database');
+const { getFunctions } = require('firebase-admin/functions');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
@@ -13,8 +15,7 @@ const {
   DONATION_CONSENT_TTL_MS,
   integrationExpiresAt,
   isIntegrationExpired,
-  isOutfitSessionExpired,
-  removeExpiredRecords,
+  removeExpiredRecordIfMatches,
 } = require('./onyuDonationRetention');
 
 const app = initializeApp();
@@ -3108,6 +3109,14 @@ const onyuGetViewerAccess = onCall(async (request) => {
 // 인증 스트리머의 사전 동의와 승인 뒤에만 쓸 의상 선택 세션의 서버 전용 골격이다.
 const ONYU_DONATION_INTEGRATIONS_PATH = 'onyuVn/donationIntegrations';
 const ONYU_OUTFIT_DONATION_SESSIONS_PATH = 'onyuVn/outfitDonationSessions';
+const ONYU_DONATION_EXPIRY_TASK_NAME = 'cleanupOnyuDonationExpiryTask';
+
+async function enqueueOnyuDonationExpiry(kind, key, expiresAt) {
+  await getFunctions(app).taskQueue(ONYU_DONATION_EXPIRY_TASK_NAME).enqueue(
+    { kind, key, expiresAt },
+    { scheduleTime: new Date(expiresAt), dispatchDeadlineSeconds: 60 },
+  );
+}
 
 async function getOnyuDonationStreamer(uid) {
   const db = getDatabase();
@@ -3145,6 +3154,7 @@ const onyuSetDonationIntegrationPreparation = onCall(async (request) => {
   const existingExpiry = integrationExpiresAt(existing);
   const consentedAt = existing.status === 'preparing' && existingExpiry > now ? Number(existing.consentedAt) || now : now;
   const expiresAt = consentedAt + DONATION_CONSENT_TTL_MS;
+  await enqueueOnyuDonationExpiry('integration', uid, expiresAt);
   await ref.set({ status: 'preparing', soopId: streamer.soopId, nickname: streamer.nickname, consentedAt, expiresAt, updatedAt: now, consentVersion: 1 });
   return { ok: true, status: 'preparing', consentedAt, expiresAt, sdkApproved: false };
 });
@@ -3159,8 +3169,10 @@ const onyuRegisterOutfitDonationSession = onCall(async (request) => {
   if (integration.status !== 'active' || isIntegrationExpired(integration)) return { ok: true, enabled: false, reason: isIntegrationExpired(integration) ? 'consent-expired' : integration.status === 'preparing' ? 'soop-approval-pending' : 'not-prepared' };
   const now = Date.now();
   const ref = streamer.db.ref(ONYU_OUTFIT_DONATION_SESSIONS_PATH).push();
-  await ref.set({ uid, soopId: streamer.soopId, chapterId, status: 'waiting', openedAt: now, expiresAt: now + 600000 });
-  return { ok: true, enabled: true, sessionId: ref.key, expiresAt: now + 600000 };
+  const expiresAt = now + 600000;
+  await enqueueOnyuDonationExpiry('session', ref.key, expiresAt);
+  await ref.set({ uid, soopId: streamer.soopId, chapterId, status: 'waiting', openedAt: now, expiresAt });
+  return { ok: true, enabled: true, sessionId: ref.key, expiresAt };
 });
 
 const onyuCloseOutfitDonationSession = onCall(async (request) => {
@@ -3173,16 +3185,24 @@ const onyuCloseOutfitDonationSession = onCall(async (request) => {
   return { ok: true, closed: false };
 });
 
-// 준비 동의는 24시간, 의상 선택 세션은 각 expiresAt까지만 유효하다.
-// 매 5분 정리로 만료 직후의 접근을 차단하고, KST 자정 실행분으로 누락을 다시 점검한다.
-const cleanupOnyuDonationRetention = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Asia/Seoul', timeoutSeconds: 120 }, async () => {
+// 등록된 동의나 세션이 있을 때만 해당 만료 시각에 일회성 작업이 실행된다.
+// 상시 폴링이나 주기 스케줄은 사용하지 않는다. Cloud Tasks가 실패 작업을 재시도한다.
+const cleanupOnyuDonationExpiryTask = onTaskDispatched({
+  retryConfig: { maxAttempts: 10, minBackoffSeconds: 60, maxBackoffSeconds: 3600, maxDoublings: 5 },
+  rateLimits: { maxConcurrentDispatches: 5 },
+}, async (request) => {
+  const data = request.data || {};
+  const kind = String(data.kind || '');
+  const key = String(data.key || '');
+  const expectedExpiry = Number(data.expiresAt) || 0;
+  const validKey = kind === 'integration' ? /^[A-Za-z0-9_-]{1,128}$/.test(key)
+    : kind === 'session' ? /^[A-Za-z0-9_-]{10,128}$/.test(key) : false;
+  if (!validKey || !expectedExpiry) return;
+
   const db = getDatabase();
-  const now = Date.now();
-  const [integrationsRemoved, sessionsRemoved] = await Promise.all([
-    removeExpiredRecords(db, ONYU_DONATION_INTEGRATIONS_PATH, isIntegrationExpired, now),
-    removeExpiredRecords(db, ONYU_OUTFIT_DONATION_SESSIONS_PATH, isOutfitSessionExpired, now),
-  ]);
-  return { integrationsRemoved, sessionsRemoved };
+  const path = kind === 'integration' ? ONYU_DONATION_INTEGRATIONS_PATH : ONYU_OUTFIT_DONATION_SESSIONS_PATH;
+  const getExpiry = kind === 'integration' ? integrationExpiresAt : (record) => Number(record && record.expiresAt) || 0;
+  await removeExpiredRecordIfMatches(db, path, key, getExpiry, expectedExpiry);
 });
 
 // SOOP Chat SDK Consent 승인 뒤 사용할 OAuth 반환 주소다. 승인 전에는 인증 코드와
@@ -5161,7 +5181,7 @@ module.exports = {
   onyuSetDonationIntegrationPreparation,
   onyuRegisterOutfitDonationSession,
   onyuCloseOutfitDonationSession,
-  cleanupOnyuDonationRetention,
+  cleanupOnyuDonationExpiryTask,
   onyuSoopOAuthCallback,
   onyuListStreamerGiftTargets,
   onyuSubmitStreamerGameGift,
