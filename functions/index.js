@@ -21,7 +21,10 @@ const {
 const app = initializeApp();
 const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
 const MESSENGER_DATABASE_INSTANCE = 'streamer-messenger-rtdb';
+const FANPAGE_DATABASE_URL = 'https://streamer-fanpage-rtdb.firebaseio.com';
+const FANPAGE_DATABASE_INSTANCE = 'streamer-fanpage-rtdb';
 const messengerDatabase = () => getDatabaseWithUrl(MESSENGER_DATABASE_URL, app);
+const fanpageDatabase = () => getDatabaseWithUrl(FANPAGE_DATABASE_URL, app);
 let messengerMigrationStateCache = { paused: false, expiresAt: 0 };
 async function isMessengerDatabaseMigrationPaused() {
   if (Date.now() < messengerMigrationStateCache.expiresAt) return messengerMigrationStateCache.paused;
@@ -2244,10 +2247,14 @@ const notifyFanPageViewerSubscriptionCodeRenewal = onValueUpdated({
 });
 // 고점체크 후원 스트리머 신청도 새 대기 인덱스가 생성되면 Discord로 알린다.
 // 요청 본문은 server-only 요청 노드에서 읽고, Firebase UID는 알림에 포함하지 않는다.
-const notifyFanPageSponsorAdRequest = onValueCreated('/streamerFanPageSponsorPending/{requestId}', async (event) => {
+const notifyFanPageSponsorAdRequest = onValueCreated({
+  ref: '/streamerFanPageSponsorPending/{requestId}',
+  instance: FANPAGE_DATABASE_INSTANCE,
+  retry: true,
+}, async (event) => {
   const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
   if (!requestId) return null;
-  const requestSnapshot = await getDatabase()
+  const requestSnapshot = await fanpageDatabase()
     .ref('streamerFanPageSponsorRequests/' + requestId)
     .get();
   const data = requestSnapshot.val() || {};
@@ -2288,7 +2295,11 @@ const FANPAGE_FEEDBACK_CATEGORY_LABELS = {
   bug: '오류 제보',
   other: '기타',
 };
-const notifyFanPageDesignFeedback = onValueCreated('/streamerFanPageDesignFeedback/{feedbackId}', async (event) => {
+const notifyFanPageDesignFeedback = onValueCreated({
+  ref: '/streamerFanPageDesignFeedback/{feedbackId}',
+  instance: FANPAGE_DATABASE_INSTANCE,
+  retry: true,
+}, async (event) => {
   const data = event.data.val() || {};
   const category = FANPAGE_FEEDBACK_CATEGORY_LABELS[data.category] || '기타';
   const senderVerification = data.senderVerification && typeof data.senderVerification === 'object'
@@ -2330,7 +2341,11 @@ const notifyFanPageDesignFeedback = onValueCreated('/streamerFanPageDesignFeedba
 // 인증 스트리머가 다마고치 디자인 신청을 저장하면 관리자 화면으로 바로 연결한다.
 // 신청 내용과 Firebase UID는 공유하지 않고, 공개 스트리머 신원과 검토 링크만 알린다.
 const notifyFanPageTamagotchiApplication = onValueCreated(
-  '/streamerFanPageTamagotchiApplications/{streamerId}/{applicationId}',
+  {
+    ref: '/streamerFanPageTamagotchiApplications/{streamerId}/{applicationId}',
+    instance: FANPAGE_DATABASE_INSTANCE,
+    retry: true,
+  },
   async (event) => {
     const data = event.data.val() || {};
     const streamerId = /^[A-Za-z0-9]{2,20}$/.test(String(event.params.streamerId || ''))
