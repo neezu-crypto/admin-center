@@ -9,6 +9,13 @@ const { ServerValue } = require('firebase-admin/database');
 const {
   notificationFallsInDonationRequestWindow,
 } = require('./donation-verification');
+const {
+  DONATION_CONSENT_TTL_MS,
+  integrationExpiresAt,
+  isIntegrationExpired,
+  isOutfitSessionExpired,
+  removeExpiredRecords,
+} = require('./onyuDonationRetention');
 
 const app = initializeApp();
 const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
@@ -3118,8 +3125,14 @@ async function getOnyuDonationStreamer(uid) {
 const onyuGetDonationIntegrationStatus = onCall(async (request) => {
   const uid = requireAuth(request);
   const streamer = await getOnyuDonationStreamer(uid);
-  const data = (await streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid).get()).val() || {};
-  return { ok: true, status: data.status === 'preparing' ? 'preparing' : 'not-prepared', soopId: streamer.soopId, consentedAt: Number(data.consentedAt) || null, sdkApproved: false };
+  const integrationRef = streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid);
+  const data = (await integrationRef.get()).val() || {};
+  if (isIntegrationExpired(data)) {
+    await integrationRef.transaction((current) => current && isIntegrationExpired(current) ? null : current);
+    return { ok: true, status: 'not-prepared', soopId: streamer.soopId, consentedAt: null, expiresAt: null, sdkApproved: false };
+  }
+  const prepared = data.status === 'preparing';
+  return { ok: true, status: prepared ? 'preparing' : 'not-prepared', soopId: streamer.soopId, consentedAt: Number(data.consentedAt) || null, expiresAt: prepared ? integrationExpiresAt(data) : null, sdkApproved: false };
 });
 
 const onyuSetDonationIntegrationPreparation = onCall(async (request) => {
@@ -3129,8 +3142,11 @@ const onyuSetDonationIntegrationPreparation = onCall(async (request) => {
   if (!(request.data && request.data.enabled === true)) { await ref.remove(); return { ok: true, status: 'not-prepared', sdkApproved: false }; }
   const now = Date.now();
   const existing = (await ref.get()).val() || {};
-  await ref.set({ status: 'preparing', soopId: streamer.soopId, nickname: streamer.nickname, consentedAt: Number(existing.consentedAt) || now, updatedAt: now, consentVersion: 1 });
-  return { ok: true, status: 'preparing', sdkApproved: false };
+  const existingExpiry = integrationExpiresAt(existing);
+  const consentedAt = existing.status === 'preparing' && existingExpiry > now ? Number(existing.consentedAt) || now : now;
+  const expiresAt = consentedAt + DONATION_CONSENT_TTL_MS;
+  await ref.set({ status: 'preparing', soopId: streamer.soopId, nickname: streamer.nickname, consentedAt, expiresAt, updatedAt: now, consentVersion: 1 });
+  return { ok: true, status: 'preparing', consentedAt, expiresAt, sdkApproved: false };
 });
 
 const onyuRegisterOutfitDonationSession = onCall(async (request) => {
@@ -3140,7 +3156,7 @@ const onyuRegisterOutfitDonationSession = onCall(async (request) => {
   const streamer = await getOnyuDonationStreamer(uid);
   const integration = (await streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid).get()).val() || {};
   // 준비 상태에서는 실시간 감지나 세션 저장을 실행하지 않는다.
-  if (integration.status !== 'active') return { ok: true, enabled: false, reason: integration.status === 'preparing' ? 'soop-approval-pending' : 'not-prepared' };
+  if (integration.status !== 'active' || isIntegrationExpired(integration)) return { ok: true, enabled: false, reason: isIntegrationExpired(integration) ? 'consent-expired' : integration.status === 'preparing' ? 'soop-approval-pending' : 'not-prepared' };
   const now = Date.now();
   const ref = streamer.db.ref(ONYU_OUTFIT_DONATION_SESSIONS_PATH).push();
   await ref.set({ uid, soopId: streamer.soopId, chapterId, status: 'waiting', openedAt: now, expiresAt: now + 600000 });
@@ -3155,6 +3171,18 @@ const onyuCloseOutfitDonationSession = onCall(async (request) => {
   const snap = await ref.get();
   if (snap.exists() && snap.val().uid === uid) { await ref.remove(); return { ok: true, closed: true }; }
   return { ok: true, closed: false };
+});
+
+// 준비 동의는 24시간, 의상 선택 세션은 각 expiresAt까지만 유효하다.
+// 매 5분 정리로 만료 직후의 접근을 차단하고, KST 자정 실행분으로 누락을 다시 점검한다.
+const cleanupOnyuDonationRetention = onSchedule({ schedule: 'every 5 minutes', timeZone: 'Asia/Seoul', timeoutSeconds: 120 }, async () => {
+  const db = getDatabase();
+  const now = Date.now();
+  const [integrationsRemoved, sessionsRemoved] = await Promise.all([
+    removeExpiredRecords(db, ONYU_DONATION_INTEGRATIONS_PATH, isIntegrationExpired, now),
+    removeExpiredRecords(db, ONYU_OUTFIT_DONATION_SESSIONS_PATH, isOutfitSessionExpired, now),
+  ]);
+  return { integrationsRemoved, sessionsRemoved };
 });
 
 // SOOP Chat SDK Consent 승인 뒤 사용할 OAuth 반환 주소다. 승인 전에는 인증 코드와
@@ -5133,6 +5161,7 @@ module.exports = {
   onyuSetDonationIntegrationPreparation,
   onyuRegisterOutfitDonationSession,
   onyuCloseOutfitDonationSession,
+  cleanupOnyuDonationRetention,
   onyuSoopOAuthCallback,
   onyuListStreamerGiftTargets,
   onyuSubmitStreamerGameGift,
