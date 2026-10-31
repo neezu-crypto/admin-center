@@ -3969,6 +3969,18 @@ function validFanPageSponsorRequestId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(value);
 }
 
+async function holdFreshRealtimeSnapshot(ref) {
+  let listener;
+  const snapshot = await new Promise((resolve, reject) => {
+    listener = (value) => resolve(value);
+    ref.on('value', listener, (error) => {
+      ref.off('value', listener);
+      reject(error);
+    });
+  });
+  return { snapshot, release: () => ref.off('value', listener) };
+}
+
 async function writeFanPageSponsorAdminAudit(db, request, action, detail) {
   try {
     await logToAdminAuditLog(db, request, action, detail);
@@ -4122,93 +4134,102 @@ const manageFanPageSponsorAds = onCall(async (request) => {
     if (!/^[a-z0-9]{2,20}$/.test(soopId) || !rail || !Number.isInteger(days) || days < 1 || days > 30 || Number(initial.balloonCost) !== days * 10) {
       throw new HttpsError('failed-precondition', '신청의 SOOP 아이디·영역·기간·후원 개수가 올바르지 않습니다.');
     }
-    const processingToken = require('node:crypto').randomBytes(16).toString('hex');
-    const processing = await requestRef.transaction((current) => {
-      if (!current || current.status !== 'pending' || !Number(current.donationCompletedAt)) return;
-      return Object.assign({}, current, { status: 'processing', processingAt: now, processingBy: adminUid, processingToken });
-    }, undefined, false);
-    if (!processing.committed) throw new HttpsError('failed-precondition', '이미 처리 중이거나 완료된 신청입니다.');
-
-    let claimPrepared = false;
-    let claimActivated = false;
-    let adCreated = false;
-    const campaignId = requestId;
-    const adRef = db.ref(FANPAGE_SPONSOR_ADS_PATH);
-    const approvedUntil = now + days * 24 * 60 * 60 * 1000;
+    // Keep transaction snapshots live until approval or rollback completes.
+    const heldSnapshots = [];
     try {
-      const prepared = await claimRef.transaction((current) => {
-        if (!current || current.status !== 'pending' || normalizeSoopId(current.soopId) !== soopId || current.rail !== rail || !Number(current.donationCompletedAt)) return;
-        return Object.assign({}, current, { verificationProcessingAt: now, verificationProcessingToken: processingToken });
-      }, undefined, false);
-      if (!prepared.committed) throw new HttpsError('failed-precondition', '홍보 자리 예약이 신청과 일치하지 않습니다.');
-      claimPrepared = true;
-
-      const savedAd = {
-        campaignId,
-        soopId,
-        rail,
-        nickname: String(initial.nickname || '').trim().slice(0, 40),
-        status: 'active',
-        startsAt: now,
-        expiresAt: approvedUntil,
-        requestId,
-      };
-      const capacity = await adRef.transaction((current) => {
-        const next = Object.assign({}, current && typeof current === 'object' ? current : {});
-        for (const [id, ad] of Object.entries(next)) {
-          if (!ad || ad.status !== 'active' || Number(ad.expiresAt) <= now) delete next[id];
-        }
-        if (Object.values(next).some((ad) => normalizeSoopId(ad && ad.soopId) === soopId) ||
-            Object.keys(next).length >= FANPAGE_SPONSOR_MAX_ACTIVE_ADS ||
-            Object.values(next).filter((ad) => ad && ad.rail === rail).length >= FANPAGE_SPONSOR_MAX_ADS_PER_RAIL) return;
-        next[campaignId] = savedAd;
-        return next;
-      }, undefined, false);
-      if (!capacity.committed) throw new HttpsError('resource-exhausted', '현재 고점체크 후원 광고 슬롯이 가득 찼거나 같은 스트리머가 이미 등록되어 있습니다.');
-      adCreated = true;
-
-      const activated = await claimRef.transaction((current) => {
-        if (!current || current.status !== 'pending' || current.verificationProcessingToken !== processingToken || current.rail !== rail || normalizeSoopId(current.soopId) !== soopId) return;
-        return Object.assign({}, current, { status: 'active', expiresAt: approvedUntil, campaignId, verificationProcessingAt: null, verificationProcessingToken: null });
-      }, undefined, false);
-      if (!activated.committed) throw new HttpsError('aborted', '홍보 자리 예약을 활성화하지 못했습니다.');
-      claimActivated = true;
-
-      const finalized = await requestRef.transaction((current) => {
-        if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
-        return Object.assign({}, current, {
-          status: 'approved', reviewedAt: now, reviewedBy: adminUid,
-          verificationSource: 'admin-center-manual', campaignId, approvedUntil,
-          processingAt: null, processingBy: null, processingToken: null, updatedAt: now,
-        });
-      }, undefined, false);
-      if (!finalized.committed) throw new HttpsError('aborted', '승인 결과를 저장하지 못했습니다.');
-      await db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove().catch((error) => {
-        console.error('고점체크 후원 대기 인덱스 정리 실패:', String(error && error.message || error).slice(0, 160));
-      });
-      const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 후원 스트리머 광고 승인', initial.nickname + ' (@' + soopId + ') · ' + days + '일');
-      return { ok: true, status: 'approved', expiresAt: approvedUntil, auditLogged };
-    } catch (error) {
-      if (adCreated) {
-        await adRef.child(campaignId).transaction((current) =>
-          current && current.requestId === requestId && Number(current.startsAt) === now ? null : current,
-        undefined, false).catch(() => null);
+      for (const ref of [requestRef, claimRef, db.ref(FANPAGE_SPONSOR_ADS_PATH)]) {
+        heldSnapshots.push(await holdFreshRealtimeSnapshot(ref));
       }
-      if (claimPrepared || claimActivated) {
-        await claimRef.transaction((current) => {
-          if (!current || (current.verificationProcessingToken !== processingToken && !(current.status === 'active' && current.campaignId === campaignId))) return;
+      const processingToken = require('node:crypto').randomBytes(16).toString('hex');
+      const processing = await requestRef.transaction((current) => {
+        if (!current || current.status !== 'pending' || !Number(current.donationCompletedAt)) return;
+        return Object.assign({}, current, { status: 'processing', processingAt: now, processingBy: adminUid, processingToken });
+      }, undefined, false);
+      if (!processing.committed) throw new HttpsError('failed-precondition', '이미 처리 중이거나 완료된 신청입니다.');
+
+      let claimPrepared = false;
+      let claimActivated = false;
+      let adCreated = false;
+      const campaignId = requestId;
+      const adRef = db.ref(FANPAGE_SPONSOR_ADS_PATH);
+      const approvedUntil = now + days * 24 * 60 * 60 * 1000;
+      try {
+        const prepared = await claimRef.transaction((current) => {
+          if (!current || current.status !== 'pending' || normalizeSoopId(current.soopId) !== soopId || current.rail !== rail || !Number(current.donationCompletedAt)) return;
+          return Object.assign({}, current, { verificationProcessingAt: now, verificationProcessingToken: processingToken });
+        }, undefined, false);
+        if (!prepared.committed) throw new HttpsError('failed-precondition', '홍보 자리 예약이 신청과 일치하지 않습니다.');
+        claimPrepared = true;
+
+        const savedAd = {
+          campaignId,
+          soopId,
+          rail,
+          nickname: String(initial.nickname || '').trim().slice(0, 40),
+          status: 'active',
+          startsAt: now,
+          expiresAt: approvedUntil,
+          requestId,
+        };
+        const capacity = await adRef.transaction((current) => {
+          const next = Object.assign({}, current && typeof current === 'object' ? current : {});
+          for (const [id, ad] of Object.entries(next)) {
+            if (!ad || ad.status !== 'active' || Number(ad.expiresAt) <= now) delete next[id];
+          }
+          if (Object.values(next).some((ad) => normalizeSoopId(ad && ad.soopId) === soopId) ||
+              Object.keys(next).length >= FANPAGE_SPONSOR_MAX_ACTIVE_ADS ||
+              Object.values(next).filter((ad) => ad && ad.rail === rail).length >= FANPAGE_SPONSOR_MAX_ADS_PER_RAIL) return;
+          next[campaignId] = savedAd;
+          return next;
+        }, undefined, false);
+        if (!capacity.committed) throw new HttpsError('resource-exhausted', '현재 고점체크 후원 광고 슬롯이 가득 찼거나 같은 스트리머가 이미 등록되어 있습니다.');
+        adCreated = true;
+
+        const activated = await claimRef.transaction((current) => {
+          if (!current || current.status !== 'pending' || current.verificationProcessingToken !== processingToken || current.rail !== rail || normalizeSoopId(current.soopId) !== soopId) return;
+          return Object.assign({}, current, { status: 'active', expiresAt: approvedUntil, campaignId, verificationProcessingAt: null, verificationProcessingToken: null });
+        }, undefined, false);
+        if (!activated.committed) throw new HttpsError('aborted', '홍보 자리 예약을 활성화하지 못했습니다.');
+        claimActivated = true;
+
+        const finalized = await requestRef.transaction((current) => {
+          if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
           return Object.assign({}, current, {
-            status: 'pending', expiresAt: Number(initial.expiresAt) || Date.now(), campaignId: null,
-            verificationProcessingAt: null, verificationProcessingToken: null,
-            donationCompletedAt: Number(current.donationCompletedAt) || Number(initial.donationCompletedAt) || 0,
+            status: 'approved', reviewedAt: now, reviewedBy: adminUid,
+            verificationSource: 'admin-center-manual', campaignId, approvedUntil,
+            processingAt: null, processingBy: null, processingToken: null, updatedAt: now,
           });
+        }, undefined, false);
+        if (!finalized.committed) throw new HttpsError('aborted', '승인 결과를 저장하지 못했습니다.');
+        await db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove().catch((error) => {
+          console.error('고점체크 후원 대기 인덱스 정리 실패:', String(error && error.message || error).slice(0, 160));
+        });
+        const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 후원 스트리머 광고 승인', initial.nickname + ' (@' + soopId + ') · ' + days + '일');
+        return { ok: true, status: 'approved', expiresAt: approvedUntil, auditLogged };
+      } catch (error) {
+        if (adCreated) {
+          await adRef.child(campaignId).transaction((current) =>
+            current && current.requestId === requestId && Number(current.startsAt) === now ? null : current,
+          undefined, false).catch(() => null);
+        }
+        if (claimPrepared || claimActivated) {
+          await claimRef.transaction((current) => {
+            if (!current || (current.verificationProcessingToken !== processingToken && !(current.status === 'active' && current.campaignId === campaignId))) return;
+            return Object.assign({}, current, {
+              status: 'pending', expiresAt: Number(initial.expiresAt) || Date.now(), campaignId: null,
+              verificationProcessingAt: null, verificationProcessingToken: null,
+              donationCompletedAt: Number(current.donationCompletedAt) || Number(initial.donationCompletedAt) || 0,
+            });
+          }, undefined, false).catch(() => null);
+        }
+        await requestRef.transaction((current) => {
+          if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
+          return Object.assign({}, current, { status: 'pending', processingAt: null, processingBy: null, processingToken: null, updatedAt: Date.now() });
         }, undefined, false).catch(() => null);
+        throw error;
       }
-      await requestRef.transaction((current) => {
-        if (!current || current.status !== 'processing' || current.processingToken !== processingToken) return;
-        return Object.assign({}, current, { status: 'pending', processingAt: null, processingBy: null, processingToken: null, updatedAt: Date.now() });
-      }, undefined, false).catch(() => null);
-      throw error;
+    } finally {
+      heldSnapshots.forEach((held) => held.release());
     }
   }
 
