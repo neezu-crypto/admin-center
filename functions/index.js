@@ -3985,7 +3985,8 @@ async function writeFanPageSponsorAdminAudit(db, request, action, detail) {
 // 예약·용량 규칙은 streamer-fanpage/functions/sponsor-ads.js와 맞춰 유지한다.
 const manageFanPageSponsorAds = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
-  const db = getDatabase();
+  const db = fanpageDatabase();
+  const auditDb = getDatabase();
   const data = request.data || {};
   const action = String(data.action || 'list');
 
@@ -4108,7 +4109,7 @@ const manageFanPageSponsorAds = onCall(async (request) => {
           db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove(),
           claimRef.remove(),
         ]);
-        const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 신청 반려', currentRequest.nickname + ' (@' + normalizeSoopId(currentRequest.soopId) + ')');
+        const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 후원 스트리머 신청 반려', currentRequest.nickname + ' (@' + normalizeSoopId(currentRequest.soopId) + ')');
         return { ok: true, status: 'rejected', auditLogged };
       } finally {
         heldRequest.release();
@@ -4185,7 +4186,7 @@ const manageFanPageSponsorAds = onCall(async (request) => {
       await db.ref(FANPAGE_SPONSOR_PENDING_PATH + '/' + requestId).remove().catch((error) => {
         console.error('고점체크 후원 대기 인덱스 정리 실패:', String(error && error.message || error).slice(0, 160));
       });
-      const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 광고 승인', initial.nickname + ' (@' + soopId + ') · ' + days + '일');
+      const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 후원 스트리머 광고 승인', initial.nickname + ' (@' + soopId + ') · ' + days + '일');
       return { ok: true, status: 'approved', expiresAt: approvedUntil, auditLogged };
     } catch (error) {
       if (adCreated) {
@@ -4236,7 +4237,7 @@ const manageFanPageSponsorAds = onCall(async (request) => {
         undefined, false),
         linkedRequestRef.update({ endedAt: now, approvedUntil: now, updatedAt: now }),
       ]);
-      const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 광고 즉시 종료', current.nickname + ' (@' + soopId + ')');
+      const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 후원 스트리머 광고 즉시 종료', current.nickname + ' (@' + soopId + ')');
       return { ok: true, endedAt: now, auditLogged };
     }
 
@@ -4275,7 +4276,7 @@ const manageFanPageSponsorAds = onCall(async (request) => {
       throw new HttpsError('aborted', '광고가 동시에 변경되어 저장하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
     }
     await linkedRequestRef.update({ approvedUntil: expiresAt, updatedAt: now });
-    const auditLogged = await writeFanPageSponsorAdminAudit(db, request, '고점체크 후원 스트리머 광고 수정', current.nickname + ' → ' + nickname + ' (@' + soopId + ')' + (appliedExtendDays ? ' · ' + appliedExtendDays + '일 연장' : ''));
+    const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 후원 스트리머 광고 수정', current.nickname + ' → ' + nickname + ' (@' + soopId + ')' + (appliedExtendDays ? ' · ' + appliedExtendDays + '일 연장' : ''));
     return { ok: true, expiresAt, extendedDays: appliedExtendDays, auditLogged };
   }
 
