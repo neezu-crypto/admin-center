@@ -4237,7 +4237,9 @@ const manageFanPageSponsorAds = onCall(async (request) => {
     const campaignId = typeof data.campaignId === 'string' ? data.campaignId.trim() : '';
     if (!validFanPageSponsorRequestId(campaignId)) throw new HttpsError('invalid-argument', '광고 번호가 올바르지 않습니다.');
     const adRef = db.ref(FANPAGE_SPONSOR_ADS_PATH + '/' + campaignId);
-    const current = (await adRef.get()).val();
+    const held = [await holdFreshRealtimeSnapshot(adRef)];
+    try {
+    const current = held[0].snapshot.val();
     if (!current || current.status !== 'active') throw new HttpsError('not-found', '노출 중인 광고를 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.');
     const now = Date.now();
     const soopId = normalizeSoopId(current.soopId);
@@ -4245,6 +4247,8 @@ const manageFanPageSponsorAds = onCall(async (request) => {
     if (!validFanPageSponsorRequestId(requestId)) throw new HttpsError('failed-precondition', '광고의 연결된 신청 번호가 올바르지 않습니다.');
     const linkedRequestRef = db.ref(FANPAGE_SPONSOR_REQUESTS_PATH + '/' + requestId);
     if (!(await linkedRequestRef.get()).exists()) throw new HttpsError('failed-precondition', '광고 신청 이력을 찾을 수 없습니다.');
+    const claimRef = db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId);
+    held.push(await holdFreshRealtimeSnapshot(claimRef));
 
     if (action === 'end') {
       const ended = await adRef.transaction((value) => {
@@ -4253,7 +4257,7 @@ const manageFanPageSponsorAds = onCall(async (request) => {
       }, undefined, false);
       if (!ended.committed) throw new HttpsError('failed-precondition', '광고가 이미 종료되었거나 처리 중입니다.');
       await Promise.all([
-        db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId).transaction((claim) =>
+        claimRef.transaction((claim) =>
           claim && claim.campaignId === campaignId ? null : claim,
         undefined, false),
         linkedRequestRef.update({ endedAt: now, approvedUntil: now, updatedAt: now }),
@@ -4279,7 +4283,6 @@ const manageFanPageSponsorAds = onCall(async (request) => {
     const appliedExtendDays = extendDays ? Math.floor((expiresAt - currentExpiresAt) / (24 * 60 * 60 * 1000)) : 0;
     if (extendDays && !appliedExtendDays) throw new HttpsError('failed-precondition', '최대 노출 기간까지 하루 미만 남아 있어 일 단위 연장이 불가능합니다.');
 
-    const claimRef = db.ref(FANPAGE_SPONSOR_CLAIMS_PATH + '/' + requestId);
     const claimUpdate = await claimRef.transaction((claim) => {
       if (!claim || claim.status !== 'active' || claim.campaignId !== campaignId || normalizeSoopId(claim.soopId) !== soopId) return;
       return Object.assign({}, claim, { expiresAt, updatedAt: now });
@@ -4299,6 +4302,9 @@ const manageFanPageSponsorAds = onCall(async (request) => {
     await linkedRequestRef.update({ approvedUntil: expiresAt, updatedAt: now });
     const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 후원 스트리머 광고 수정', current.nickname + ' → ' + nickname + ' (@' + soopId + ')' + (appliedExtendDays ? ' · ' + appliedExtendDays + '일 연장' : ''));
     return { ok: true, expiresAt, extendedDays: appliedExtendDays, auditLogged };
+    } finally {
+      held.forEach((item) => item.release());
+    }
   }
 
   throw new HttpsError('invalid-argument', '고점체크 후원 광고 관리 동작을 확인해 주세요.');
