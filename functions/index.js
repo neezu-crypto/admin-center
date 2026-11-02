@@ -2019,7 +2019,13 @@ const notifyMessengerReport = onValueCreated({
   // 신고자의 대화 내용, UID, 사유는 Discord로 보내지 않는다. 자세한 검토는 관리자 전용 페이지에서 한다.
   await sendDiscordNotification('🔔 **새 스트리머 메신저 신고**\n신고 ID: `' + reportId + '`\n접수 시각: ' + new Date(at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) + '\n' + deepLink('section-review-queue'));
 });
-const notifyListingRequest          = makeQueueTrigger('/listingRequests/{id}', '새 종목 상장 신청 (주식시장)', 'section-listing-request');
+const notifyListingRequest = onValueCreated('/listingRequests/{id}', async (event) => {
+  const data = event.data.val() || {};
+  if (data.status !== 'pending') return;
+  await sendDiscordNotification(
+    '🔔 **새 종목 상장 신청 (주식시장)**\n' + formatRequestSummary(data) + '\n' + deepLink('section-listing-request')
+  );
+});
 // 이전 일반 시청자 접근 신청은 종료됐다. 배포된 옛 writer가 남아 있더라도
 // 더는 게임 권한과 무관한 Discord 알림을 발생시키지 않도록 호환 trigger만 유지한다.
 const notifyOnyuViewerAccessRequest = onValueCreated('/onyuVn/viewerAccessAlerts/{id}', async () => null);
