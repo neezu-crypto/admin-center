@@ -5,6 +5,7 @@ const {
   integrationExpiresAt,
   isIntegrationExpired,
   isOutfitSessionExpired,
+  confirmOutfitDonationSessionIfEligible,
   removeExpiredRecordIfMatches,
 } = require('./onyuDonationRetention');
 
@@ -26,6 +27,15 @@ test('outfit sessions expire at their own shorter expiry', () => {
   assert.equal(isOutfitSessionExpired({ expiresAt: 1000 }, 999), false);
   assert.equal(isOutfitSessionExpired({ expiresAt: 1000 }, 1000), true);
   assert.equal(isOutfitSessionExpired({}, 1000), false);
+});
+
+test('one LIVE donation confirms a waiting outfit session once; confirmed sessions reject duplicates', () => {
+  const waiting = { uid: 'uid-1', soopId: 'soop-1', status: 'waiting', expiresAt: 2000 };
+  const confirmed = confirmOutfitDonationSessionIfEligible(waiting, { uid: 'uid-1', soopId: 'soop-1', now: 1000 });
+  assert.equal(confirmed.status, 'confirmed');
+  assert.equal(confirmed.confirmedAt, 1000);
+  assert.equal(confirmOutfitDonationSessionIfEligible(confirmed, { uid: 'uid-1', soopId: 'soop-1', now: 1001 }), undefined);
+  assert.equal(confirmOutfitDonationSessionIfEligible(waiting, { uid: 'other', soopId: 'soop-1', now: 1000 }), undefined);
 });
 
 test('scheduled task removes its expired record only if it has not been renewed', async () => {

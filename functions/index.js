@@ -3253,7 +3253,8 @@ const onyuConsumeOutfitDonationSession = onCall(async (request) => {
     return confirmOutfitDonationSessionIfEligible(current, { uid, soopId: streamer.soopId, now });
   });
   const saved = transaction.snapshot.val();
-  const accepted = !!saved
+  const accepted = transaction.committed
+    && !!saved
     && saved.uid === uid
     && saved.soopId === streamer.soopId
     && saved.status === 'confirmed'

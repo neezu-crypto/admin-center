@@ -22,7 +22,8 @@ function isOutfitSessionExpired(record, now = Date.now()) {
 function confirmOutfitDonationSessionIfEligible(record, { uid, soopId, now = Date.now() } = {}) {
   if (!record || record.uid !== uid || record.soopId !== soopId) return undefined;
   if ((Number(record.expiresAt) || 0) <= now) return undefined;
-  if (record.status === 'confirmed') return record;
+  // A duplicate Chat SDK delivery must not be reported as a fresh confirmation.
+  if (record.status === 'confirmed') return undefined;
   if (record.status !== 'waiting') return undefined;
   return Object.assign({}, record, { status: 'confirmed', confirmedAt: now });
 }
