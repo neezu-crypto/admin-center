@@ -3478,8 +3478,18 @@ const onyuConsumeOutfitDonationSession = onCall(async (request) => {
   }
 
   const ref = streamer.db.ref(ONYU_OUTFIT_DONATION_SESSIONS_PATH + '/' + sessionId);
+  let transactionCheck = null;
   const transaction = await ref.transaction((current) => {
     const now = Date.now();
+    transactionCheck = {
+      integrationActive: integration.status === 'active',
+      integrationUnexpired: !isIntegrationExpired(integration, now),
+      sessionExists: !!current,
+      sessionUidMatches: !!current && current.uid === uid,
+      sessionSoopIdMatches: !!current && current.soopId === streamer.soopId,
+      sessionWaiting: !!current && current.status === 'waiting',
+      sessionUnexpired: !!current && (Number(current.expiresAt) || 0) > now,
+    };
     if (isIntegrationExpired(integration, now)) return;
     // 이벤트 원문이나 수량은 보관하지 않고, 세션의 1회 확정 상태만 원자적으로 기록한다.
     return confirmOutfitDonationSessionIfEligible(current, { uid, soopId: streamer.soopId, now });
@@ -3491,6 +3501,13 @@ const onyuConsumeOutfitDonationSession = onCall(async (request) => {
     && saved.soopId === streamer.soopId
     && saved.status === 'confirmed'
     && (Number(saved.expiresAt) || 0) > Date.now();
+  if (!accepted) {
+    // 진단용 로그에는 UID, SOOP ID, 세션 ID 또는 후원 이벤트 원문을 남기지 않는다.
+    console.warn('온이유 의상 후원 세션이 거절되었습니다.', {
+      transactionCommitted: transaction.committed,
+      checks: transactionCheck,
+    });
+  }
   return { ok: true, accepted };
 });
 
