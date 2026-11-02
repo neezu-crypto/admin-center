@@ -3478,6 +3478,13 @@ const onyuConsumeOutfitDonationSession = onCall(async (request) => {
   }
 
   const ref = streamer.db.ref(ONYU_OUTFIT_DONATION_SESSIONS_PATH + '/' + sessionId);
+  // The Admin SDK may invoke a transaction callback with its initial local null
+  // before it has fetched this one-shot session. Returning undefined then aborts
+  // the transaction without ever seeing the server record. Prime the reference
+  // with the current server value; the transaction below still rechecks every
+  // eligibility field atomically to reject races and duplicate events.
+  const initialSession = (await ref.get()).val();
+  if (!initialSession) return { ok: true, accepted: false };
   let transactionCheck = null;
   const transaction = await ref.transaction((current) => {
     const now = Date.now();
