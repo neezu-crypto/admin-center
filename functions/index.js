@@ -22,7 +22,13 @@ const {
 const {
   onyuRefreshSecretId,
   deleteOnyuRefreshTokenSecret,
+  readOnyuRefreshToken,
+  storeOnyuRefreshToken,
 } = require('./onyuSoopTokenVault');
+const {
+  isOnyuSoopRefreshEligible,
+  refreshSoopTokens,
+} = require('./onyuSoopTokenRefresh');
 
 const app = initializeApp();
 const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
@@ -3154,6 +3160,33 @@ async function deleteOnyuRefreshTokenForConsent(uid, soopConsentAt) {
   return deleteOnyuRefreshTokenSecret({ client: secretClient, projectId: getOnyuSecretProjectId(), secretId });
 }
 
+async function readOnyuSecretValue(secretId) {
+  const [version] = await secretClient.accessSecretVersion({
+    name: `projects/${getOnyuSecretProjectId()}/secrets/${secretId}/versions/latest`,
+  });
+  const value = version && version.payload && version.payload.data;
+  if (!value) throw new Error('필수 SOOP 서버 시크릿이 설정되지 않았습니다.');
+  return Buffer.isBuffer(value) ? value.toString('utf8') : Buffer.from(value).toString('utf8');
+}
+
+async function releaseOnyuSoopRefreshLock(ref, lockId, updates) {
+  return ref.transaction((current) => {
+    if (!current || current.refreshLockId !== lockId) return;
+    return Object.assign({}, current, updates || {}, {
+      refreshLockId: null,
+      refreshLockExpiresAt: null,
+      updatedAt: Date.now(),
+    });
+  });
+}
+
+function configuredOnyuSoopRevocationCodes() {
+  return String(process.env.ONYU_SOOP_CONFIRMED_REVOCATION_CODES || '')
+    .split(',')
+    .map((code) => code.trim().toUpperCase())
+    .filter(Boolean);
+}
+
 async function getOnyuDonationStreamer(uid) {
   const db = getDatabase();
   const [flagSnap, profileSnap] = await Promise.all([
@@ -3176,8 +3209,153 @@ const onyuGetDonationIntegrationStatus = onCall(async (request) => {
     await integrationRef.transaction((current) => current && isIntegrationExpired(current) ? null : current);
     return { ok: true, status: 'not-prepared', soopId: streamer.soopId, consentedAt: null, expiresAt: null, sdkApproved: false };
   }
-  const prepared = data.status === 'preparing';
-  return { ok: true, status: prepared ? 'preparing' : 'not-prepared', soopId: streamer.soopId, consentedAt: Number(data.consentedAt) || null, expiresAt: prepared ? integrationExpiresAt(data) : null, sdkApproved: false };
+  const visibleStatuses = new Set(['preparing', 'active', 'revoking', 'revoked', 'reauthorization-required']);
+  const status = visibleStatuses.has(data.status) ? data.status : 'not-prepared';
+  return { ok: true, status, soopId: streamer.soopId, consentedAt: Number(data.consentedAt) || null, expiresAt: status !== 'not-prepared' ? integrationExpiresAt(data) : null, sdkApproved: data.sdkApproved === true };
+});
+
+// 승인 뒤 활성화할 토큰 갱신 callable. 클라이언트는 access token만 메모리에서 받고,
+// Refresh Token과 Client Secret은 서버에서만 읽는다. 심사 승인·명시적 SDK 활성 상태가
+// 없으면 토큰 설정을 읽거나 SOOP 요청을 하지 않는다.
+const onyuRefreshSoopChatToken = onCall({ timeoutSeconds: 30, memory: '256MiB' }, async (request) => {
+  const uid = requireAuth(request);
+  const streamer = await getOnyuDonationStreamer(uid);
+  const ref = streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid);
+  const initial = (await ref.get()).val() || {};
+  const consentAt = Number(initial.soopConsentAt) || 0;
+  const consentExpiry = integrationExpiresAt(initial);
+  if (!isOnyuSoopRefreshEligible(initial, { verifiedSoopId: streamer.soopId })) {
+    throw new HttpsError('failed-precondition', 'SOOP 심사 승인과 유효한 연동 동의가 확인되지 않았습니다.');
+  }
+
+  const now = Date.now();
+  const accessTokenExpiresAt = Number(initial.accessTokenExpiresAt) || 0;
+  if (!accessTokenExpiresAt) throw new HttpsError('failed-precondition', '현재 Access Token 만료 정보가 없습니다.');
+  if (accessTokenExpiresAt > now + 5 * 60 * 1000) {
+    return { ok: true, refreshNeeded: false, expiresInSeconds: Math.max(1, Math.ceil((accessTokenExpiresAt - now) / 1000)) };
+  }
+
+  const lockId = require('node:crypto').randomBytes(16).toString('hex');
+  let claimFailure = '';
+  const claim = await ref.transaction((current) => {
+    const currentNow = Date.now();
+    if (!isOnyuSoopRefreshEligible(current, { verifiedSoopId: streamer.soopId, now: currentNow }) || Number(current.soopConsentAt) !== consentAt) {
+      claimFailure = 'integration-inactive';
+      return;
+    }
+    if (current.soopId !== streamer.soopId) {
+      claimFailure = 'soop-account-changed';
+      return;
+    }
+    if ((Number(current.refreshLockExpiresAt) || 0) > currentNow) {
+      claimFailure = 'refresh-in-progress';
+      return;
+    }
+    if ((Number(current.accessTokenExpiresAt) || 0) > currentNow + 5 * 60 * 1000) {
+      claimFailure = 'not-due';
+      return;
+    }
+    return Object.assign({}, current, { refreshLockId: lockId, refreshLockExpiresAt: currentNow + 120000, updatedAt: currentNow });
+  });
+  if (!claim.committed) {
+    const current = claim.snapshot.val() || {};
+    if (claimFailure === 'not-due') {
+      return { ok: true, refreshNeeded: false, expiresInSeconds: Math.max(1, Math.ceil(((Number(current.accessTokenExpiresAt) || Date.now() + 1000) - Date.now()) / 1000)) };
+    }
+    if (claimFailure === 'refresh-in-progress') return { ok: false, retryable: true, reason: 'refresh-in-progress' };
+    throw new HttpsError('failed-precondition', 'SOOP 연동 상태가 바뀌었으므로 다시 확인해 주세요.');
+  }
+
+  const secretId = onyuRefreshSecretId(uid, consentAt);
+  let refreshToken;
+  let credentials;
+  let refreshed;
+  try {
+    [refreshToken, credentials] = await Promise.all([
+      readOnyuRefreshToken({ client: secretClient, projectId: getOnyuSecretProjectId(), secretId }),
+      Promise.all([readOnyuSecretValue('ONYU_SOOP_CLIENT_ID'), readOnyuSecretValue('ONYU_SOOP_CLIENT_SECRET')]),
+    ]);
+    refreshed = await refreshSoopTokens({
+      clientId: credentials[0],
+      clientSecret: credentials[1],
+      refreshToken,
+      confirmedRevocationCodes: configuredOnyuSoopRevocationCodes(),
+    });
+  } catch (error) {
+    await releaseOnyuSoopRefreshLock(ref, lockId);
+    if (error && error.code === 'SOOP_REFRESH_RESPONSE_INVALID') {
+      throw new HttpsError('unavailable', 'SOOP 토큰 갱신 응답을 확인할 수 없어 연결을 유지하지 않습니다.');
+    }
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError('unavailable', 'SOOP 토큰 갱신을 일시적으로 완료하지 못했습니다. 다시 시도해 주세요.');
+  }
+
+  if (!refreshed.ok) {
+    if (refreshed.failureClass === 'revoked') {
+      await releaseOnyuSoopRefreshLock(ref, lockId, {
+        status: 'revoking',
+        revocationReason: 'soop-refresh-rejected',
+        revocationRequestedAt: Date.now(),
+        tokenCleanupKeepRecord: true,
+      });
+      try {
+        await deleteOnyuRefreshTokenForConsent(uid, consentAt);
+        await ref.transaction((current) => current && current.status === 'revoking' && current.revocationReason === 'soop-refresh-rejected' && Number(current.soopConsentAt) === consentAt
+          ? Object.assign({}, current, { status: 'revoked', tokenRevokedAt: Date.now(), tokenCleanupKeepRecord: null, updatedAt: Date.now() })
+          : current);
+      } catch (_) {
+        const retryAt = Date.now() + 60000;
+        try {
+          await getFunctions(app).taskQueue(ONYU_DONATION_EXPIRY_TASK_NAME).enqueue(
+            { kind: 'tokenSecret', key: uid, soopConsentAt: consentAt, expiresAt: retryAt, keepRevokedRecord: true },
+            { scheduleTime: new Date(retryAt), dispatchDeadlineSeconds: 60 },
+          );
+        } catch (_) {}
+      }
+      return { ok: false, revoked: true, reconnectAllowed: false };
+    }
+
+    if (refreshed.failureClass === 'unclassified') {
+      await releaseOnyuSoopRefreshLock(ref, lockId, {
+        status: 'reauthorization-required',
+        refreshFailureClass: 'unclassified-auth-error',
+        refreshFailureAt: Date.now(),
+      });
+      return { ok: false, revoked: false, retryable: false, reconnectAllowed: false };
+    }
+
+    await releaseOnyuSoopRefreshLock(ref, lockId);
+    throw new HttpsError('unavailable', 'SOOP 토큰 서비스가 일시적으로 응답하지 않았습니다. 다시 시도합니다.');
+  }
+
+  const refreshedAt = Date.now();
+  const nextAccessExpiry = refreshedAt + refreshed.expiresInSeconds * 1000;
+  try {
+    await storeOnyuRefreshToken({
+      client: secretClient,
+      projectId: getOnyuSecretProjectId(),
+      uid,
+      soopConsentAt: consentAt,
+      preparationExpiresAt: consentExpiry,
+      refreshToken: refreshed.refreshToken,
+      now: refreshedAt,
+    });
+  } catch (_) {
+    await releaseOnyuSoopRefreshLock(ref, lockId);
+    throw new HttpsError('unavailable', '새 Refresh Token을 안전하게 보관하지 못해 갱신 결과를 사용하지 않습니다.');
+  }
+
+  const saved = await releaseOnyuSoopRefreshLock(ref, lockId, {
+    accessTokenExpiresAt: nextAccessExpiry,
+    lastTokenRefreshAt: refreshedAt,
+    refreshFailureClass: null,
+    refreshFailureAt: null,
+  });
+  if (!saved.committed || !saved.snapshot.val() || saved.snapshot.val().status !== 'active') {
+    await deleteOnyuRefreshTokenForConsent(uid, consentAt).catch(() => {});
+    return { ok: false, revoked: true, reconnectAllowed: false };
+  }
+  return { ok: true, refreshNeeded: true, accessToken: refreshed.accessToken, expiresInSeconds: refreshed.expiresInSeconds };
 });
 
 const onyuSetDonationIntegrationPreparation = onCall(async (request) => {
@@ -3294,11 +3472,18 @@ const cleanupOnyuDonationExpiryTask = onTaskDispatched({
     if (!soopConsentAt) return;
     await deleteOnyuRefreshTokenForConsent(key, soopConsentAt);
     const ref = db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + key);
-    await ref.transaction((current) => current
-      && current.status === 'revoking'
-      && Number(current.soopConsentAt) === soopConsentAt
-      ? null
-      : current);
+    await ref.transaction((current) => {
+      if (!current || current.status !== 'revoking' || Number(current.soopConsentAt) !== soopConsentAt) return current;
+      if (data.keepRevokedRecord === true && current.revocationReason === 'soop-refresh-rejected') {
+        return Object.assign({}, current, {
+          status: 'revoked',
+          tokenRevokedAt: Date.now(),
+          tokenCleanupKeepRecord: null,
+          updatedAt: Date.now(),
+        });
+      }
+      return null;
+    });
     return;
   }
 
@@ -5325,6 +5510,7 @@ module.exports = {
   notifyOnyuStreamerGameGiftAutoApproval,
   onyuGetViewerAccess,
   onyuGetDonationIntegrationStatus,
+  onyuRefreshSoopChatToken,
   onyuSetDonationIntegrationPreparation,
   onyuRegisterOutfitDonationSession,
   onyuConsumeOutfitDonationSession,
