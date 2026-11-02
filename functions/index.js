@@ -3499,7 +3499,11 @@ const onyuConsumeOutfitDonationSession = onCall(async (request) => {
     };
     if (isIntegrationExpired(integration, now)) return;
     // 이벤트 원문이나 수량은 보관하지 않고, 세션의 1회 확정 상태만 원자적으로 기록한다.
-    return confirmOutfitDonationSessionIfEligible(current, { uid, soopId: streamer.soopId, now });
+    // 현재 로컬 캐시에 세션이 아직 없을 때 `undefined`를 반환하면 SDK가
+    // 서버 값을 가져오기 전에 트랜잭션 자체를 중단한다. 현재 값을 그대로 반환하면
+    // 서버 ETag 충돌 시 최신값으로 재시도하면서 유효한 대기 세션을 판정할 수 있다.
+    const confirmed = confirmOutfitDonationSessionIfEligible(current, { uid, soopId: streamer.soopId, now });
+    return confirmed === undefined ? current : confirmed;
   });
   const saved = transaction.snapshot.val();
   const accepted = transaction.committed
