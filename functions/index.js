@@ -29,6 +29,10 @@ const {
   isOnyuSoopRefreshEligible,
   refreshSoopTokens,
 } = require('./onyuSoopTokenRefresh');
+const {
+  onyuDonationCleanupFailureId,
+  mergeOnyuDonationCleanupFailure,
+} = require('./onyuDonationCleanupFailures');
 
 const app = initializeApp();
 const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
@@ -3143,6 +3147,56 @@ const onyuGetViewerAccess = onCall(async (request) => {
 const ONYU_DONATION_INTEGRATIONS_PATH = 'onyuVn/donationIntegrations';
 const ONYU_OUTFIT_DONATION_SESSIONS_PATH = 'onyuVn/outfitDonationSessions';
 const ONYU_DONATION_EXPIRY_TASK_NAME = 'cleanupOnyuDonationExpiryTask';
+const ONYU_DONATION_CLEANUP_FAILURES_PATH = 'onyuVn/donationCleanupFailures';
+
+async function recordOnyuDonationCleanupFailure(db, data, error) {
+  const failureId = onyuDonationCleanupFailureId(data);
+  const ref = db.ref(ONYU_DONATION_CLEANUP_FAILURES_PATH + '/' + failureId);
+  const result = await ref.transaction((current) => mergeOnyuDonationCleanupFailure(current, data, error));
+  const failure = result.snapshot.val() || {};
+  if (failure.attempts === 1) {
+    await sendDiscordNotification(
+      '🚨 **온이유 데이터 자동 삭제 실패**\n종류: `' + data.kind + '`\n실패 ID: `' + failureId + '`\n통합 관리 센터에서 재처리해 주세요.\n' + deepLink('section-onyu-access')
+    );
+  }
+  return failureId;
+}
+
+async function processOnyuDonationExpiry(db, data) {
+  const kind = String(data.kind || '');
+  const key = String(data.key || '');
+  const expectedExpiry = Number(data.expiresAt) || 0;
+  const validKey = kind === 'integration' ? /^[A-Za-z0-9_-]{1,128}$/.test(key)
+    : kind === 'session' ? /^[A-Za-z0-9_-]{10,128}$/.test(key)
+      : kind === 'tokenSecret' ? /^[A-Za-z0-9_-]{1,128}$/.test(key) : false;
+  if (!validKey || !expectedExpiry) throw new Error('invalid-cleanup-task');
+  if (kind === 'tokenSecret') {
+    if (expectedExpiry > Date.now()) return;
+    const soopConsentAt = Number(data.soopConsentAt) || 0;
+    if (!soopConsentAt) throw new Error('missing-soop-consent-time');
+    await deleteOnyuRefreshTokenForConsent(key, soopConsentAt);
+    const ref = db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + key);
+    await ref.transaction((current) => {
+      if (!current || current.status !== 'revoking' || Number(current.soopConsentAt) !== soopConsentAt) return current;
+      if (data.keepRevokedRecord === true && current.revocationReason === 'soop-refresh-rejected') {
+        return Object.assign({}, current, {
+          status: 'revoked', tokenRevokedAt: Date.now(), tokenCleanupKeepRecord: null, updatedAt: Date.now(),
+        });
+      }
+      return null;
+    });
+    return;
+  }
+  const path = kind === 'integration' ? ONYU_DONATION_INTEGRATIONS_PATH : ONYU_OUTFIT_DONATION_SESSIONS_PATH;
+  const getExpiry = kind === 'integration' ? integrationExpiresAt : (record) => Number(record && record.expiresAt) || 0;
+  if (kind === 'integration') {
+    const ref = db.ref(path + '/' + key);
+    const record = (await ref.get()).val();
+    if (!record || Number(getExpiry(record)) !== expectedExpiry || Number(getExpiry(record)) > Date.now()) return;
+    if (record.soopConsentAt) await deleteOnyuRefreshTokenForConsent(key, Number(record.soopConsentAt));
+  }
+  await removeExpiredRecordIfMatches(db, path, key, getExpiry, expectedExpiry);
+}
 
 async function enqueueOnyuDonationExpiry(kind, key, expiresAt) {
   await getFunctions(app).taskQueue(ONYU_DONATION_EXPIRY_TASK_NAME).enqueue(
@@ -3457,45 +3511,71 @@ const cleanupOnyuDonationExpiryTask = onTaskDispatched({
   rateLimits: { maxConcurrentDispatches: 5 },
 }, async (request) => {
   const data = request.data || {};
-  const kind = String(data.kind || '');
-  const key = String(data.key || '');
-  const expectedExpiry = Number(data.expiresAt) || 0;
-  const validKey = kind === 'integration' ? /^[A-Za-z0-9_-]{1,128}$/.test(key)
-    : kind === 'session' ? /^[A-Za-z0-9_-]{10,128}$/.test(key)
-      : kind === 'tokenSecret' ? /^[A-Za-z0-9_-]{1,128}$/.test(key) : false;
-  if (!validKey || !expectedExpiry) return;
-
   const db = getDatabase();
-  if (kind === 'tokenSecret') {
-    if (expectedExpiry > Date.now()) return;
-    const soopConsentAt = Number(data.soopConsentAt) || 0;
-    if (!soopConsentAt) return;
-    await deleteOnyuRefreshTokenForConsent(key, soopConsentAt);
-    const ref = db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + key);
-    await ref.transaction((current) => {
-      if (!current || current.status !== 'revoking' || Number(current.soopConsentAt) !== soopConsentAt) return current;
-      if (data.keepRevokedRecord === true && current.revocationReason === 'soop-refresh-rejected') {
-        return Object.assign({}, current, {
-          status: 'revoked',
-          tokenRevokedAt: Date.now(),
-          tokenCleanupKeepRecord: null,
-          updatedAt: Date.now(),
-        });
-      }
-      return null;
-    });
-    return;
+  try {
+    await processOnyuDonationExpiry(db, data);
+    await db.ref(ONYU_DONATION_CLEANUP_FAILURES_PATH + '/' + onyuDonationCleanupFailureId(data)).remove();
+  } catch (error) {
+    try {
+      await recordOnyuDonationCleanupFailure(db, data, error);
+    } catch (recordError) {
+      console.error('온이유 삭제 실패 기록 저장도 실패:', recordError);
+    }
+    throw error;
   }
+});
 
-  const path = kind === 'integration' ? ONYU_DONATION_INTEGRATIONS_PATH : ONYU_OUTFIT_DONATION_SESSIONS_PATH;
-  const getExpiry = kind === 'integration' ? integrationExpiresAt : (record) => Number(record && record.expiresAt) || 0;
-  if (kind === 'integration') {
-    const ref = db.ref(path + '/' + key);
-    const record = (await ref.get()).val();
-    if (!record || Number(getExpiry(record)) !== expectedExpiry || Number(getExpiry(record)) > Date.now()) return;
-    if (record.soopConsentAt) await deleteOnyuRefreshTokenForConsent(key, Number(record.soopConsentAt));
+const onyuAdminListDonationCleanupFailures = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const rootRef = db.ref(ONYU_DONATION_CLEANUP_FAILURES_PATH);
+  const firstSnap = await rootRef.get();
+  const staleBefore = Date.now() - 5 * 60 * 1000;
+  const staleClaims = Object.entries(firstSnap.val() || {}).filter(([, item]) =>
+    item && item.status === 'processing' && Number(item.processingAt) < staleBefore
+  );
+  await Promise.all(staleClaims.map(([id]) => rootRef.child(id).transaction((current) => {
+    if (!current || current.status !== 'processing' || Number(current.processingAt) >= staleBefore) return current;
+    return Object.assign({}, current, { status: 'open', processingAt: null, processingBy: null, updatedAt: Date.now() });
+  })));
+  const snap = staleClaims.length ? await rootRef.get() : firstSnap;
+  const rows = Object.entries(snap.val() || {}).map(([failureId, item]) => Object.assign({ failureId }, item || {}))
+    .filter((item) => item.status === 'open')
+    .sort((a, b) => Number(b.lastFailedAt || 0) - Number(a.lastFailedAt || 0))
+    .slice(0, 100);
+  return { ok: true, failures: rows };
+});
+
+const onyuAdminRetryDonationCleanup = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const failureId = String(request.data && request.data.failureId || '');
+  if (!/^[a-f0-9]{64}$/.test(failureId)) throw new HttpsError('invalid-argument', '삭제 실패 항목을 확인할 수 없습니다.');
+  const db = getDatabase();
+  const ref = db.ref(ONYU_DONATION_CLEANUP_FAILURES_PATH + '/' + failureId);
+  const claim = await ref.transaction((current) => {
+    const staleProcessing = current && current.status === 'processing' && Number(current.processingAt) < Date.now() - 5 * 60 * 1000;
+    if (!current || (current.status !== 'open' && !staleProcessing)) return;
+    return Object.assign({}, current, { status: 'processing', processingAt: Date.now(), processingBy: adminUid });
+  });
+  if (!claim.committed || !claim.snapshot.exists()) throw new HttpsError('failed-precondition', '이미 처리 중이거나 목록에서 사라진 항목입니다. 새로고침해 주세요.');
+  const item = claim.snapshot.val();
+  try {
+    await processOnyuDonationExpiry(db, item);
+    await ref.remove();
+    await logToAdminAuditLog(db, request, '온이유 만료 데이터 수동 삭제', item.kind + ' / ' + failureId);
+    return { ok: true, resolved: true };
+  } catch (error) {
+    await ref.transaction((current) => {
+      if (!current || current.status !== 'processing' || current.processingBy !== adminUid) return current;
+      return Object.assign({}, current, {
+        status: 'open', attempts: (Number(current.attempts) || 0) + 1,
+        lastFailedAt: Date.now(), lastErrorCode: String(error && error.code || error && error.name || 'cleanup-failed').slice(0, 80),
+        updatedAt: Date.now(), processingAt: null, processingBy: null,
+      });
+    });
+    await sendDiscordNotification('⚠️ **온이유 데이터 수동 삭제 재시도 실패**\n실패 ID: `' + failureId + '`\n통합 관리 센터에서 다시 확인해 주세요.\n' + deepLink('section-onyu-access'));
+    return { ok: false, resolved: false, message: '삭제에 실패했습니다. 항목은 관리자 처리 목록에 남아 있습니다.' };
   }
-  await removeExpiredRecordIfMatches(db, path, key, getExpiry, expectedExpiry);
 });
 
 // 인증 UID가 삭제되면 온이유 후원 토큰도 함께 파기한다. 토큰이 없는 계정은 즉시 반환한다.
@@ -5516,6 +5596,8 @@ module.exports = {
   onyuConsumeOutfitDonationSession,
   onyuCloseOutfitDonationSession,
   cleanupOnyuDonationExpiryTask,
+  onyuAdminListDonationCleanupFailures,
+  onyuAdminRetryDonationCleanup,
   cleanupOnyuDonationAuthUserDeleted,
   onyuSoopOAuthCallback,
   onyuListStreamerGiftTargets,

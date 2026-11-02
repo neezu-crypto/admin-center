@@ -716,6 +716,11 @@
     <div class="card" id="section-onyu-access">
       <h2>온이유 과거 이용권 기록</h2>
       <p class="hint">온이유는 2026-10-18부터 로그인 사용자와 인증 스트리머에게 무료로 제공되며 새 이용권 구매·선물 신청은 종료됐습니다. 아래는 종료 전에 접수된 기록을 확인·마무리하기 위한 관리자 전용 화면이며, 이용권 기록은 현재 게임 접근 권한에 영향을 주지 않습니다.</p>
+      <h3 class="subhead" style="margin-top:20px;">자동 삭제 실패 처리</h3>
+      <p class="hint">만료 데이터 삭제에 실패하면 Discord로 즉시 알리고 자동 재시도를 진행합니다. 끝내 삭제되지 않은 항목은 아래 목록에서 확인하고 수동 재시도할 수 있습니다.</p>
+      <button id="onyuDonationCleanupRefreshBtn" class="perm-refresh-btn" type="button">실패 목록 새로고침</button>
+      <div id="onyuDonationCleanupStatus" class="hint" role="status" aria-live="polite" style="margin-top:8px;"></div>
+      <div id="onyuDonationCleanupFailures"></div>
       <h3 class="subhead" style="margin-top:20px;">기존 신청 이력</h3>
       <p class="hint">고점체크 오늘의 후원 스트리머 신청은 SOOP 후원 감시와 자동 승인을 중단했습니다. 신청은 아래 고점체크 광고 관리 화면에서 관리자가 수동으로 확인·승인 또는 반려합니다. 온이유 과거 미처리 이용권 기록도 이 화면에서 수동으로 확인해 주세요.</p>
       <div id="onyuGiftAutoWatchStatus" class="hint" role="status" aria-live="polite" style="margin:0 0 10px;">고점체크 후원 자동 감시·자동 승인이 중단되었습니다.</div>
@@ -1463,6 +1468,8 @@
   const cancelPendingJudgmentFn = httpsCallable(functions, 'cancelPendingJudgment');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
   const onyuListStreamerGameGiftsFn = httpsCallable(functions, 'onyuListStreamerGameGifts');
+  const onyuAdminListDonationCleanupFailuresFn = httpsCallable(functions, 'onyuAdminListDonationCleanupFailures');
+  const onyuAdminRetryDonationCleanupFn = httpsCallable(functions, 'onyuAdminRetryDonationCleanup');
   const onyuReviewStreamerGameGiftFn = httpsCallable(functions, 'onyuReviewStreamerGameGift');
   const onyuRecoverStuckStreamerGameGiftFn = httpsCallable(functions, 'onyuRecoverStuckStreamerGameGift');
   const onyuAdminLookupEntitlementFn = httpsCallable(functions, 'onyuAdminLookupEntitlement');
@@ -1564,6 +1571,9 @@
   const verificationVerifiedListEl = document.getElementById('verificationVerifiedList');
   const onyuGiftRefreshBtn = document.getElementById('onyuGiftRefreshBtn');
   const onyuGiftListEl = document.getElementById('onyuGiftList');
+  const onyuDonationCleanupRefreshBtn = document.getElementById('onyuDonationCleanupRefreshBtn');
+  const onyuDonationCleanupStatusEl = document.getElementById('onyuDonationCleanupStatus');
+  const onyuDonationCleanupFailuresEl = document.getElementById('onyuDonationCleanupFailures');
   const onyuEntitlementLookupTypeEl = document.getElementById('onyuEntitlementLookupType');
   const onyuEntitlementLookupInputEl = document.getElementById('onyuEntitlementLookupInput');
   const onyuEntitlementLookupBtn = document.getElementById('onyuEntitlementLookupBtn');
@@ -2637,6 +2647,56 @@
     }
   }
   onyuGiftRefreshBtn.addEventListener('click', function () { refreshOnyuGiftRequests(false); });
+
+  async function refreshOnyuDonationCleanupFailures() {
+    onyuDonationCleanupRefreshBtn.disabled = true;
+    onyuDonationCleanupStatusEl.textContent = '삭제 실패 내역을 조회하고 있습니다...';
+    try {
+      const result = await onyuAdminListDonationCleanupFailuresFn();
+      const failures = result.data && Array.isArray(result.data.failures) ? result.data.failures : [];
+      onyuDonationCleanupFailuresEl.innerHTML = '';
+      if (!failures.length) {
+        onyuDonationCleanupStatusEl.textContent = '처리 대기 중인 삭제 실패가 없습니다.';
+        return;
+      }
+      onyuDonationCleanupStatusEl.textContent = failures.length + '건의 삭제 실패가 관리자 처리를 기다리고 있습니다.';
+      failures.forEach(function (item) {
+        const row = document.createElement('div');
+        row.className = 'verif-row';
+        const kindLabel = item.kind === 'integration' ? '연동 동의 기록' : item.kind === 'session' ? '의상 선택 세션' : item.kind === 'tokenSecret' ? 'SOOP 토큰 시크릿' : '알 수 없는 데이터';
+        row.innerHTML = '<div class="verif-info"><b>' + escapeHtml(kindLabel) + '</b>' +
+          '<span>실패 ID: ' + escapeHtml(item.failureId || '') + '</span>' +
+          '<span>대상 키: ' + escapeHtml(item.key || '') + ' · 실패 횟수: ' + Number(item.attempts || 0) + '</span>' +
+          '<span>마지막 실패: ' + (item.lastFailedAt ? new Date(item.lastFailedAt).toLocaleString('ko-KR') : '확인 불가') +
+          ' · 오류 코드: ' + escapeHtml(item.lastErrorCode || '확인 불가') + '</span></div><div class="verif-actions"></div>';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'approve';
+        button.textContent = '수동 재시도';
+        button.addEventListener('click', async function () {
+          if (!window.confirm(kindLabel + ' 삭제를 다시 시도할까요?')) return;
+          button.disabled = true;
+          onyuDonationCleanupStatusEl.textContent = '삭제를 다시 시도하고 있습니다...';
+          try {
+            const retry = await onyuAdminRetryDonationCleanupFn({ failureId: item.failureId });
+            onyuDonationCleanupStatusEl.textContent = retry.data && retry.data.resolved
+              ? '삭제를 완료했습니다.' : (retry.data && retry.data.message || '삭제에 실패했습니다. 목록에서 다시 확인해 주세요.');
+          } catch (error) {
+            onyuDonationCleanupStatusEl.textContent = '재시도 요청 실패: ' + (error && error.message || '알 수 없는 오류');
+          }
+          await refreshOnyuDonationCleanupFailures();
+        });
+        row.querySelector('.verif-actions').appendChild(button);
+        onyuDonationCleanupFailuresEl.appendChild(row);
+      });
+    } catch (error) {
+      console.error('온이유 자동 삭제 실패 내역 조회 실패:', error);
+      onyuDonationCleanupStatusEl.textContent = '조회에 실패했습니다: ' + (error && error.message || '알 수 없는 오류');
+    } finally {
+      onyuDonationCleanupRefreshBtn.disabled = false;
+    }
+  }
+  onyuDonationCleanupRefreshBtn.addEventListener('click', refreshOnyuDonationCleanupFailures);
 
   function renderOnyuGiftRequests() {
     if (onyuGiftStaleTimer) {
