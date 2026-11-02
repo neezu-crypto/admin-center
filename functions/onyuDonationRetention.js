@@ -19,6 +19,14 @@ function isOutfitSessionExpired(record, now = Date.now()) {
   return expiry > 0 && expiry <= now;
 }
 
+function confirmOutfitDonationSessionIfEligible(record, { uid, soopId, now = Date.now() } = {}) {
+  if (!record || record.uid !== uid || record.soopId !== soopId) return undefined;
+  if ((Number(record.expiresAt) || 0) <= now) return undefined;
+  if (record.status === 'confirmed') return record;
+  if (record.status !== 'waiting') return undefined;
+  return Object.assign({}, record, { status: 'confirmed', confirmedAt: now });
+}
+
 async function removeExpiredRecordIfMatches(db, path, key, getExpiry, expectedExpiry, now = Date.now()) {
   const expected = Number(expectedExpiry) || 0;
   if (!expected || expected > now) return false;
@@ -34,5 +42,6 @@ module.exports = {
   integrationExpiresAt,
   isIntegrationExpired,
   isOutfitSessionExpired,
+  confirmOutfitDonationSessionIfEligible,
   removeExpiredRecordIfMatches,
 };

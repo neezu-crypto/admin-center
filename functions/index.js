@@ -15,6 +15,7 @@ const {
   DONATION_CONSENT_TTL_MS,
   integrationExpiresAt,
   isIntegrationExpired,
+  confirmOutfitDonationSessionIfEligible,
   removeExpiredRecordIfMatches,
 } = require('./onyuDonationRetention');
 
@@ -3196,6 +3197,36 @@ const onyuRegisterOutfitDonationSession = onCall(async (request) => {
   return { ok: true, enabled: true, sessionId: ref.key, expiresAt };
 });
 
+const onyuConsumeOutfitDonationSession = onCall(async (request) => {
+  const uid = requireAuth(request);
+  const sessionId = String(request.data && request.data.sessionId || '');
+  const count = request.data && request.data.count;
+  if (!/^[A-Za-z0-9_-]{10,128}$/.test(sessionId)) throw new HttpsError('invalid-argument', '의상 선택 세션 정보가 올바르지 않습니다.');
+  if (!Number.isSafeInteger(count) || count < 50) throw new HttpsError('invalid-argument', '후원 이벤트가 자동 선택 기준에 도달하지 않았습니다.');
+  if (!request.data || request.data.fromVod !== false) return { ok: true, accepted: false, reason: 'not-live' };
+
+  const streamer = await getOnyuDonationStreamer(uid);
+  const integration = (await streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid).get()).val() || {};
+  if (integration.status !== 'active' || isIntegrationExpired(integration) || integration.soopId !== streamer.soopId) {
+    return { ok: true, accepted: false, reason: 'integration-inactive' };
+  }
+
+  const ref = streamer.db.ref(ONYU_OUTFIT_DONATION_SESSIONS_PATH + '/' + sessionId);
+  const transaction = await ref.transaction((current) => {
+    const now = Date.now();
+    if (isIntegrationExpired(integration, now)) return;
+    // 이벤트 원문이나 수량은 보관하지 않고, 세션의 1회 확정 상태만 원자적으로 기록한다.
+    return confirmOutfitDonationSessionIfEligible(current, { uid, soopId: streamer.soopId, now });
+  });
+  const saved = transaction.snapshot.val();
+  const accepted = !!saved
+    && saved.uid === uid
+    && saved.soopId === streamer.soopId
+    && saved.status === 'confirmed'
+    && (Number(saved.expiresAt) || 0) > Date.now();
+  return { ok: true, accepted };
+});
+
 const onyuCloseOutfitDonationSession = onCall(async (request) => {
   const uid = requireAuth(request);
   const sessionId = String(request.data && request.data.sessionId || '');
@@ -5229,6 +5260,7 @@ module.exports = {
   onyuGetDonationIntegrationStatus,
   onyuSetDonationIntegrationPreparation,
   onyuRegisterOutfitDonationSession,
+  onyuConsumeOutfitDonationSession,
   onyuCloseOutfitDonationSession,
   cleanupOnyuDonationExpiryTask,
   onyuSoopOAuthCallback,
