@@ -2,6 +2,7 @@ const { onCall, onRequest, HttpsError } = require('firebase-functions/v2/https')
 const { onValueCreated, onValueUpdated, onValueWritten } = require('firebase-functions/v2/database');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onTaskDispatched } = require('firebase-functions/tasks');
+const firebaseFunctionsV1 = require('firebase-functions/v1');
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getDatabase, getDatabaseWithUrl } = require('firebase-admin/database');
@@ -18,6 +19,10 @@ const {
   confirmOutfitDonationSessionIfEligible,
   removeExpiredRecordIfMatches,
 } = require('./onyuDonationRetention');
+const {
+  onyuRefreshSecretId,
+  deleteOnyuRefreshTokenSecret,
+} = require('./onyuSoopTokenVault');
 
 const app = initializeApp();
 const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
@@ -3140,6 +3145,15 @@ async function enqueueOnyuDonationExpiry(kind, key, expiresAt) {
   );
 }
 
+function getOnyuSecretProjectId() {
+  return process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || app.options.projectId;
+}
+
+async function deleteOnyuRefreshTokenForConsent(uid, soopConsentAt) {
+  const secretId = onyuRefreshSecretId(uid, soopConsentAt);
+  return deleteOnyuRefreshTokenSecret({ client: secretClient, projectId: getOnyuSecretProjectId(), secretId });
+}
+
 async function getOnyuDonationStreamer(uid) {
   const db = getDatabase();
   const [flagSnap, profileSnap] = await Promise.all([
@@ -3170,7 +3184,27 @@ const onyuSetDonationIntegrationPreparation = onCall(async (request) => {
   const uid = requireAuth(request);
   const streamer = await getOnyuDonationStreamer(uid);
   const ref = streamer.db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid);
-  if (!(request.data && request.data.enabled === true)) { await ref.remove(); return { ok: true, status: 'not-prepared', sdkApproved: false }; }
+  if (!(request.data && request.data.enabled === true)) {
+    const existing = (await ref.get()).val() || {};
+    if (!existing.consentedAt) { await ref.remove(); return { ok: true, status: 'not-prepared', sdkApproved: false }; }
+    const soopConsentAt = Number(existing.soopConsentAt) || 0;
+    const revocationId = require('node:crypto').randomBytes(16).toString('hex');
+    await ref.update({ status: 'revoking', revocationRequestedAt: Date.now(), revocationId, updatedAt: Date.now() });
+    try {
+      if (soopConsentAt) await deleteOnyuRefreshTokenForConsent(uid, soopConsentAt);
+    } catch (error) {
+      const retryAt = Date.now() + 60000;
+      try {
+        await getFunctions(app).taskQueue(ONYU_DONATION_EXPIRY_TASK_NAME).enqueue(
+          { kind: 'tokenSecret', key: uid, soopConsentAt, expiresAt: retryAt },
+          { scheduleTime: new Date(retryAt), dispatchDeadlineSeconds: 60 },
+        );
+      } catch (_) {}
+      throw new HttpsError('unavailable', '연동은 비활성화했습니다. 보안 토큰 삭제를 서버에서 재시도합니다.');
+    }
+    await ref.transaction((current) => current && current.status === 'revoking' && current.revocationId === revocationId ? null : current);
+    return { ok: true, status: 'not-prepared', sdkApproved: false };
+  }
   const now = Date.now();
   const existing = (await ref.get()).val() || {};
   const existingExpiry = integrationExpiresAt(existing);
@@ -3248,13 +3282,45 @@ const cleanupOnyuDonationExpiryTask = onTaskDispatched({
   const key = String(data.key || '');
   const expectedExpiry = Number(data.expiresAt) || 0;
   const validKey = kind === 'integration' ? /^[A-Za-z0-9_-]{1,128}$/.test(key)
-    : kind === 'session' ? /^[A-Za-z0-9_-]{10,128}$/.test(key) : false;
+    : kind === 'session' ? /^[A-Za-z0-9_-]{10,128}$/.test(key)
+      : kind === 'tokenSecret' ? /^[A-Za-z0-9_-]{1,128}$/.test(key) : false;
   if (!validKey || !expectedExpiry) return;
 
   const db = getDatabase();
+  if (kind === 'tokenSecret') {
+    if (expectedExpiry > Date.now()) return;
+    const soopConsentAt = Number(data.soopConsentAt) || 0;
+    if (!soopConsentAt) return;
+    await deleteOnyuRefreshTokenForConsent(key, soopConsentAt);
+    const ref = db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + key);
+    await ref.transaction((current) => current
+      && current.status === 'revoking'
+      && Number(current.soopConsentAt) === soopConsentAt
+      ? null
+      : current);
+    return;
+  }
+
   const path = kind === 'integration' ? ONYU_DONATION_INTEGRATIONS_PATH : ONYU_OUTFIT_DONATION_SESSIONS_PATH;
   const getExpiry = kind === 'integration' ? integrationExpiresAt : (record) => Number(record && record.expiresAt) || 0;
+  if (kind === 'integration') {
+    const ref = db.ref(path + '/' + key);
+    const record = (await ref.get()).val();
+    if (!record || Number(getExpiry(record)) !== expectedExpiry || Number(getExpiry(record)) > Date.now()) return;
+    if (record.soopConsentAt) await deleteOnyuRefreshTokenForConsent(key, Number(record.soopConsentAt));
+  }
   await removeExpiredRecordIfMatches(db, path, key, getExpiry, expectedExpiry);
+});
+
+// 인증 UID가 삭제되면 온이유 후원 토큰도 함께 파기한다. 토큰이 없는 계정은 즉시 반환한다.
+const cleanupOnyuDonationAuthUserDeleted = firebaseFunctionsV1.runWith({ failurePolicy: true }).auth.user().onDelete(async (user) => {
+  const uid = String(user && user.uid || '');
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(uid)) return;
+  const db = getDatabase();
+  const ref = db.ref(ONYU_DONATION_INTEGRATIONS_PATH + '/' + uid);
+  const record = (await ref.get()).val() || {};
+  if (record.soopConsentAt) await deleteOnyuRefreshTokenForConsent(uid, Number(record.soopConsentAt));
+  await ref.remove();
 });
 
 // SOOP Chat SDK Consent 승인 뒤 사용할 OAuth 반환 주소다. 승인 전에는 인증 코드와
@@ -5263,6 +5329,7 @@ module.exports = {
   onyuConsumeOutfitDonationSession,
   onyuCloseOutfitDonationSession,
   cleanupOnyuDonationExpiryTask,
+  cleanupOnyuDonationAuthUserDeleted,
   onyuSoopOAuthCallback,
   onyuListStreamerGiftTargets,
   onyuSubmitStreamerGameGift,
