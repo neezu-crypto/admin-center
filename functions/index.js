@@ -2024,6 +2024,30 @@ const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}'
 const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval');
 const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval');
 const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
+// 통합 캐시 충전은 신청 생성 뒤 실제 후원을 마친 사용자가 별도 완료 알림을 보낸다.
+// Discord에는 후원자 닉네임·아이디·Firebase UID를 보내지 않고, 관리자가 검수 화면에서
+// 대조할 수 있는 신청 번호와 수량만 전달한다.
+const GAME_SERIES_WALLET_ADMIN_URL = 'https://neezu-crypto.github.io/streamer-game-series-shop/customer-center.html';
+const notifyGameSeriesWalletDonationCompleted = onValueUpdated('/gameSeriesWallet/chargeRequests/{requestId}', async (event) => {
+  const before = event.data.before.val() || {};
+  const charge = event.data.after.val() || {};
+  if (before.status === 'donationCompleted' || charge.status !== 'donationCompleted' || charge.paymentMethod !== 'starBalloon') {
+    return null;
+  }
+  const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 100) || '(확인 필요)';
+  const starCount = Number(charge.starCount);
+  const countText = Number.isSafeInteger(starCount) && starCount > 0
+    ? `${starCount.toLocaleString('ko-KR')}개`
+    : '(수량 확인 필요)';
+  await sendDiscordNotification(
+    '🔔 **새 통합 캐시 후원 완료 알림**\n' +
+    '별풍선 신청 수량: ' + countText + '\n' +
+    '신청 번호: `' + requestId + '`\n' +
+    '실제 SOOP 후원 내역을 대조한 뒤 관리자 화면에서 승인해 주세요.\n' +
+    GAME_SERIES_WALLET_ADMIN_URL
+  );
+  return null;
+});
 const notifyMessengerReport = onValueCreated({
   ref: '/streamerMessenger/reports/{id}',
   instance: MESSENGER_DATABASE_INSTANCE,
@@ -5584,6 +5608,7 @@ module.exports = {
   notifyTreasureChestRequest,
   notifyCashChargeRequest,
   notifyUnfreezeDonationRequest,
+  notifyGameSeriesWalletDonationCompleted,
   notifyMessengerReport,
   notifyListingRequest,
   notifyLifeGameReportAlert,
