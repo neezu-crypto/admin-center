@@ -2027,7 +2027,9 @@ const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequest
 // 통합 캐시 충전은 신청 생성 뒤 실제 후원을 마친 사용자가 별도 완료 알림을 보낸다.
 // Discord에는 후원자 닉네임·아이디·Firebase UID를 보내지 않고, 관리자가 검수 화면에서
 // 대조할 수 있는 신청 번호와 수량만 전달한다.
-const GAME_SERIES_WALLET_ADMIN_URL = 'https://neezu-crypto.github.io/streamer-game-series-shop/customer-center.html';
+// 고객센터는 초기에는 잔액 탭과 검수 목록이 숨겨진 상태로 렌더링되므로, 탭과 초점 값을
+// 명시하고 클라이언트가 로그인·목록 렌더링 뒤 검수 대기 영역으로 이동하게 한다.
+const GAME_SERIES_WALLET_ADMIN_URL = 'https://neezu-crypto.github.io/streamer-game-series-shop/customer-center.html?tab=requests&focus=walletReviewQueue#walletReviewQueue';
 const notifyGameSeriesWalletDonationCompleted = onValueUpdated('/gameSeriesWallet/chargeRequests/{requestId}', async (event) => {
   const before = event.data.before.val() || {};
   const charge = event.data.after.val() || {};
