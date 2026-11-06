@@ -2235,11 +2235,12 @@ const notifyGalleryUnlockRequest = onValueCreated('/gallery/unlockRequests/{id}'
 // 요청 ID를 기록한다. Discord에는 SOOP 아이디만 공유하고 Firebase UID·인증 코드·해시는 보내지 않는다.
 const notifyFanPageViewerSubscriptionRequest = onValueCreated({
   ref: '/streamerFanPageViewerSubscriptionPending/{requestId}',
+  instance: FANPAGE_DATABASE_INSTANCE,
   retry: true,
 }, async (event) => {
   const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
   if (!requestId) return null;
-  const requestSnapshot = await getDatabase()
+  const requestSnapshot = await fanpageDatabase()
     .ref('streamerFanPageViewerSubscriptionRequests/' + requestId)
     .get();
   const data = requestSnapshot.val() || {};
@@ -2277,6 +2278,7 @@ const notifyFanPageViewerSubscriptionRequest = onValueCreated({
 // 생성 트리거 대신 요청 레코드 업데이트에서만 감지한다. 인증 코드와 해시는 알림에 포함하지 않는다.
 const notifyFanPageViewerSubscriptionCodeRenewal = onValueUpdated({
   ref: '/streamerFanPageViewerSubscriptionRequests/{requestId}',
+  instance: FANPAGE_DATABASE_INSTANCE,
   retry: true,
 }, async (event) => {
   const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
