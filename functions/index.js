@@ -39,8 +39,13 @@ const MESSENGER_DATABASE_URL = 'https://streamer-messenger-rtdb.firebaseio.com';
 const MESSENGER_DATABASE_INSTANCE = 'streamer-messenger-rtdb';
 const FANPAGE_DATABASE_URL = 'https://streamer-fanpage-rtdb.firebaseio.com';
 const FANPAGE_DATABASE_INSTANCE = 'streamer-fanpage-rtdb';
+const LIFE_GAME_DATABASE_URL = 'https://streamer-life-game-rtdb.firebaseio.com';
+const LIFE_GAME_DATABASE_INSTANCE = 'streamer-life-game-rtdb';
 const messengerDatabase = () => getDatabaseWithUrl(MESSENGER_DATABASE_URL, app);
 const fanpageDatabase = () => getDatabaseWithUrl(FANPAGE_DATABASE_URL, app);
+// 인생게임의 진행·후원·검수 데이터는 전용 RTDB에 있고, 관리자 계정·감사 로그는
+// 기본 DB에 남는다. 두 저장소를 섞지 않도록 인생게임 데이터 접근은 이 헬퍼만 쓴다.
+const lifeGameDatabase = () => getDatabaseWithUrl(LIFE_GAME_DATABASE_URL, app);
 let messengerMigrationStateCache = { paused: false, expiresAt: 0 };
 async function isMessengerDatabaseMigrationPaused() {
   if (Date.now() < messengerMigrationStateCache.expiresAt) return messengerMigrationStateCache.paused;
@@ -154,7 +159,7 @@ const recordPublicPromoEvent = onRequest(async (request, response) => {
       await incrementPromoAnalytics(dayRef.child(`linkClicksByStreamer/${digest}`));
       await incrementPromoAnalytics(dayRef.child('linkClicks'));
     } else if (eventName === 'sponsorClick' || eventName === 'sponsorImpression') {
-      const sponsor = (await db.ref('lifeGame/currentSponsor').get()).val();
+      const sponsor = (await lifeGameDatabase().ref('lifeGame/currentSponsor').get()).val();
       if (sponsor && Number(sponsor.startAt) <= Date.now() && Number(sponsor.endAt) > Date.now()) {
         await incrementPromoAnalytics(dayRef.child(eventName === 'sponsorClick' ? 'sponsorStationClicks' : 'sponsorImpressions'));
       }
@@ -500,7 +505,7 @@ const getAdminSessionSummary = onCall(async (request) => {
       hasAnyEntry(db, 'bannerRequests', 'pending'),
       hasAnyEntry(db, 'pinRequests', 'pending'),
       hasAnyEntry(db, 'relayRoomRequests', 'pending'),
-      hasAnyEntry(db, 'lifeGame/sponsorRequests', 'pending'),
+      hasAnyEntry(lifeGameDatabase(), 'lifeGame/sponsorRequests', 'pending'),
       hasAnyEntry(db, 'bettingMarket/markets', 'pendingValidation'),
       hasAnyEntry(db, 'bettingMarket/markets', 'closed'),
       hasAnyEntry(db, 'bettingMarket/markets', 'pendingSettlement'),
@@ -2137,19 +2142,19 @@ const notifyOnyuStreamerGameGiftAutoApproval = onValueUpdated('/onyuVn/streamerG
 // admin-center 페이지 안에 대응하는 섹션이 없고, 각 사이트 자체 관리 패널에서
 // 처리한다. 그래서 makeQueueTrigger의 deepLink(admin-center#anchor 고정)를 그대로
 // 못 쓰고, 그 사이트 자신의 URL로 안내하는 커스텀 트리거를 쓴다.
-const notifyLifeGameReportAlert = onValueCreated('/lifeGame/galleryReports/{id}', async (event) => {
+const notifyLifeGameReportAlert = onValueCreated({ ref: '/lifeGame/galleryReports/{id}', instance: LIFE_GAME_DATABASE_INSTANCE }, async (event) => {
   const data = event.data.val() || {};
   await sendDiscordNotification('🔔 **새 갤러리 신고 (인생게임)**\n' + formatRequestSummary(data) + '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널에서 확인)');
 });
 // 게임 후기 신고 - 신고 노드는 reviewPublicId를 저장하므로 해당 공개 후기에서
 // 별점·본문·작성자 정보를 함께 읽어 Discord 알림에 표시한다.
-const notifyLifeGameReviewReportAlert = onValueCreated('/lifeGame/reviewReports/{id}', async (event) => {
+const notifyLifeGameReviewReportAlert = onValueCreated({ ref: '/lifeGame/reviewReports/{id}', instance: LIFE_GAME_DATABASE_INSTANCE }, async (event) => {
   const data = event.data.val() || {};
   const reviewPublicId = String(data.reviewPublicId || data.reviewUid || '').trim();
   let review = null;
   if (reviewPublicId) {
     try {
-      const reviewSnap = await db.ref('lifeGame/reviewsPublic/' + reviewPublicId).get();
+      const reviewSnap = await lifeGameDatabase().ref('lifeGame/reviewsPublic/' + reviewPublicId).get();
       review = reviewSnap.val() || null;
     } catch (error) {
       console.error('인생게임 신고 후기 조회 실패:', reviewPublicId, error);
@@ -2184,7 +2189,7 @@ const notifyLifeGameReviewReportAlert = onValueCreated('/lifeGame/reviewReports/
     '\nhttps://neezu-crypto.github.io/streamer-life-game/ (관리자 패널 → 신고된 후기)'
   );
 });
-const notifyLifeGameSponsorRequest = onValueCreated('/lifeGame/sponsorRequests/{id}', async (event) => {
+const notifyLifeGameSponsorRequest = onValueCreated({ ref: '/lifeGame/sponsorRequests/{id}', instance: LIFE_GAME_DATABASE_INSTANCE }, async (event) => {
   const data = event.data.val() || {};
   const liveUrl = streamerLiveUrlForData(data);
   await sendDiscordNotification(
@@ -2739,7 +2744,7 @@ const getGalleryStats = onCall(async (request) => {
 // 동일한 원칙(다른 저장소 소유 데이터를 Admin SDK로 읽기만, 새 로직 중복 없음).
 const getLifeGameStats = onCall(async (request) => {
   await requireAdmin(request);
-  const db = getDatabase();
+  const db = lifeGameDatabase();
   const snap = await db.ref('lifeGame/stats').get();
   const data = snap.val() || {};
   const totals = data.totals || {};
@@ -2769,7 +2774,7 @@ const getLifeGameStats = onCall(async (request) => {
 // 기록을 관리자에게 조회하는 용도로만 유지한다.
 const listLifeGamePlayerStartRecords = onCall(async (request) => {
   await requireAdmin(request);
-  const snap = await getDatabase().ref('lifeGame/playerStartRecords').get();
+  const snap = await lifeGameDatabase().ref('lifeGame/playerStartRecords').get();
   const raw = snap.val() || {};
   const players = Object.keys(raw).map(function (uid) {
     const entry = raw[uid] || {};
@@ -2787,7 +2792,7 @@ const listLifeGamePlayerStartRecords = onCall(async (request) => {
 // Admin SDK 전용 lifeGame 경로이며, 검수 등록만 이후 인증 자동 승인 근거가 된다.
 const listLifeGamePlayedStreamers = onCall(async (request) => {
   await requireAdmin(request);
-  const db = getDatabase();
+  const db = lifeGameDatabase();
   const [candidateSnap, allowlistSnap] = await Promise.all([
     db.ref('lifeGame/playedStreamerCandidates').get(),
     db.ref('lifeGame/playedStreamerAllowlist').get()
@@ -2824,13 +2829,13 @@ const addLifeGamePlayedStreamer = onCall(async (request) => {
   if (!/^[a-z0-9]{2,20}$/.test(soopId)) throw new HttpsError('invalid-argument', 'SOOP 아이디는 영문 소문자/숫자 2~20자로 입력해주세요.');
   if (!nickname || nickname.length > 50) throw new HttpsError('invalid-argument', '닉네임을 1~50자로 입력해주세요.');
   if (evidenceUrl && !/^https:\/\//i.test(evidenceUrl)) throw new HttpsError('invalid-argument', '검수 링크는 https URL이어야 합니다.');
-  const db = getDatabase();
+  const db = lifeGameDatabase();
   const reviewedAt = Date.now();
   const entry = { uid: uid, soopId: soopId, nickname: nickname, reviewedAt: reviewedAt, reviewerUid: adminUid, source: 'manual-review' };
   if (note) entry.note = note;
   if (evidenceUrl) entry.evidenceUrl = evidenceUrl;
   await db.ref('lifeGame/playedStreamerAllowlist/' + uid + '/' + soopId).set(entry);
-  await logToAdminAuditLog(db, request, '인생게임 플레이 스트리머 검수 등록', nickname + ' · ' + soopId + ' · ' + uid);
+  await logToAdminAuditLog(getDatabase(), request, '인생게임 플레이 스트리머 검수 등록', nickname + ' · ' + soopId + ' · ' + uid);
   return { ok: true };
 });
 
@@ -2842,13 +2847,13 @@ const removeLifeGamePlayedStreamer = onCall(async (request) => {
   if (!/^[A-Za-z0-9_-]{10,128}$/.test(uid) || !/^[a-z0-9]{2,20}$/.test(soopId)) {
     throw new HttpsError('invalid-argument', 'UID 또는 SOOP 아이디 형식을 확인해주세요.');
   }
-  const db = getDatabase();
+  const db = lifeGameDatabase();
   const ref = db.ref('lifeGame/playedStreamerAllowlist/' + uid + '/' + soopId);
   const snap = await ref.get();
   if (!snap.exists()) throw new HttpsError('not-found', '검수 등록 항목을 찾을 수 없습니다.');
   const entry = snap.val() || {};
   await ref.remove();
-  await logToAdminAuditLog(db, request, '인생게임 플레이 스트리머 검수 해제', (entry.nickname || '') + ' · ' + soopId + ' · ' + uid);
+  await logToAdminAuditLog(getDatabase(), request, '인생게임 플레이 스트리머 검수 해제', (entry.nickname || '') + ' · ' + soopId + ' · ' + uid);
   return { ok: true };
 });
 
@@ -2913,7 +2918,7 @@ async function commitLifeGameSponsorApproval(db, request, adminUid, requestId, d
       approvalCommitted = true;
       let auditLogged = true;
       try {
-        await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 승인', finalNickname + ' · ' + daysNum + '일');
+        await logToAdminAuditLog(getDatabase(), request, '인생게임 후원 스트리머 승인', finalNickname + ' · ' + daysNum + '일');
       } catch (auditError) {
         auditLogged = false;
         console.error('인생게임 후원 스트리머 승인 감사 로그 실패:', String(auditError && auditError.message || auditError).slice(0, 160));
@@ -2943,7 +2948,7 @@ const lifeGameApproveSponsorRequest = onCall(async (request) => {
     throw new HttpsError('invalid-argument', '노출 기간을 올바르게 입력해주세요.');
   }
   const nickname = String(data.nickname || '').trim();
-  return commitLifeGameSponsorApproval(getDatabase(), request, adminUid, requestId, daysNum, nickname, {
+  return commitLifeGameSponsorApproval(lifeGameDatabase(), request, adminUid, requestId, daysNum, nickname, {
     verificationSource: 'admin-manual',
   });
 });
@@ -2954,7 +2959,7 @@ const lifeGameRejectSponsorRequest = onCall(async (request) => {
   const requestId = data.requestId;
   if (!requestId) throw new HttpsError('invalid-argument', 'requestId가 필요합니다.');
 
-  const db = getDatabase();
+  const db = lifeGameDatabase();
   const reqSnap = await db.ref('lifeGame/sponsorRequests/' + requestId).get();
   if (!reqSnap.exists()) throw new HttpsError('not-found', '신청 내역을 찾을 수 없습니다.');
   if (reqSnap.val().status !== 'pending') {
@@ -2962,7 +2967,7 @@ const lifeGameRejectSponsorRequest = onCall(async (request) => {
   }
 
   await db.ref('lifeGame/sponsorRequests/' + requestId).update({ status: 'rejected', reviewedAt: Date.now() });
-  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 거절', requestId);
+  await logToAdminAuditLog(getDatabase(), request, '인생게임 후원 스트리머 거절', requestId);
   return { ok: true };
 });
 
@@ -2970,7 +2975,7 @@ const lifeGameRejectSponsorRequest = onCall(async (request) => {
 // 조작하고 모든 쓰기는 관리자 인증 및 통합 감사 로그를 거친다.
 const getLifeGameCurrentSponsor = onCall(async (request) => {
   await requireAdmin(request);
-  const snap = await getDatabase().ref('lifeGame/currentSponsor').get();
+  const snap = await lifeGameDatabase().ref('lifeGame/currentSponsor').get();
   return { sponsor: snap.val() || null, fetchedAt: Date.now() };
 });
 
@@ -2989,7 +2994,7 @@ const updateLifeGameCurrentSponsor = onCall(async (request) => {
   if (!Number.isInteger(extendDays) || extendDays < 0 || extendDays > 365) {
     throw new HttpsError('invalid-argument', '연장 일수는 0~365일로 입력해주세요.');
   }
-  const db = getDatabase();
+  const db = lifeGameDatabase();
   const now = Date.now();
   const ref = db.ref('lifeGame/currentSponsor');
   // 주식시장 배너 승인처럼 서버의 현재 값을 읽고 루트 멀티패스 update로
@@ -3017,14 +3022,14 @@ const updateLifeGameCurrentSponsor = onCall(async (request) => {
     'lifeGame/currentSponsor/endAt': after.endAt,
     'lifeGame/currentSponsor/updatedAt': after.updatedAt,
   });
-  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 광고 수정',
+  await logToAdminAuditLog(getDatabase(), request, '인생게임 후원 스트리머 광고 수정',
     current.nickname + ' → ' + nickname + ' · ' + soopId + (extendDays ? ' · ' + extendDays + '일 연장' : ''));
   return { ok: true, sponsor: after };
 });
 
 const endLifeGameCurrentSponsor = onCall(async (request) => {
   await requireAdmin(request);
-  const db = getDatabase();
+  const db = lifeGameDatabase();
   const now = Date.now();
   const ref = db.ref('lifeGame/currentSponsor');
   const currentSnap = await ref.get();
@@ -3033,7 +3038,7 @@ const endLifeGameCurrentSponsor = onCall(async (request) => {
     throw new HttpsError('not-found', '관리할 후원 스트리머 광고가 없습니다. 새로고침 후 현재 광고를 다시 확인해주세요.');
   }
   await db.ref().update({ 'lifeGame/currentSponsor/endAt': now, 'lifeGame/currentSponsor/endedAt': now });
-  await logToAdminAuditLog(db, request, '인생게임 후원 스트리머 광고 즉시 종료', current.nickname + ' · ' + (current.soopId || ''));
+  await logToAdminAuditLog(getDatabase(), request, '인생게임 후원 스트리머 광고 즉시 종료', current.nickname + ' · ' + (current.soopId || ''));
   return { ok: true, endedAt: now };
 });
 
@@ -3839,13 +3844,14 @@ const getLifeGameSponsorAutoVerificationDiagnostics = onCall(async (request) => 
   if (!/^LG-[A-F0-9]{8}$/.test(diagnosticCode)) {
     throw new HttpsError('invalid-argument', '점검 코드를 확인해주세요.');
   }
-  const db = getDatabase();
-  const requestId = String((await db.ref('lifeGame/sponsorDiagnosticCodes/' + diagnosticCode).get()).val() || '');
+  const lifeDb = lifeGameDatabase();
+  const sharedDb = getDatabase();
+  const requestId = String((await lifeDb.ref('lifeGame/sponsorDiagnosticCodes/' + diagnosticCode).get()).val() || '');
   if (!requestId) throw new HttpsError('not-found', '해당 점검 코드의 신청을 찾을 수 없습니다.');
   const [requestSnap, diagnosticSnap, monitorSnap] = await Promise.all([
-    db.ref('lifeGame/sponsorRequests/' + requestId).get(),
-    db.ref('adminCenter/donationVerificationDiagnostics/' + diagnosticCode).limitToLast(30).get(),
-    db.ref('adminCenter/donationVerificationMonitorStatus/' + adminUid).get(),
+    lifeDb.ref('lifeGame/sponsorRequests/' + requestId).get(),
+    sharedDb.ref('adminCenter/donationVerificationDiagnostics/' + diagnosticCode).limitToLast(30).get(),
+    sharedDb.ref('adminCenter/donationVerificationMonitorStatus/' + adminUid).get(),
   ]);
   const item = requestSnap.val() || {};
   const diagnostics = diagnosticSnap.val() || {};
