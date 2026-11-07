@@ -1,0 +1,5 @@
+exclude:
+  - CLAUDE.md
+  - AGENTS.md
+  - .github/copilot-instructions.md
+  - database.fanpage.rules.json

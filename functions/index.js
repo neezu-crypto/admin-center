@@ -2300,6 +2300,41 @@ const notifyFanPageViewerSubscriptionCodeRenewal = onValueUpdated({
   );
   return null;
 });
+// 캐시 홍보는 결제 결과가 확정되었을 때만 알린다. 임시 캠페인 생성은 알리지 않는다.
+const notifyFanPageCashSponsorResult = onValueWritten({
+  ref: '/streamerFanPageViewerSponsors/paymentResults/{requestId}',
+  instance: FANPAGE_DATABASE_INSTANCE,
+  retry: true,
+}, async (event) => {
+  const before = event.data.before.val() || {};
+  const after = event.data.after.val() || {};
+  if (!['activated', 'refund-pending'].includes(after.status) || before.status === after.status) return null;
+  const requestId = String(event.params.requestId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+  if (!requestId) return null;
+  const deliveryRef = getDatabase().ref('adminCenter/fanPageCashSponsorNotifications/' + requestId + '/' + after.status);
+  const held = await holdFreshRealtimeSnapshot(deliveryRef);
+  try {
+    const now = Date.now();
+    const claim = await deliveryRef.transaction((current) => {
+      if (current?.sentAt || (current?.leaseUntil && current.leaseUntil > now)) return;
+      return { leaseUntil: now + 120000 };
+    }, undefined, false);
+    if (!claim.committed) return null;
+    const clean = (value) => String(value || '').replace(/[@<>\r\n`*_~|]/g, ' ').trim().slice(0, 40);
+    const text = after.status === 'activated'
+      ? '📣 **고점체크 캐시 홍보 등록**\n대상: ' + clean(after.nickname) + ' · @' + normalizeSoopId(after.soopId)
+        + '\n기간: ' + Math.max(0, Number(after.days) || 0) + '일 · 위치: ' + (after.rail === 'right' ? '오른쪽' : '왼쪽')
+      : '⚠️ **고점체크 홍보 자동 환불 확인 필요**\n요청 번호: `' + requestId + '`';
+    const sent = await sendDiscordNotification(text + '\n' + deepLink('section-fanpage-sponsor-ads'));
+    if (!sent.sent) {
+      await deliveryRef.remove();
+      throw new Error('캐시 홍보 알림 전송 실패: ' + sent.reason);
+    }
+    await deliveryRef.set({ sentAt: Date.now() });
+    return null;
+  } finally { held.release(); }
+});
+
 // 고점체크 후원 스트리머 신청도 새 대기 인덱스가 생성되면 Discord로 알린다.
 // 요청 본문은 server-only 요청 노드에서 읽고, Firebase UID는 알림에 포함하지 않는다.
 const notifyFanPageSponsorAdRequest = onValueCreated({
@@ -4485,13 +4520,184 @@ const manageFanPageSponsorAds = onCall(async (request) => {
         startsAt: Math.max(0, Number(ad.startsAt) || 0),
         expiresAt: Math.max(0, Number(ad.expiresAt) || 0),
       }));
+    // 신규 캐시 캠페인은 레거시 광고와 별도 경로에 저장된다.
+    const [cashSnapshot, resultSnapshot] = await Promise.all([
+      db.ref('streamerFanPageViewerSponsors/campaigns').get(),
+      db.ref('streamerFanPageViewerSponsors/paymentResults').get(),
+    ]);
+    const cashResults = resultSnapshot.val() || {};
+    const cashAds = Object.entries(cashSnapshot.val() || {})
+      .map(([campaignId, record]) => ({
+        campaignId, nickname: String(record?.nickname || '').slice(0, 40),
+        soopId: normalizeSoopId(record?.soopId), rail: record?.rail === 'right' ? 'right' : 'left',
+        status: String(record?.status || ''), startsAt: Math.max(0, Number(record?.startsAt) || 0),
+        expiresAt: Math.max(0, Number(record?.expiresAt) || 0),
+        cashCost: Math.max(0, Number(record?.cashCost) || 0),
+        refundAmount: Math.max(0, Number(record?.adminRefundAmount) || 0),
+        refundedAt: Math.max(0, Number(record?.adminRefundedAt) || 0),
+        resultStatus: String(cashResults[campaignId]?.status || ''),
+      })).sort((a, b) => b.startsAt - a.startsAt).slice(0, 100);
+    const cashIssues = Object.entries(cashResults)
+      .filter(([, record]) => record?.status === 'refund-pending')
+      .map(([requestId, record]) => ({ requestId, status: record.status,
+        reviewRequired: record.refundFailure === 'campaign-review-required',
+        cashAmount: Math.max(0, Number(record.cashAmount) || 0),
+        updatedAt: Math.max(0, Number(record.updatedAt) || 0) }))
+      .sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 100);
     return {
       ok: true,
       requests,
       ads,
+      cashAds,
+      cashIssues,
       truncated: Object.keys(pendingMap).length > requestIds.length,
       checkedAt: Date.now(),
     };
+  }
+
+  if (action === 'cash-retry-failed-refund') {
+    const requestId = typeof data.requestId === 'string' ? data.requestId.trim() : '';
+    if (!validFanPageSponsorRequestId(requestId)) throw new HttpsError('invalid-argument', '요청 번호가 올바르지 않습니다.');
+    const [resultSnapshot, campaignSnapshot] = await Promise.all([
+      db.ref('streamerFanPageViewerSponsors/paymentResults/' + requestId).get(),
+      db.ref('streamerFanPageViewerSponsors/campaigns/' + requestId).get(),
+    ]);
+    const result = resultSnapshot.val();
+    if (!result || !['refund-pending', 'refunded'].includes(result.status) || !result.requesterUid || campaignSnapshot.exists()) {
+      throw new HttpsError('failed-precondition', '환불 대기 기록 또는 캠페인 상태를 확인할 수 없습니다.');
+    }
+    const uid = String(result.requesterUid);
+    if (/[.#$\[\]/]/.test(uid)) throw new HttpsError('failed-precondition', '결제 계정을 확인할 수 없습니다.');
+    const amount = Number(result.cashAmount);
+    const { applyFailedFullRefund } = require('./fanpage-sponsor-refund');
+    const accountRef = auditDb.ref('gameSeriesWallet/accounts/' + uid);
+    const heldAccount = await holdFreshRealtimeSnapshot(accountRef);
+    let alreadyRefunded = false;
+    try {
+      const wallet = await accountRef.transaction((account) => {
+        alreadyRefunded = account?.fanPageViewerSponsorPurchases?.[requestId]?.status === 'refunded';
+        return applyFailedFullRefund(account, { requestId, cashCost: amount, now: Date.now(), reason: '고점체크 홍보 활성화 실패 자동 환불 복구' });
+      }, undefined, false);
+      if (!wallet.committed) throw new HttpsError('failed-precondition', '원 결제 또는 환불 상태가 일치하지 않습니다.');
+    } finally { heldAccount.release(); }
+    const ledgerRef = auditDb.ref('gameSeriesWallet/ledger/' + uid + '/' + requestId + '_viewerSponsorPromotion_refund');
+    const heldLedger = await holdFreshRealtimeSnapshot(ledgerRef);
+    try {
+      const ledger = await ledgerRef.transaction((current) => {
+        if (current) return current.requestId === requestId && current.balanceDelta === amount ? current : undefined;
+        return { requestId, type: 'viewerSponsorPromotion_refund', balanceDelta: amount,
+          reason: '고점체크 홍보 활성화 실패 자동 환불 복구', createdAt: Date.now() };
+      }, undefined, false);
+      if (!ledger.committed) throw new HttpsError('aborted', '환불 계정은 처리됐지만 원장 대조가 필요합니다.');
+    } finally { heldLedger.release(); }
+    const resultRef = db.ref('streamerFanPageViewerSponsors/paymentResults/' + requestId);
+    const heldResult = await holdFreshRealtimeSnapshot(resultRef);
+    try {
+      const finished = await resultRef.transaction((current) => {
+        if (!current || current.requesterUid !== uid || !['refund-pending', 'refunded'].includes(current.status)) return;
+        return { ...current, status: 'refunded', updatedAt: Date.now() };
+      }, undefined, false);
+      if (!finished.committed) throw new HttpsError('aborted', '환불 처리 후 결과 상태를 확인하지 못했습니다. 다시 확인해 주세요.');
+    } finally { heldResult.release(); }
+    const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 캐시 자동 환불 복구', requestId + ' · ' + amount + '캐시');
+    return { ok: true, refundAmount: amount, alreadyRefunded, auditLogged };
+  }
+
+  if (action === 'cash-refund-quote' || action === 'cash-refund') {
+    const campaignId = typeof data.campaignId === 'string' ? data.campaignId.trim() : '';
+    if (!validFanPageSponsorRequestId(campaignId)) throw new HttpsError('invalid-argument', '캠페인 번호가 올바르지 않습니다.');
+    const [campaignSnapshot, resultSnapshot] = await Promise.all([
+      db.ref('streamerFanPageViewerSponsors/campaigns/' + campaignId).get(),
+      db.ref('streamerFanPageViewerSponsors/paymentResults/' + campaignId).get(),
+    ]);
+    const campaign = campaignSnapshot.val();
+    const result = resultSnapshot.val();
+    if (!campaign || campaign.status !== 'ended' || campaign.paymentRequestId !== campaignId
+      || !result || result.status !== 'activated' || result.campaignId !== campaignId
+      || Number(result.cashAmount) !== Number(campaign.cashCost) || !result.requesterUid) {
+      throw new HttpsError('failed-precondition', '중단된 홍보와 결제 기록을 대조할 수 없습니다. 수동 확인해 주세요.');
+    }
+    const { calculateUnusedCashRefund, applyUnusedCashRefund } = require('./fanpage-sponsor-refund');
+    let refundAmount;
+    try {
+      refundAmount = calculateUnusedCashRefund({ startsAt: Number(campaign.startsAt), expiresAt: Number(campaign.expiresAt),
+        endedAt: Number(campaign.endedAt), cashCost: Number(campaign.cashCost) });
+    } catch (_) { throw new HttpsError('failed-precondition', '노출 기간 또는 결제액이 올바르지 않습니다.'); }
+    if (action === 'cash-refund-quote') return { ok: true, refundAmount, cashCost: Number(campaign.cashCost), endedAt: Number(campaign.endedAt) };
+    const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+    if (reason.length < 2 || reason.length > 200) throw new HttpsError('invalid-argument', '환불 사유를 2~200자로 입력해 주세요.');
+    const uid = String(result.requesterUid);
+    if (require('node:crypto').createHash('sha256').update(uid).digest('hex') !== campaign.requesterUidHash) {
+      throw new HttpsError('failed-precondition', '결제 계정과 홍보 기록이 일치하지 않습니다.');
+    }
+    const debitRef = auditDb.ref('gameSeriesWallet/ledger/' + uid + '/' + campaignId + '_viewerSponsorPromotion');
+    const debit = (await debitRef.get()).val();
+    if (!debit || debit.requestId !== campaignId || debit.type !== 'viewerSponsorPromotion'
+      || Number(debit.balanceDelta) !== -Number(campaign.cashCost)) {
+      throw new HttpsError('failed-precondition', '원래 차감 원장을 확인할 수 없습니다. 수동 점검해 주세요.');
+    }
+    const accountRef = auditDb.ref('gameSeriesWallet/accounts/' + uid);
+    const heldAccount = await holdFreshRealtimeSnapshot(accountRef);
+    let alreadyRefunded = false;
+    try {
+      const wallet = await accountRef.transaction((account) => {
+        alreadyRefunded = !!account?.fanPageViewerSponsorPurchases?.[campaignId]?.adminRefund;
+        return applyUnusedCashRefund(account, { requestId: campaignId, cashCost: Number(campaign.cashCost), refundAmount, now: Date.now(), reason });
+      }, undefined, false);
+      if (!wallet.committed) throw new HttpsError('failed-precondition', '원 결제 또는 기존 환불 상태를 확인할 수 없습니다.');
+    } finally { heldAccount.release(); }
+    const ledgerRef = auditDb.ref('gameSeriesWallet/ledger/' + uid + '/' + campaignId + '_viewerSponsorPromotion_adminRefund');
+    const heldLedger = await holdFreshRealtimeSnapshot(ledgerRef);
+    try {
+      const ledger = await ledgerRef.transaction((current) => {
+        if (current) return current.requestId === campaignId && current.balanceDelta === refundAmount ? current : undefined;
+        return { requestId: campaignId, type: 'viewerSponsorPromotion_adminRefund', balanceDelta: refundAmount, reason, createdAt: Date.now() };
+      }, undefined, false);
+      if (!ledger.committed) throw new HttpsError('aborted', '환불은 처리됐지만 원장 확인이 필요합니다. 같은 요청을 다시 확인해 주세요.');
+    } finally { heldLedger.release(); }
+    const campaignRef = db.ref('streamerFanPageViewerSponsors/campaigns/' + campaignId);
+    const heldCampaign = await holdFreshRealtimeSnapshot(campaignRef);
+    try {
+      const updated = await campaignRef.transaction((current) => {
+        if (!current || current.status !== 'ended' || Number(current.endedAt) !== Number(campaign.endedAt)
+          || Number(current.cashCost) !== Number(campaign.cashCost)) return;
+        if (current.adminRefundedAt && Number(current.adminRefundAmount) !== refundAmount) return;
+        return { ...current, adminRefundAmount: refundAmount, adminRefundedAt: current.adminRefundedAt || Date.now() };
+      }, undefined, false);
+      if (!updated.committed) throw new HttpsError('aborted', '환불은 처리됐지만 캠페인 상태 확인이 필요합니다. 다시 확인해 주세요.');
+    } finally { heldCampaign.release(); }
+    const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 캐시 홍보 부분 환불', campaignId + ' · ' + refundAmount + '캐시 · ' + reason);
+    return { ok: true, refundAmount, alreadyRefunded, auditLogged };
+  }
+
+  if (action === 'cash-end') {
+    const campaignId = typeof data.campaignId === 'string' ? data.campaignId.trim() : '';
+    const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+    if (!validFanPageSponsorRequestId(campaignId)) throw new HttpsError('invalid-argument', '캠페인 번호가 올바르지 않습니다.');
+    if (reason.length < 2 || reason.length > 200) throw new HttpsError('invalid-argument', '중단 사유를 2~200자로 입력해 주세요.');
+    const campaignRef = db.ref('streamerFanPageViewerSponsors/campaigns/' + campaignId);
+    const held = await holdFreshRealtimeSnapshot(campaignRef);
+    try {
+      const now = Date.now();
+      const ended = await campaignRef.transaction((record) => {
+        if (!record || record.status !== 'active' || Number(record.expiresAt) <= now || record.paymentRequestId !== campaignId) return;
+        return { ...record, status: 'ended', endedAt: now, endedBy: adminUid, endReason: reason };
+      }, undefined, false);
+      if (!ended.committed) throw new HttpsError('failed-precondition', '진행 중인 캐시 홍보만 중단할 수 있습니다.');
+      const record = ended.snapshot.val();
+      const soopId = normalizeSoopId(record.soopId);
+      const claimRef = db.ref('streamerFanPageViewerSponsors/claimsBySoopId/' + soopId);
+      let claimReleased = false;
+      try {
+        const heldClaim = await holdFreshRealtimeSnapshot(claimRef);
+        try {
+          const release = await claimRef.transaction((claim) => claim && claim.requestId === campaignId ? null : claim, undefined, false);
+          claimReleased = !release.snapshot.val() || release.snapshot.val().requestId !== campaignId;
+        } finally { heldClaim.release(); }
+      } catch (error) { console.error('캐시 홍보 슬롯 해제 실패', { campaignId, error }); }
+      const auditLogged = await writeFanPageSponsorAdminAudit(auditDb, request, '고점체크 캐시 홍보 중단', '@' + soopId + ' · ' + reason);
+      return { ok: true, endedAt: now, claimReleased, auditLogged };
+    } finally { held.release(); }
   }
 
   if (action === 'approve' || action === 'reject') {
@@ -5630,6 +5836,7 @@ module.exports = {
   notifyFanPageViewerSubscriptionRequest,
   notifyFanPageViewerSubscriptionCodeRenewal,
   notifyFanPageSponsorAdRequest,
+  notifyFanPageCashSponsorResult,
   notifyFanPageDesignFeedback,
   notifyFanPageTamagotchiApplication,
   notifyGalleryImageUpload,

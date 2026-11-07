@@ -856,6 +856,13 @@
       <div id="fanpageSponsorPendingRequests" class="fanpage-sponsor-admin-list"></div>
       <h3 class="subhead" style="margin-top:18px;">현재 및 만료 광고</h3>
       <div id="fanpageSponsorActiveAds" class="fanpage-sponsor-admin-list"></div>
+      <h3 class="subhead" style="margin-top:18px;">통합 캐시 홍보 이력</h3>
+      <p class="hint">최근 100건을 표시합니다. 결과 기록이 없으면 결제 상태를 별도로 확인해야 합니다.</p>
+      <label>검색 <input id="fanpageSponsorCashSearch" type="search" placeholder="닉네임 또는 SOOP 아이디"></label>
+      <label>상태 <select id="fanpageSponsorCashFilter"><option value="all">전체</option><option value="active">노출 중</option><option value="expired">기간 종료</option><option value="ended">관리자 중단</option><option value="issue">결제 확인 필요</option></select></label>
+      <div id="fanpageSponsorCashAds" class="fanpage-sponsor-admin-list"></div>
+      <h3 class="subhead" style="margin-top:18px;">자동 환불 확인 필요</h3>
+      <div id="fanpageSponsorCashIssues" class="fanpage-sponsor-admin-list"></div>
       <button id="fanpageSponsorAdminRefreshBtn" class="perm-refresh-btn" type="button" style="margin-top:12px;">새로고침</button>
     </div>
 
@@ -5520,6 +5527,15 @@
   const fanPageSponsorPendingRequestsEl = document.getElementById('fanpageSponsorPendingRequests');
   const fanPageSponsorActiveAdsEl = document.getElementById('fanpageSponsorActiveAds');
   const fanPageSponsorAdminRefreshBtnEl = document.getElementById('fanpageSponsorAdminRefreshBtn');
+  function filterFanPageCashAds() {
+    const query = document.getElementById('fanpageSponsorCashSearch').value.trim().toLocaleLowerCase();
+    const filter = document.getElementById('fanpageSponsorCashFilter').value;
+    document.querySelectorAll('#fanpageSponsorCashAds [data-cash-search]').forEach(function (row) {
+      row.hidden = !row.dataset.cashSearch.includes(query) || (filter !== 'all' && row.dataset.cashStatus !== filter && !(filter === 'issue' && row.dataset.cashIssue === 'true'));
+    });
+  }
+  document.getElementById('fanpageSponsorCashSearch').addEventListener('input', filterFanPageCashAds);
+  document.getElementById('fanpageSponsorCashFilter').addEventListener('change', filterFanPageCashAds);
 
   function fanPageSponsorAdminDate(timestamp) {
     return timestamp ? new Date(timestamp).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '확인 전';
@@ -5543,6 +5559,101 @@
       const data = response.data || {};
       const requests = Array.isArray(data.requests) ? data.requests : [];
       const ads = Array.isArray(data.ads) ? data.ads : [];
+      const cashAds = Array.isArray(data.cashAds) ? data.cashAds : [];
+      const cashIssues = Array.isArray(data.cashIssues) ? data.cashIssues : [];
+      const cashHost = document.getElementById('fanpageSponsorCashAds');
+      const issueHost = document.getElementById('fanpageSponsorCashIssues');
+      cashHost.replaceChildren();
+      issueHost.replaceChildren();
+      cashAds.forEach(function (ad) {
+        const row = document.createElement('article');
+        row.className = 'fanpage-sponsor-admin-item';
+        const details = document.createElement('div');
+        const title = document.createElement('strong');
+        const status = ad.status !== 'active' ? ad.status : Number(ad.expiresAt) > Date.now() ? '노출 중' : '기간 종료';
+        row.dataset.cashSearch = (ad.nickname + ' ' + ad.soopId).toLocaleLowerCase();
+        row.dataset.cashStatus = ad.status === 'ended' ? 'ended' : Number(ad.expiresAt) > Date.now() ? 'active' : 'expired';
+        row.dataset.cashIssue = String(!ad.resultStatus || ad.resultStatus === 'refund-pending');
+        title.textContent = status + ' · ' + ad.nickname + ' (@' + ad.soopId + ') · ' + (ad.rail === 'right' ? '오른쪽' : '왼쪽');
+        const meta = document.createElement('span');
+        meta.className = 'hint';
+        meta.textContent = Number(ad.cashCost || 0).toLocaleString('ko-KR') + '캐시 · 시작 ' + fanPageSponsorAdminDate(ad.startsAt) + ' · 종료 ' + fanPageSponsorAdminDate(ad.expiresAt) + ' · 결제 결과 ' + (ad.resultStatus || '확인 필요') + (ad.refundedAt ? ' · 환불 ' + Number(ad.refundAmount || 0).toLocaleString('ko-KR') + '캐시' : '') + ' · 요청 ' + ad.campaignId;
+        details.append(title, meta);
+        row.append(details);
+        if (ad.status === 'active' && Number(ad.expiresAt) > Date.now()) {
+          const end = fanPageSponsorAdminButton('노출 중단', 'cash-end', 'danger');
+          end.addEventListener('click', async function () {
+            const reason = prompt('@' + ad.soopId + ' 홍보 중단 사유를 입력하세요. 환불은 별도 처리됩니다.');
+            if (reason === null) return;
+            if (reason.trim().length < 2 || reason.trim().length > 200) { alert('사유를 2~200자로 입력해 주세요.'); return; }
+            if (!confirm('홍보를 즉시 중단할까요? 이 작업은 캐시를 자동 환불하지 않습니다.')) return;
+            end.disabled = true;
+            try {
+              const response = await manageFanPageSponsorAdsFn({ action: 'cash-end', campaignId: ad.campaignId, reason: reason.trim() });
+              await refreshFanPageSponsorManagement();
+              fanPageSponsorAdminStatusEl.textContent = response.data?.claimReleased === false
+                ? '홍보를 중단했지만 슬롯 해제를 확인하지 못했습니다. 관리자 확인이 필요합니다.'
+                : '홍보를 중단했습니다. 환불은 별도로 확인해 주세요.';
+              if (response.data?.auditLogged === false) fanPageSponsorAdminStatusEl.textContent += ' 감사 로그 기록도 확인이 필요합니다.';
+            } catch (error) { fanPageSponsorAdminStatusEl.textContent = '중단 실패: ' + (error.message || error); end.disabled = false; }
+          });
+          row.append(end);
+        }
+        if (ad.status === 'ended') {
+          const quote = fanPageSponsorAdminButton('남은 기간 환불액 확인', 'cash-refund-quote');
+          quote.addEventListener('click', async function () {
+            quote.disabled = true;
+            try {
+              const response = await manageFanPageSponsorAdsFn({ action: 'cash-refund-quote', campaignId: ad.campaignId });
+              fanPageSponsorAdminStatusEl.textContent = '남은 기간 기준 환불 예상액: ' + Number(response.data?.refundAmount || 0).toLocaleString('ko-KR') + '캐시. 실제 환불은 진행되지 않았습니다.';
+            } catch (error) { fanPageSponsorAdminStatusEl.textContent = '환불액 확인 실패: ' + (error.message || error); }
+            finally { quote.disabled = false; }
+          });
+          row.append(quote);
+          const refund = fanPageSponsorAdminButton('운영 사유 부분 환불', 'cash-refund');
+          refund.addEventListener('click', async function () {
+            const reason = prompt('운영 사유와 환불 사유를 입력하세요. 이용자 귀책 여부를 먼저 확인해 주세요.');
+            if (reason === null) return;
+            if (reason.trim().length < 2 || reason.trim().length > 200) { alert('사유를 2~200자로 입력해 주세요.'); return; }
+            refund.disabled = true;
+            try {
+              const quoteResult = await manageFanPageSponsorAdsFn({ action: 'cash-refund-quote', campaignId: ad.campaignId });
+              const amount = Number(quoteResult.data?.refundAmount || 0);
+              if (!confirm('@' + ad.soopId + '의 미노출 기간 ' + amount.toLocaleString('ko-KR') + '캐시를 결제 계정에 환불할까요?')) return;
+              const result = await manageFanPageSponsorAdsFn({ action: 'cash-refund', campaignId: ad.campaignId, reason: reason.trim() });
+              fanPageSponsorAdminStatusEl.textContent = Number(result.data?.refundAmount || 0).toLocaleString('ko-KR') + '캐시 환불 ' + (result.data?.alreadyRefunded ? '기존 처리 확인' : '완료') + (result.data?.auditLogged === false ? ' · 감사 로그 확인 필요' : '');
+            } catch (error) { fanPageSponsorAdminStatusEl.textContent = '환불 확인 필요: ' + (error.message || error); }
+            finally { refund.disabled = false; }
+          });
+          row.append(refund);
+        }
+        cashHost.append(row);
+      });
+      filterFanPageCashAds();
+      if (!cashAds.length) cashHost.textContent = '통합 캐시 홍보 이력이 없습니다.';
+      cashIssues.forEach(function (issue) {
+        const row = document.createElement('article');
+        row.className = 'fanpage-sponsor-admin-item';
+        row.textContent = '환불 확인 필요 · ' + Number(issue.cashAmount || 0).toLocaleString('ko-KR') + '캐시 · 요청 ' + issue.requestId + ' · ' + fanPageSponsorAdminDate(issue.updatedAt);
+        if (issue.reviewRequired) {
+          row.append(document.createTextNode(' · 캠페인 기록이 남아 있어 직접 대조가 필요합니다.'));
+          issueHost.append(row);
+          return;
+        }
+        const retry = fanPageSponsorAdminButton('자동 환불 복구', 'cash-retry-failed-refund');
+        retry.addEventListener('click', async function () {
+          if (!confirm('요청 ' + issue.requestId + '의 원래 결제와 캠페인 상태를 확인하고 자동 환불을 복구할까요?')) return;
+          retry.disabled = true;
+          try {
+            const response = await manageFanPageSponsorAdsFn({ action: 'cash-retry-failed-refund', requestId: issue.requestId });
+            await refreshFanPageSponsorManagement();
+            fanPageSponsorAdminStatusEl.textContent = Number(response.data?.refundAmount || 0).toLocaleString('ko-KR') + '캐시 환불 ' + (response.data?.alreadyRefunded ? '기존 처리 및 원장 확인' : '복구 완료') + (response.data?.auditLogged === false ? ' · 감사 로그 확인 필요' : '');
+          } catch (error) { fanPageSponsorAdminStatusEl.textContent = '환불 복구 확인 필요: ' + (error.message || error); retry.disabled = false; }
+        });
+        row.append(retry);
+        issueHost.append(row);
+      });
+      if (!cashIssues.length) issueHost.textContent = '환불 확인이 필요한 기록이 없습니다.';
       fanPageSponsorPendingRequestsEl.replaceChildren();
       fanPageSponsorActiveAdsEl.replaceChildren();
 

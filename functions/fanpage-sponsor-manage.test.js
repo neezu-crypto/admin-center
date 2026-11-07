@@ -33,5 +33,16 @@ function makeHarness(missingClaim = false) {
   await assert.rejects(h.call({ action: 'update', nickname: 'new name', extendDays: 0 }));
   assert.equal(h.state[paths.ad].nickname, 'test');
   assert.equal(h.listeners.size, 0);
+  h = makeHarness();
+  const cashPath = 'streamerFanPageViewerSponsors/campaigns/' + id;
+  const cashClaim = 'streamerFanPageViewerSponsors/claimsBySoopId/abc123';
+  h.state[cashPath] = { status: 'active', paymentRequestId: id, soopId: 'abc123', expiresAt: Date.now() + 86400000 };
+  h.state[cashClaim] = { status: 'active', requestId: id };
+  const ended = await h.call({ action: 'cash-end', reason: '관리자 중단 테스트' });
+  assert.equal(ended.claimReleased, true);
+  assert.equal(h.state[cashPath].status, 'ended');
+  assert.equal(h.state[cashClaim], null);
+  await assert.rejects(h.call({ action: 'cash-end', reason: '중복 중단' }));
+  assert.equal(h.listeners.size, 0);
   console.log('cold-cache end, update and missing-claim cleanup passed');
 })().catch(error => { console.error(error); process.exit(1); });
