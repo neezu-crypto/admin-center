@@ -2385,6 +2385,49 @@ const FANPAGE_FEEDBACK_CATEGORY_LABELS = {
   bug: '오류 제보',
   other: '기타',
 };
+const notifyViewerStatsBugReport = onValueCreated({ ref: '/viewerStatsBugReports/{reportId}', instance: FANPAGE_DATABASE_INSTANCE, retry: true }, async (event) => {
+  const id = String(event.params.reportId || '');
+  if (!/^[a-f0-9]{64}$/.test(id)) return;
+  const source = await fanpageDatabase().ref('viewerStatsBugReports/' + id).get();
+  if (!source.exists() || source.val()?.status === 'deleted') return;
+  const notification = getDatabase().ref('adminCenter/viewerStatsBugReportNotifications/' + id);
+  const held = await holdFreshRealtimeSnapshot(notification);
+  try {
+    const now = Date.now();
+    const claim = await notification.transaction((current) => current?.sentAt || Number(current?.leaseUntil) > now ? undefined : { leaseUntil: now + 120000 }, undefined, false);
+    if (!claim.committed) {
+      if (claim.snapshot.val()?.sentAt) return;
+      throw new Error('알림 처리 중: 재시도 필요');
+    }
+    const createdAt = Number(source.val()?.createdAt) || Date.now();
+    const receivedAt = new Date(createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    const result = await sendDiscordNotification('🐞 **고점체크 버그 제보 접수**\n제보 번호: `' + id + '`\n접수 시각: ' + receivedAt + '\n' + deepLink('section-viewer-bug-reports'));
+    if (!result.sent) { await notification.remove(); throw new Error('알림 전송 실패: ' + result.reason); }
+    await notification.set({ sentAt: Date.now() });
+  } finally { held.release(); }
+});
+// 자동 복구가 다섯 번 실패해 관리자 확인 상태로 바뀐 결제만 알린다. 결제자 UID나
+// 잔액은 Discord에 보내지 않고 요청 번호·상품·오류 코드만 전달한다.
+const notifyViewerStatsUnlockReviewRequired = onValueUpdated({ ref: '/viewerStatsUnlockPayments/operations/{requestId}', instance: FANPAGE_DATABASE_INSTANCE, retry: true }, async (event) => {
+  const requestId = String(event.params.requestId || '');
+  const before = event.data.before.val() || {};
+  const after = event.data.after.val() || {};
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(requestId) || after.status !== 'review-required' || before.status === 'review-required') return;
+  const notification = getDatabase().ref('adminCenter/viewerStatsUnlockReviewNotifications/' + requestId);
+  const held = await holdFreshRealtimeSnapshot(notification);
+  try {
+    const now = Date.now();
+    const claim = await notification.transaction((current) => current?.sentAt || Number(current?.leaseUntil) > now ? undefined : { leaseUntil: now + 120000 }, undefined, false);
+    if (!claim.committed) {
+      if (claim.snapshot.val()?.sentAt) return;
+      throw new Error('유료 해금 알림 처리 중: 재시도 필요');
+    }
+    const featureLabels = { period: '기간별 분석', same_day: '다시보기 비교', keyword: '키워드 다중 비교' };
+    const sent = await sendDiscordNotification('⚠️ **고점체크 유료 기능 결제 확인 필요**\n결제 번호: `' + requestId + '`\n기능: ' + (featureLabels[String(after.featureId || '')] || '확인 필요') + '\n오류 코드: ' + String(after.lastFailureCode || '없음').slice(0, 80) + '\n' + deepLink('section-viewer-unlock-payments'));
+    if (!sent.sent) { await notification.remove(); throw new Error('알림 전송 실패: ' + sent.reason); }
+    await notification.set({ sentAt: Date.now() });
+  } finally { held.release(); }
+});
 const notifyFanPageDesignFeedback = onValueCreated({
   ref: '/streamerFanPageDesignFeedback/{feedbackId}',
   instance: FANPAGE_DATABASE_INSTANCE,
@@ -4461,6 +4504,89 @@ async function writeFanPageSponsorAdminAudit(db, request, action, detail) {
 // 관리센터가 관리자 인증 후 Admin SDK로만 읽고 쓰며, 공개 callable의 App Check나
 // 브라우저 RTDB 권한을 우회해 데이터를 노출하지 않는다. 신청 승인 조건과 슬롯
 // 예약·용량 규칙은 streamer-fanpage/functions/sponsor-ads.js와 맞춰 유지한다.
+const manageViewerStatsBugReports = onCall(async (request) => {
+  await requireAdmin(request);
+  const data = request.data && typeof request.data === 'object' ? request.data : {};
+  const reports = fanpageDatabase().ref('viewerStatsBugReports');
+  if (data.action === 'list') {
+    const cursor = data.cursor;
+    if (cursor != null && (!Number.isSafeInteger(cursor.createdAt) || cursor.createdAt < 0 || !/^[a-f0-9]{64}$/.test(cursor.id || ''))) throw new HttpsError('invalid-argument', '목록 위치를 확인해 주세요.');
+    let query = reports.orderByChild('createdAt');
+    if (cursor) query = query.endBefore(cursor.createdAt, cursor.id);
+    const snapshot = await query.limitToLast(101).get();
+    return require('./viewer-bug-report-admin').buildBugReportPage(snapshot.val());
+  }
+  const id = String(data.reportId || '');
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new HttpsError('invalid-argument', '제보 번호를 확인해 주세요.');
+  if (!['resolve', 'reopen', 'delete'].includes(data.action)) throw new HttpsError('invalid-argument', '처리 방법을 확인해 주세요.');
+  const ref = reports.child(id);
+  const held = await holdFreshRealtimeSnapshot(ref);
+  try {
+    const { applyBugReportAction } = require('./viewer-bug-report-admin');
+    const result = await ref.transaction((current) => {
+      return applyBugReportAction(current, data.action, Date.now());
+    }, undefined, false);
+    if (!result.committed) throw new HttpsError('not-found', '제보를 찾을 수 없습니다.');
+  } finally { held.release(); }
+  const auditLogged = await writeFanPageSponsorAdminAudit(getDatabase(), request, '고점체크 버그 제보 ' + data.action, id);
+  return { ok: true, auditLogged };
+});
+
+// 고점체크 유료 기능의 권위 결제 레코드는 팬페이지 전용 RTDB에 있다. 관리센터는
+// Admin SDK로만 읽고, 환불은 활성 권한이 만들어지지 못한 review-required 건에 한정한다.
+const manageViewerStatsUnlockPayments = onCall(async (request) => {
+  const adminUid = await requireAdmin(request);
+  const data = request.data && typeof request.data === 'object' ? request.data : {};
+  const action = String(data.action || 'list');
+  const fanpageDb = fanpageDatabase();
+  const { buildUnlockPaymentPage, filterUnlockPaymentRecords, isRequestId, refundUnactivatedViewerUnlock } = require('./viewer-unlock-admin');
+  if (action === 'list') {
+    const cursor = data.cursor == null ? '' : String(data.cursor);
+    const searchQuery = String(data.query || '').trim();
+    const statusFilter = String(data.status || '').trim();
+    if (cursor && !/^\d{13}_[A-Za-z0-9_-]{16,128}$/.test(cursor)) throw new HttpsError('invalid-argument', '결제 목록 위치를 확인해 주세요.');
+    if (searchQuery.length > 128 || !/^[A-Za-z0-9_-]*$/.test(searchQuery)) throw new HttpsError('invalid-argument', '검색어는 요청 번호 또는 계정 ID로 입력해 주세요.');
+    if (statusFilter && !['charging', 'activated', 'review-required', 'refund-pending', 'refunded'].includes(statusFilter)) throw new HttpsError('invalid-argument', '결제 상태를 확인해 주세요.');
+    let query = fanpageDb.ref('viewerStatsUnlockPayments/byCreated').orderByKey();
+    if (cursor) query = query.endBefore(cursor);
+    // 필터를 적용해도 다음 결과를 찾을 수 있도록 한 페이지에서 조금 넉넉히 읽는다.
+    const indexSnapshot = await query.limitToLast(251).get();
+    const indexed = Object.entries(indexSnapshot.val() || {})
+      .filter(([key, item]) => /^\d{13}_[A-Za-z0-9_-]{16,128}$/.test(key) && isRequestId(String(item?.requestId || '')))
+      .sort(([left], [right]) => right.localeCompare(left));
+    const page = indexed;
+    const records = {};
+    await Promise.all(page.map(async ([, item]) => {
+      const requestId = String(item.requestId);
+      const operation = (await fanpageDb.ref(`viewerStatsUnlockPayments/operations/${requestId}`).get()).val();
+      if (operation && operation.requestId === requestId) records[requestId] = operation;
+    }));
+    return {
+      ...buildUnlockPaymentPage(filterUnlockPaymentRecords(records, { query: searchQuery, status: statusFilter }), 50),
+      nextCursor: indexed.length === 251 ? indexed.at(-1)?.[0] || null : null,
+    };
+  }
+  if (action !== 'refund') throw new HttpsError('invalid-argument', '처리 방법을 확인해 주세요.');
+  const requestId = String(data.requestId || '');
+  const reason = String(data.reason || '').trim().slice(0, 300);
+  if (!isRequestId(requestId) || !reason) throw new HttpsError('invalid-argument', '결제 번호와 환불 사유를 확인해 주세요.');
+  try {
+    const result = await refundUnactivatedViewerUnlock({ fanpageDb, walletDb: getDatabase(), requestId });
+    await fanpageDb.ref(`viewerStatsUnlockPayments/operations/${requestId}`).update({
+      refundReason: reason,
+      refundedBy: adminUid,
+      refundReviewedAt: Date.now(),
+    });
+    const auditLogged = await writeFanPageSponsorAdminAudit(getDatabase(), request, '고점체크 유료 기능 환불', `${requestId}: ${reason}`);
+    return { ...result, auditLogged };
+  } catch (error) {
+    const code = String(error && error.message || 'unknown');
+    if (code === 'operation-unavailable') throw new HttpsError('failed-precondition', '처리 확인이 필요한 미활성 결제만 환불할 수 있습니다.');
+    console.error('고점체크 유료 기능 환불 실패:', code);
+    throw new HttpsError('aborted', '환불 결과를 확인하지 못했습니다. 결제 내역을 다시 확인해 주세요.');
+  }
+});
+
 const manageFanPageSponsorAds = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const db = fanpageDatabase();
@@ -5772,6 +5898,10 @@ module.exports = {
   getLifeGameSponsorAutoVerificationDiagnostics,
   listFanPageSponsorDonationDiagnostics,
   manageFanPageSponsorAds,
+  manageViewerStatsBugReports,
+  manageViewerStatsUnlockPayments,
+  notifyViewerStatsBugReport,
+  notifyViewerStatsUnlockReviewRequired,
   lifeGameRejectSponsorRequest,
   getLifeGameCurrentSponsor,
   updateLifeGameCurrentSponsor,

@@ -848,6 +848,36 @@
       </div>
     </div>
 
+    <div class="card" id="section-viewer-unlock-payments">
+      <h2>고점체크 유료 기능 결제·해금 관리</h2>
+      <p class="hint">최근 결제·해금 이력입니다. <strong>처리 확인 필요</strong> 상태이며 아직 활성 권한이 만들어지지 못한 건만 환불할 수 있습니다. 활성화된 기능은 이 화면에서 회수·환불하지 않습니다.</p>
+      <div class="fanpage-sponsor-admin-actions">
+        <label>상태
+          <select id="viewerUnlockPaymentsStatusFilter">
+            <option value="">전체</option>
+            <option value="charging">차감 중</option>
+            <option value="activated">활성화됨</option>
+            <option value="review-required">처리 확인 필요</option>
+            <option value="refund-pending">환불 처리 중</option>
+            <option value="refunded">환불 완료</option>
+          </select>
+        </label>
+        <label>요청 번호 또는 계정 ID <input id="viewerUnlockPaymentsQuery" type="search" maxlength="128" autocomplete="off"></label>
+        <button id="viewerUnlockPaymentsRefresh" class="perm-refresh-btn" type="button">조회</button>
+      </div>
+      <p id="viewerUnlockPaymentsStatus" class="hint" role="status"></p>
+      <div id="viewerUnlockPaymentsList" class="fanpage-sponsor-admin-list"></div>
+      <button id="viewerUnlockPaymentsMore" class="perm-refresh-btn" type="button" hidden>더 보기</button>
+    </div>
+
+    <div class="card" id="section-viewer-bug-reports">
+      <h2>고점체크 버그 제보</h2>
+      <p class="hint">제출된 제보는 관리자만 확인하고 처리하거나 삭제할 수 있습니다.</p>
+      <button id="viewerBugReportsRefresh" class="perm-refresh-btn" type="button">새로고침</button>
+      <p id="viewerBugReportsStatus" class="hint" role="status"></p>
+      <div id="viewerBugReportsList" class="fanpage-sponsor-admin-list"></div>
+      <button id="viewerBugReportsMore" class="perm-refresh-btn" type="button" hidden>더 보기</button>
+    </div>
     <div class="card" id="section-fanpage-sponsor-ads">
       <h2>고점체크 오늘의 후원 스트리머 신청·광고 관리</h2>
       <p class="hint">후원 완료가 표시된 신청만 승인할 수 있습니다. 승인·반려, 노출 중 광고의 닉네임 수정·기간 연장·즉시 종료가 가능하며 모든 변경은 관리자 감사 로그에 기록됩니다.</p>
@@ -1268,6 +1298,103 @@
   const functions = getFunctions(app, 'us-central1');
   const db = getDatabase(app);
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
+  const manageViewerStatsBugReportsFn = httpsCallable(functions, 'manageViewerStatsBugReports');
+  const manageViewerStatsUnlockPaymentsFn = httpsCallable(functions, 'manageViewerStatsUnlockPayments');
+  const viewerUnlockFeatureLabels = { period: '기간별 분석', same_day: '다시보기 비교', keyword: '키워드 다중 비교' };
+  let viewerUnlockPaymentsCursor = null;
+  async function refreshViewerUnlockPayments(append = false) {
+    const status = document.getElementById('viewerUnlockPaymentsStatus');
+    const list = document.getElementById('viewerUnlockPaymentsList');
+    const more = document.getElementById('viewerUnlockPaymentsMore');
+    if (!append) viewerUnlockPaymentsCursor = null;
+    more.disabled = true;
+    status.textContent = '결제·해금 이력을 불러오는 중입니다.';
+    try {
+      const response = await manageViewerStatsUnlockPaymentsFn({
+        action: 'list',
+        cursor: append ? viewerUnlockPaymentsCursor : null,
+        status: document.getElementById('viewerUnlockPaymentsStatusFilter').value,
+        query: document.getElementById('viewerUnlockPaymentsQuery').value.trim(),
+      });
+      const items = response.data.items || [];
+      if (!append) list.replaceChildren();
+      for (const item of items) {
+        const row = document.createElement('article'); row.className = 'fanpage-sponsor-admin-item';
+        const content = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = `${viewerUnlockFeatureLabels[item.featureId] || item.featureId || '알 수 없는 기능'} · ${item.cashAmount || 0}캐시 · ${item.status || '상태 없음'}`;
+        const meta = document.createElement('small');
+        meta.textContent = `${item.uid || 'UID 없음'} · ${item.requestId} · ${item.createdAt ? new Date(item.createdAt).toLocaleString('ko-KR') : '시각 없음'}`;
+        content.append(title, meta);
+        if (item.failureCode) { const issue = document.createElement('p'); issue.className = 'hint'; issue.textContent = `확인 코드: ${item.failureCode}`; content.append(issue); }
+        if (item.refundReason) { const reason = document.createElement('p'); reason.className = 'hint'; reason.textContent = `환불 사유: ${item.refundReason}`; content.append(reason); }
+        row.append(content);
+        if (item.status === 'review-required') {
+          const actions = document.createElement('div'); actions.className = 'fanpage-sponsor-admin-actions';
+          const refund = document.createElement('button'); refund.type = 'button'; refund.className = 'perm-refresh-btn danger'; refund.textContent = '미활성 결제 환불';
+          refund.addEventListener('click', async () => {
+            const reason = prompt('환불 사유를 기록해 주세요.');
+            if (!reason || !reason.trim()) return;
+            refund.disabled = true;
+            try {
+              const result = await manageViewerStatsUnlockPaymentsFn({ action: 'refund', requestId: item.requestId, reason: reason.trim() });
+              status.textContent = result.data.replay ? '이미 환불 완료된 결제입니다.' : '환불 처리와 감사 기록을 완료했습니다.';
+              await refreshViewerUnlockPayments();
+            } catch (error) { status.textContent = '환불 실패: ' + (error.message || error); refund.disabled = false; }
+          });
+          actions.append(refund); row.append(actions);
+        }
+        list.append(row);
+      }
+      viewerUnlockPaymentsCursor = response.data.nextCursor || null;
+      more.hidden = !viewerUnlockPaymentsCursor;
+      more.disabled = false;
+      status.textContent = items.length ? `${items.length}건 ${append ? '추가' : '표시'} 중` : '결제·해금 이력이 없습니다.';
+    } catch (error) { status.textContent = '결제·해금 이력을 불러오지 못했습니다: ' + (error.message || error); }
+  }
+  document.getElementById('viewerUnlockPaymentsRefresh').addEventListener('click', refreshViewerUnlockPayments);
+  document.getElementById('viewerUnlockPaymentsStatusFilter').addEventListener('change', () => refreshViewerUnlockPayments());
+  document.getElementById('viewerUnlockPaymentsQuery').addEventListener('search', () => refreshViewerUnlockPayments());
+  document.getElementById('viewerUnlockPaymentsMore').addEventListener('click', () => refreshViewerUnlockPayments(true));
+  let viewerBugReportsCursor = null;
+  async function refreshViewerBugReports(append = false) {
+    const status = document.getElementById('viewerBugReportsStatus');
+    const list = document.getElementById('viewerBugReportsList');
+    const more = document.getElementById('viewerBugReportsMore');
+    if (!append) viewerBugReportsCursor = null;
+    more.disabled = true;
+    status.textContent = '제보를 불러오는 중입니다.';
+    try {
+      const response = await manageViewerStatsBugReportsFn({ action: 'list', cursor: append ? viewerBugReportsCursor : null });
+      const items = response.data.items || [];
+      if (!append) list.replaceChildren();
+      for (const item of items) {
+        const row = document.createElement('article'); row.className = 'fanpage-sponsor-admin-item';
+        const content = document.createElement('div');
+        const title = document.createElement('strong'); title.textContent = (item.title || '제목 없음') + ' · ' + (item.status === 'resolved' ? '처리 완료' : '미처리');
+        const body = document.createElement('p'); body.textContent = item.content; body.style.whiteSpace = 'pre-wrap';
+        const meta = document.createElement('small'); meta.textContent = new Date(item.createdAt).toLocaleString('ko-KR') + ' · ' + item.id;
+        content.append(title, body, meta); row.append(content);
+        const actions = document.createElement('div'); actions.className = 'fanpage-sponsor-admin-actions';
+        for (const [label, action] of [[item.status === 'resolved' ? '미처리로 변경' : '처리 완료', item.status === 'resolved' ? 'reopen' : 'resolve'], ['삭제', 'delete']]) {
+          const button = document.createElement('button'); button.type = 'button'; button.className = 'perm-refresh-btn'; button.textContent = label;
+          button.addEventListener('click', async () => {
+            if (action === 'delete' && !confirm('제보를 삭제하면 복구하기 어렵습니다. 삭제할까요?')) return;
+            button.disabled = true;
+            try { const result = await manageViewerStatsBugReportsFn({ action, reportId: item.id }); await refreshViewerBugReports(); if (result.data.auditLogged === false) status.textContent = '처리는 완료됐지만 감사 로그 확인이 필요합니다.'; }
+            catch (error) { status.textContent = '제보 처리 실패: ' + (error.message || error); button.disabled = false; }
+          }); actions.append(button);
+        }
+        row.append(actions); list.append(row);
+      }
+      viewerBugReportsCursor = response.data.nextCursor || null;
+      more.hidden = !viewerBugReportsCursor;
+      status.textContent = list.children.length ? `${list.children.length}건 표시 중` : '접수된 제보가 없습니다.';
+    } catch (error) { status.textContent = '제보를 불러오지 못했습니다: ' + (error.message || error); }
+    finally { more.disabled = false; }
+  }
+  document.getElementById('viewerBugReportsRefresh').addEventListener('click', () => refreshViewerBugReports());
+  document.getElementById('viewerBugReportsMore').addEventListener('click', () => refreshViewerBugReports(true));
   const getAdminSessionSummaryFn = httpsCallable(functions, 'getAdminSessionSummary');
   // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market이 이미 배포한 함수를 그대로
   // httpsCallable로 부른다(06번 원칙 — codebase가 달라도 같은 프로젝트 안에서는
@@ -1740,7 +1867,11 @@
     },
     {
       id: 'review', label: '검수·승인', icon: '🔎', role: 'admin',
-      sections: ['section-game-series-wallet', 'section-fanpage-subscriptions', 'section-review-queue', 'section-onyu-reviews', 'section-onyu-production-inquiries', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
+      sections: ['section-fanpage-subscriptions', 'section-review-queue', 'section-onyu-reviews', 'section-onyu-production-inquiries', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
+    },
+    {
+      id: 'cash-store', label: '통합 캐시 상점', icon: '💳', role: 'admin',
+      sections: ['section-game-series-wallet'],
     },
     {
       id: 'content', label: '콘텐츠·현황', icon: '📦', role: 'admin',
@@ -1756,7 +1887,7 @@
     },
     {
       id: 'viewer-stats', label: '고점체크', icon: '📊', role: 'admin',
-      sections: ['section-fanpage-sponsor-ads'],
+      sections: ['section-fanpage-sponsor-ads', 'section-viewer-unlock-payments', 'section-viewer-bug-reports'],
     },
     {
       id: 'lifegame-player-uids', label: '인생게임 UID 기록 (신규 수집 중단)', icon: '🧾', role: 'admin',
@@ -2012,7 +2143,9 @@
       } else if (sessionId === 'review') {
         if (role === 'admin') startMarketManagementSubscription();
         startReviewQueueSubscriptions();
-        jobs.push(refreshGameSeriesWalletAdmin(), refreshFanpageSubscriptionRequests(), refreshOnyuPlayerReviews(true), refreshOnyuProductionInquiries(), refreshFanPageSponsorDonationDiagnostics());
+        jobs.push(refreshFanpageSubscriptionRequests(), refreshOnyuPlayerReviews(true), refreshOnyuProductionInquiries(), refreshFanPageSponsorDonationDiagnostics());
+      } else if (sessionId === 'cash-store') {
+        jobs.push(refreshGameSeriesWalletAdmin());
       } else if (sessionId === 'content') {
         jobs.push(refreshSeriesConfig(), refreshPromotedContent());
       } else if (sessionId === 'played-streamers') {
@@ -2020,7 +2153,7 @@
       } else if (sessionId === 'lifegame-sponsor') {
         jobs.push(refreshLifeGameCurrentSponsor());
       } else if (sessionId === 'viewer-stats') {
-        jobs.push(refreshFanPageSponsorManagement());
+        jobs.push(refreshFanPageSponsorManagement(), refreshViewerUnlockPayments(), refreshViewerBugReports());
       } else if (sessionId === 'lifegame-player-uids') {
         jobs.push(refreshLifeGamePlayerUidList());
       } else if (sessionId === 'promotions') {
@@ -6937,6 +7070,7 @@
     { id: 'section-played-streamers', label: '🎮 인생게임 스트리머 검수 목록', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-current-sponsor', label: '📢 오늘의 후원 스트리머 광고', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-fanpage-sponsor-ads', label: '📊 고점체크 홍보 관리', role: 'admin', group: '콘텐츠·현황' },
+    { id: 'section-viewer-unlock-payments', label: '💳 고점체크 유료 기능 결제·해금', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-player-uids', label: '🧾 인생게임 UID 기록 (신규 수집 중단)', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
