@@ -1751,8 +1751,12 @@
       sections: ['section-played-streamers'],
     },
     {
-      id: 'lifegame-sponsor', label: '오늘의 후원 스트리머', icon: '📢', role: 'admin',
-      sections: ['section-lifegame-current-sponsor', 'section-fanpage-sponsor-ads'],
+      id: 'lifegame-sponsor', label: '인생게임 후원 스트리머', icon: '📢', role: 'admin',
+      sections: ['section-lifegame-current-sponsor'],
+    },
+    {
+      id: 'viewer-stats', label: '고점체크', icon: '📊', role: 'admin',
+      sections: ['section-fanpage-sponsor-ads'],
     },
     {
       id: 'lifegame-player-uids', label: '인생게임 UID 기록 (신규 수집 중단)', icon: '🧾', role: 'admin',
@@ -2014,7 +2018,9 @@
       } else if (sessionId === 'played-streamers') {
         jobs.push(refreshLifeGamePlayedStreamers());
       } else if (sessionId === 'lifegame-sponsor') {
-        jobs.push(refreshLifeGameCurrentSponsor(), refreshFanPageSponsorManagement());
+        jobs.push(refreshLifeGameCurrentSponsor());
+      } else if (sessionId === 'viewer-stats') {
+        jobs.push(refreshFanPageSponsorManagement());
       } else if (sessionId === 'lifegame-player-uids') {
         jobs.push(refreshLifeGamePlayerUidList());
       } else if (sessionId === 'promotions') {
@@ -6930,6 +6936,7 @@
     { id: 'section-content-freeze', label: '🥶 콘텐츠 동결', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-played-streamers', label: '🎮 인생게임 스트리머 검수 목록', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-current-sponsor', label: '📢 오늘의 후원 스트리머 광고', role: 'admin', group: '콘텐츠·현황' },
+    { id: 'section-fanpage-sponsor-ads', label: '📊 고점체크 홍보 관리', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-lifegame-player-uids', label: '🧾 인생게임 UID 기록 (신규 수집 중단)', role: 'admin', group: '콘텐츠·현황' },
     { id: 'section-promoted-content', label: '📣 게시글 홍보 현황', role: 'admin' },
     { id: 'section-discord-webhook', label: '🔔 디스코드 웹훅', role: 'admin', group: '사이트 설정' },
