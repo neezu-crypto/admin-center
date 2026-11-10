@@ -1297,6 +1297,12 @@
   const auth = getAuth(app);
   const functions = getFunctions(app, 'us-central1');
   const db = getDatabase(app);
+  // 전용 주식시장 DB를 실제 primary로 전환하는 배포에서만 true로 바꾼다.
+  // adminCenter/stockMarketDatabaseMigration은 브라우저에 비공개이므로, 관리자
+  // 페이지가 그 경로를 직접 읽어 임의 전환하지 않는다.
+  const STOCK_MARKET_DATABASE_PRIMARY = true;
+  const stockDb = getDatabase(app, 'https://soop-stock-market-rtdb.firebaseio.com');
+  const marketDb = STOCK_MARKET_DATABASE_PRIMARY ? stockDb : db;
   const getAdminCenterStateFn = httpsCallable(functions, 'getAdminCenterState');
   const manageViewerStatsBugReportsFn = httpsCallable(functions, 'manageViewerStatsBugReports');
   const manageViewerStatsUnlockPaymentsFn = httpsCallable(functions, 'manageViewerStatsUnlockPayments');
@@ -6047,16 +6053,20 @@
   // 과거 별풍선 신청도 같은 큐에서 결제 방식과 함께 검수한다.
   const PURCHASE_QUEUE_SOURCES = [
     { path: 'bettingMarket/chestPurchaseRequests', label: '보물상자 구매(배팅시장)', kind: 'bmChest' },
-    { path: 'chartBannerRequests', label: '차트 배너 신청', kind: 'chartBanner' },
-    { path: 'cardBannerRequests', label: '카드 배너 신청', kind: 'cardBanner' },
-    { path: 'treasureChestRequests', label: '보물상자 구매 신청', kind: 'treasureChest' },
+    { path: 'chartBannerRequests', label: '차트 배너 신청', kind: 'chartBanner', source: 'stock' },
+    { path: 'cardBannerRequests', label: '카드 배너 신청', kind: 'cardBanner', source: 'stock' },
+    { path: 'treasureChestRequests', label: '보물상자 구매 신청', kind: 'treasureChest', source: 'stock' },
     { path: 'cashChargeRequests', label: '자산 충전 신청', kind: 'cashCharge' },
-    { path: 'unfreezeDonationRequests', label: '동결 해제(후원) 신청', kind: 'unfreezeDonation' },
-    { path: 'bannerRequests', label: '배너 신청', kind: 'banner' },
-    { path: 'pinRequests', label: '고정노출 신청', kind: 'pin' },
-    { path: 'relayRoomRequests', label: '중계방 신청', kind: 'relayRoom' },
+    { path: 'unfreezeDonationRequests', label: '동결 해제(후원) 신청', kind: 'unfreezeDonation', source: 'stock' },
+    { path: 'bannerRequests', label: '배너 신청', kind: 'banner', source: 'stock' },
+    { path: 'pinRequests', label: '고정노출 신청', kind: 'pin', source: 'stock' },
+    { path: 'relayRoomRequests', label: '중계방 신청', kind: 'relayRoom', source: 'stock' },
     { path: 'lifeGame/sponsorRequests', label: '후원 스트리머 신청 (인생게임)', kind: 'lifeGameSponsor' },
   ];
+
+  function reviewSourceDb(source) {
+    return source && source.source === 'stock' ? marketDb : db;
+  }
 
   // 검수 세션 밖에서는 전체 목록 대신 각 큐의 최신 1건만 구독한다.
   // 실제 상세 데이터는 검수 세션을 열었을 때 기존 limitToLast(200) 구독으로 읽는다.
@@ -6097,16 +6107,16 @@
       { key: 'marketReports', query: query(ref(db, 'bettingMarket/marketReports'), limitToLast(1)) },
       { key: 'nicknameReports', query: query(ref(db, 'bettingMarket/nicknameReports'), limitToLast(1)) },
       { key: 'presetMergeFailures', query: query(ref(db, 'presetMergeFailures'), limitToLast(1)) },
-      { key: 'listingRequests', query: query(ref(db, 'listingRequests'), orderByChild('status'), equalTo('pending'), limitToLast(1)) },
+      { key: 'listingRequests', query: query(ref(marketDb, 'listingRequests'), orderByChild('status'), equalTo('pending'), limitToLast(1)) },
     ];
     PURCHASE_QUEUE_SOURCES.forEach(function (src) {
       if (src.kind === 'bmChest') {
-        sources.push({ key: 'purchase:' + src.path, query: query(ref(db, src.path), limitToLast(1)) });
+        sources.push({ key: 'purchase:' + src.path, query: query(ref(reviewSourceDb(src), src.path), limitToLast(1)) });
       } else {
         ['pending', 'approving', 'rejecting'].forEach(function (status) {
           sources.push({
             key: 'purchase:' + src.path + ':' + status,
-            query: query(ref(db, src.path), orderByChild('status'), equalTo(status), limitToLast(1)),
+            query: query(ref(reviewSourceDb(src), src.path), orderByChild('status'), equalTo(status), limitToLast(1)),
           });
         });
       }
@@ -6231,7 +6241,7 @@
   function startMarketManagementSubscription() {
     if (marketManagementSubscribed) return;
     marketManagementSubscribed = true;
-    get(ref(db, 'stocks')).then(function (snap) {
+    get(ref(marketDb, 'stocks')).then(function (snap) {
       const data = snap.val() || {};
       Object.keys(data).forEach(function (id) { stockNamesCache[id] = (data[id] && data[id].name) || id; });
     }).catch(function (e) { console.error('종목 이름 조회 실패:', e); });
@@ -6458,14 +6468,14 @@
       renderPresetMergeFailureList();
       updateReviewAlertBadge();
     }));
-    registerSessionUnsubscriber('review', onValue(query(ref(db, 'listingRequests'), orderByChild('status'), equalTo('pending'), limitToLast(200)), function (snap) {
+    registerSessionUnsubscriber('review', onValue(query(ref(marketDb, 'listingRequests'), orderByChild('status'), equalTo('pending'), limitToLast(200)), function (snap) {
       listingRequests = snap.val() || {};
       renderListingRequestList();
       updateReviewAlertBadge();
     }));
     PURCHASE_QUEUE_SOURCES.forEach(function (src) {
       if (src.kind === 'bmChest') {
-        registerSessionUnsubscriber('review', onValue(query(ref(db, src.path), limitToLast(200)), function (snap) {
+        registerSessionUnsubscriber('review', onValue(query(ref(reviewSourceDb(src), src.path), limitToLast(200)), function (snap) {
           purchaseQueueData[src.path] = snap.val() || {};
           renderPurchaseApprovalList();
           updateReviewAlertBadge();
@@ -6474,7 +6484,7 @@
       }
       purchaseQueueStatusData[src.path] = {};
       ['pending', 'approving', 'rejecting'].forEach(function (status) {
-        const queueQuery = query(ref(db, src.path), orderByChild('status'), equalTo(status), limitToLast(200));
+        const queueQuery = query(ref(reviewSourceDb(src), src.path), orderByChild('status'), equalTo(status), limitToLast(200));
         registerSessionUnsubscriber('review', onValue(queueQuery, function (snap) {
           purchaseQueueStatusData[src.path][status] = snap.val() || {};
           purchaseQueueData[src.path] = Object.assign({},

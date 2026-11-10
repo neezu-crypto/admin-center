@@ -41,11 +41,28 @@ const FANPAGE_DATABASE_URL = 'https://streamer-fanpage-rtdb.firebaseio.com';
 const FANPAGE_DATABASE_INSTANCE = 'streamer-fanpage-rtdb';
 const LIFE_GAME_DATABASE_URL = 'https://streamer-life-game-rtdb.firebaseio.com';
 const LIFE_GAME_DATABASE_INSTANCE = 'streamer-life-game-rtdb';
+const STOCK_MARKET_DATABASE_URL = 'https://soop-stock-market-rtdb.firebaseio.com';
+const STOCK_MARKET_DATABASE_INSTANCE = 'soop-stock-market-rtdb';
+const STOCK_MARKET_MIGRATION_STATE_PATH = 'adminCenter/stockMarketDatabaseMigration/state';
 const messengerDatabase = () => getDatabaseWithUrl(MESSENGER_DATABASE_URL, app);
 const fanpageDatabase = () => getDatabaseWithUrl(FANPAGE_DATABASE_URL, app);
 // 인생게임의 진행·후원·검수 데이터는 전용 RTDB에 있고, 관리자 계정·감사 로그는
 // 기본 DB에 남는다. 두 저장소를 섞지 않도록 인생게임 데이터 접근은 이 헬퍼만 쓴다.
 const lifeGameDatabase = () => getDatabaseWithUrl(LIFE_GAME_DATABASE_URL, app);
+const stockMarketDatabase = () => getDatabaseWithUrl(STOCK_MARKET_DATABASE_URL, app);
+
+// 주식시장 데이터만 전용 인스턴스로 바뀐다. 계정·인증·통합 캐시·관리자
+// 권한은 언제나 기본 DB를 사용하므로, 이 helper를 전역 getDatabase() 대체로
+// 쓰지 않는다.
+async function activeStockMarketDatabase(sharedDatabase = getDatabase()) {
+  const state = (await sharedDatabase.ref(STOCK_MARKET_MIGRATION_STATE_PATH).get()).val() || {};
+  return state.phase === 'market-primary' ? stockMarketDatabase() : sharedDatabase;
+}
+
+async function isStockMarketPrimary(sharedDatabase = getDatabase()) {
+  const state = (await sharedDatabase.ref(STOCK_MARKET_MIGRATION_STATE_PATH).get()).val() || {};
+  return state.phase === 'market-primary';
+}
 let messengerMigrationStateCache = { paused: false, expiresAt: 0 };
 async function isMessengerDatabaseMigrationPaused() {
   if (Date.now() < messengerMigrationStateCache.expiresAt) return messengerMigrationStateCache.paused;
@@ -476,6 +493,7 @@ const getAdminSessionSummary = onCall(async (request) => {
   await requireAdmin(request);
   const role = 'admin';
   const db = getDatabase();
+  const marketDb = await activeStockMarketDatabase(db);
 
   const summary = { identity: false, monitoring: false, review: false, content: false, promotions: false, settings: false, devbar: false, shared: false };
   const tasks = [];
@@ -495,16 +513,16 @@ const getAdminSessionSummary = onCall(async (request) => {
       hasAnyEntry(db, 'bettingMarket/marketReports'),
       hasAnyEntry(db, 'bettingMarket/nicknameReports'),
       hasAnyEntry(db, 'presetMergeFailures'),
-      hasAnyEntry(db, 'listingRequests', 'pending'),
+      hasAnyEntry(marketDb, 'listingRequests', 'pending'),
       hasAnyEntry(db, 'bettingMarket/chestPurchaseRequests'),
-      hasAnyEntry(db, 'chartBannerRequests', 'pending'),
-      hasAnyEntry(db, 'cardBannerRequests', 'pending'),
-      hasAnyEntry(db, 'treasureChestRequests', 'pending'),
+      hasAnyEntry(marketDb, 'chartBannerRequests', 'pending'),
+      hasAnyEntry(marketDb, 'cardBannerRequests', 'pending'),
+      hasAnyEntry(marketDb, 'treasureChestRequests', 'pending'),
       hasAnyEntry(db, 'cashChargeRequests', 'pending'),
-      hasAnyEntry(db, 'unfreezeDonationRequests', 'pending'),
-      hasAnyEntry(db, 'bannerRequests', 'pending'),
-      hasAnyEntry(db, 'pinRequests', 'pending'),
-      hasAnyEntry(db, 'relayRoomRequests', 'pending'),
+      hasAnyEntry(marketDb, 'unfreezeDonationRequests', 'pending'),
+      hasAnyEntry(marketDb, 'bannerRequests', 'pending'),
+      hasAnyEntry(marketDb, 'pinRequests', 'pending'),
+      hasAnyEntry(marketDb, 'relayRoomRequests', 'pending'),
       hasAnyEntry(lifeGameDatabase(), 'lifeGame/sponsorRequests', 'pending'),
       hasAnyEntry(db, 'bettingMarket/markets', 'pendingValidation'),
       hasAnyEntry(db, 'bettingMarket/markets', 'closed'),
@@ -1174,6 +1192,7 @@ function normalizePromoStockMatchName(value) {
 const listStreamerPromoLinks = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const db = getDatabase();
+  const marketDb = await activeStockMarketDatabase(db);
   const migration = await migrateStreamerPromoSeedToCandidates(db, adminUid, request);
   const [verifiedSnap, linksSnap, recentSnap, excludedPromoSnap, candidatesSnap, seedSnap, removedPromoSnap, stocksSnap] = await Promise.all([
     db.ref('streamerVerifications').get(),
@@ -1183,7 +1202,7 @@ const listStreamerPromoLinks = onCall(async (request) => {
     db.ref('adminCenter/streamerPromoCandidates').get(),
     db.ref('adminCenter/streamerPromoSeed').get(),
     db.ref('adminCenter/streamerPromoRemoved').get(),
-    db.ref('stocks').get(),
+    marketDb.ref('stocks').get(),
   ]);
   const links = linksSnap.val() || {};
   let recentOpened = recentSnap.val() || null;
@@ -1950,8 +1969,11 @@ function streamerLiveUrlForData(data) {
   return 'https://play.sooplive.com/' + encodeURIComponent(raw.toLowerCase()) + '/';
 }
 
-function makeQueueTrigger(path, label, anchorId) {
-  return onValueCreated(path, async (event) => {
+// 인스턴스를 지정하지 않으면 '*'로 배포되어 전용 주식시장 DB의 쓰기도 받는다. 주식시장 신청 알림은
+// 기본 DB(레거시)와 전용 DB 트리거를 인스턴스별로 따로 두어 같은 신청이 두 번 알림되지 않게 한다.
+const SHARED_DATABASE_INSTANCE = 'soop-stock-market-default-rtdb';
+function makeQueueTrigger(path, label, anchorId, options = {}) {
+  return onValueCreated({ ref: path, ...options }, async (event) => {
     const data = event.data.val() || {};
     await sendDiscordNotification('🔔 **' + label + '**\n' + formatRequestSummary(data) + '\n' + deepLink(anchorId));
   });
@@ -2021,14 +2043,14 @@ const notifyStreamerVerificationAutoApproval = onValueUpdated('/streamerVerifica
   return null;
 });
 const notifyChestPurchaseRequest    = makeQueueTrigger('/bettingMarket/chestPurchaseRequests/{id}', '새 보물상자 구매 신청 (배팅시장)', 'section-purchase-approval');
-const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)', 'section-purchase-approval');
-const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)', 'section-purchase-approval');
-const notifyCardBannerRequest       = makeQueueTrigger('/cardBannerRequests/{id}', '새 카드 배너 신청 (주식시장)', 'section-purchase-approval');
-const notifyPinRequest              = makeQueueTrigger('/pinRequests/{id}', '새 고정노출 신청 (주식시장)', 'section-purchase-approval');
-const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}', '새 중계방 신청 (주식시장)', 'section-purchase-approval');
-const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval');
-const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval');
-const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
+const notifyBannerRequest           = makeQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
+const notifyChartBannerRequest      = makeQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
+const notifyCardBannerRequest       = makeQueueTrigger('/cardBannerRequests/{id}', '새 카드 배너 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
+const notifyPinRequest              = makeQueueTrigger('/pinRequests/{id}', '새 고정노출 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
+const notifyRelayRoomRequest        = makeQueueTrigger('/relayRoomRequests/{id}', '새 중계방 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
+const notifyTreasureChestRequest    = makeQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
+const notifyCashChargeRequest       = makeQueueTrigger('/cashChargeRequests/{id}', '새 자산 충전 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
+const notifyUnfreezeDonationRequest = makeQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval', { instance: SHARED_DATABASE_INSTANCE });
 // 통합 캐시 충전은 신청 생성 뒤 실제 후원을 마친 사용자가 별도 완료 알림을 보낸다.
 // Discord에는 후원자 닉네임·아이디·Firebase UID를 보내지 않고, 관리자가 검수 화면에서
 // 대조할 수 있는 신청 번호와 수량만 전달한다.
@@ -2066,12 +2088,51 @@ const notifyMessengerReport = onValueCreated({
   // 신고자의 대화 내용, UID, 사유는 Discord로 보내지 않는다. 자세한 검토는 관리자 전용 페이지에서 한다.
   await sendDiscordNotification('🔔 **새 스트리머 메신저 신고**\n신고 ID: `' + reportId + '`\n접수 시각: ' + new Date(at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) + '\n' + deepLink('section-review-queue'));
 });
-const notifyListingRequest = onValueCreated('/listingRequests/{id}', async (event) => {
+const notifyListingRequest = onValueCreated({ ref: '/listingRequests/{id}', instance: SHARED_DATABASE_INSTANCE }, async (event) => {
   const data = event.data.val() || {};
   if (data.status !== 'pending') return;
   await sendDiscordNotification(
     '🔔 **새 종목 상장 신청 (주식시장)**\n' + formatRequestSummary(data) + '\n' + deepLink('section-listing-request')
   );
+});
+
+// 주식시장 전용 RTDB가 primary가 된 뒤에는 기본 DB 트리거가 새 신청을 더 이상
+// 보지 못한다. 동일한 알림을 전용 인스턴스에도 등록하되, 데이터 복사 단계에서
+// 과거 신청이 대량으로 Discord에 다시 전송되지 않도록 shared DB phase를 먼저
+// 확인한다. 기본 DB 트리거는 전환 전 레거시 신청 호환을 위해 유지한다.
+function makeDedicatedStockQueueTrigger(path, title, section) {
+  return onValueCreated({
+    ref: path,
+    instance: STOCK_MARKET_DATABASE_INSTANCE,
+    region: 'us-central1',
+  }, async (event) => {
+    if (!(await isStockMarketPrimary())) return null;
+    const data = event.data.val() || {};
+    if (data.status !== 'pending') return null;
+    await sendDiscordNotification('🔔 **' + title + '**\n' + formatRequestSummary(data) + '\n' + deepLink(section));
+    return null;
+  });
+}
+
+const notifyDedicatedStockBannerRequest = makeDedicatedStockQueueTrigger('/bannerRequests/{id}', '새 배너 신청 (주식시장)', 'section-purchase-approval');
+const notifyDedicatedStockChartBannerRequest = makeDedicatedStockQueueTrigger('/chartBannerRequests/{id}', '새 차트 배너 신청 (주식시장)', 'section-purchase-approval');
+const notifyDedicatedStockCardBannerRequest = makeDedicatedStockQueueTrigger('/cardBannerRequests/{id}', '새 카드 배너 신청 (주식시장)', 'section-purchase-approval');
+const notifyDedicatedStockPinRequest = makeDedicatedStockQueueTrigger('/pinRequests/{id}', '새 고정노출 신청 (주식시장)', 'section-purchase-approval');
+const notifyDedicatedStockRelayRoomRequest = makeDedicatedStockQueueTrigger('/relayRoomRequests/{id}', '새 중계방 신청 (주식시장)', 'section-purchase-approval');
+const notifyDedicatedStockTreasureChestRequest = makeDedicatedStockQueueTrigger('/treasureChestRequests/{id}', '새 보물상자 구매 신청 (주식시장)', 'section-purchase-approval');
+const notifyDedicatedStockUnfreezeDonationRequest = makeDedicatedStockQueueTrigger('/unfreezeDonationRequests/{id}', '새 동결 해제(후원) 신청 (주식시장)', 'section-purchase-approval');
+const notifyDedicatedStockListingRequest = onValueCreated({
+  ref: '/listingRequests/{id}',
+  instance: STOCK_MARKET_DATABASE_INSTANCE,
+  region: 'us-central1',
+}, async (event) => {
+  if (!(await isStockMarketPrimary())) return null;
+  const data = event.data.val() || {};
+  if (data.status !== 'pending') return null;
+  await sendDiscordNotification(
+    '🔔 **새 종목 상장 신청 (주식시장)**\n' + formatRequestSummary(data) + '\n' + deepLink('section-listing-request')
+  );
+  return null;
 });
 // 이전 일반 시청자 접근 신청은 종료됐다. 배포된 옛 writer가 남아 있더라도
 // 더는 게임 권한과 무관한 Discord 알림을 발생시키지 않도록 호환 trigger만 유지한다.
@@ -2648,16 +2709,16 @@ const PURCHASE_SOURCES = [
   { path: 'bettingMarket/skinPurchases', gameId: 'bettingMarket', itemType: 'skin', uidField: 'uid', labelField: 'skinName', amountField: 'price' },
   { path: 'bettingMarket/chestPurchaseRequests', gameId: 'bettingMarket', itemType: 'chest_purchase', uidField: 'uid', labelField: null, amountField: null },
   { path: 'bettingMarket/chestOpenLog', gameId: 'bettingMarket', itemType: 'chest_open', uidField: 'uid', labelField: null, amountField: 'prize' },
-  { path: 'bannerRequests', gameId: 'stockMarket', itemType: 'banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons' },
-  { path: 'chartBannerRequests', gameId: 'stockMarket', itemType: 'chart_banner', uidField: 'requesterUid', labelField: 'stockName', amountField: 'starBalloons' },
-  { path: 'cardBannerRequests', gameId: 'stockMarket', itemType: 'card_banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons' },
-  { path: 'pinRequests', gameId: 'stockMarket', itemType: 'pin', uidField: 'requesterUid', labelField: 'stockName', amountField: 'starBalloons' },
-  { path: 'relayRoomRequests', gameId: 'stockMarket', itemType: 'relay_room', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons' },
-  { path: 'treasureChestRequests', gameId: 'stockMarket', itemType: 'treasure_chest', uidField: 'requesterUid', labelField: null, amountField: null },
+  { path: 'bannerRequests', gameId: 'stockMarket', itemType: 'banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons', source: 'stock' },
+  { path: 'chartBannerRequests', gameId: 'stockMarket', itemType: 'chart_banner', uidField: 'requesterUid', labelField: 'stockName', amountField: 'starBalloons', source: 'stock' },
+  { path: 'cardBannerRequests', gameId: 'stockMarket', itemType: 'card_banner', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons', source: 'stock' },
+  { path: 'pinRequests', gameId: 'stockMarket', itemType: 'pin', uidField: 'requesterUid', labelField: 'stockName', amountField: 'starBalloons', source: 'stock' },
+  { path: 'relayRoomRequests', gameId: 'stockMarket', itemType: 'relay_room', uidField: 'requesterUid', labelField: 'nickname', amountField: 'starBalloons', source: 'stock' },
+  { path: 'treasureChestRequests', gameId: 'stockMarket', itemType: 'treasure_chest', uidField: 'requesterUid', labelField: null, amountField: null, source: 'stock' },
   { path: 'cashChargeRequests', gameId: 'stockMarket', itemType: 'cash_charge', uidField: 'requesterUid', labelField: 'nickname', amountField: null },
-  { path: 'unfreezeDonationRequests', gameId: 'stockMarket', itemType: 'unfreeze_donation', uidField: 'requesterUid', labelField: 'stockName', amountField: null },
-  { path: 'playTimePurchases', gameId: 'stockMarket', itemType: 'play_time', uidField: 'uid', labelField: null, amountField: 'chargedAmount' },
-  { path: 'lotteryPurchases', gameId: 'stockMarket', itemType: 'lottery', uidField: 'uid', labelField: null, amountField: 'chargedAmount' },
+  { path: 'unfreezeDonationRequests', gameId: 'stockMarket', itemType: 'unfreeze_donation', uidField: 'requesterUid', labelField: 'stockName', amountField: null, source: 'stock' },
+  { path: 'playTimePurchases', gameId: 'stockMarket', itemType: 'play_time', uidField: 'uid', labelField: null, amountField: 'chargedAmount', source: 'stock' },
+  { path: 'lotteryPurchases', gameId: 'stockMarket', itemType: 'lottery', uidField: 'uid', labelField: null, amountField: 'chargedAmount', source: 'stock' },
 ];
 
 const getPurchaseOverview = onCall(async (request) => {
@@ -2670,11 +2731,14 @@ const getPurchaseOverview = onCall(async (request) => {
   // 수 있다 - 그래서 정렬·자르기 전에 유형별로 먼저 걸러낸다.
   const itemTypeFilter = String((request.data || {}).itemType || '').trim();
   const db = getDatabase();
+  const marketDb = await activeStockMarketDatabase(db);
 
   const sources = itemTypeFilter
     ? PURCHASE_SOURCES.filter(function (src) { return src.itemType === itemTypeFilter; })
     : PURCHASE_SOURCES;
-  const snaps = await Promise.all(sources.map(function (src) { return db.ref(src.path).get(); }));
+  const snaps = await Promise.all(sources.map(function (src) {
+    return (src.source === 'stock' ? marketDb : db).ref(src.path).get();
+  }));
 
   let entries = [];
   snaps.forEach(function (snap, i) {
@@ -4427,13 +4491,13 @@ const onyuConfirmStreamerGameGiftFromNotification = onCall(async (request) => {
 // amount/time overlap must block automatic approval instead of being guessed.
 // These source paths and fields were checked against their callable writers.
 const OTHER_GAME_DONATION_REQUEST_SOURCES = [
-  { path: 'bannerRequests', gameKey: 'soop-stock-market', requestType: 'rank-banner', amountField: 'starBalloons' },
-  { path: 'chartBannerRequests', gameKey: 'soop-stock-market', requestType: 'chart-banner', amountField: 'starBalloons' },
-  { path: 'cardBannerRequests', gameKey: 'soop-stock-market', requestType: 'card-banner', amountField: 'starBalloons' },
-  { path: 'pinRequests', gameKey: 'soop-stock-market', requestType: 'pin', amountField: 'starBalloons' },
-  { path: 'relayRoomRequests', gameKey: 'soop-stock-market', requestType: 'relay-room', amountField: 'starBalloons' },
+  { path: 'bannerRequests', gameKey: 'soop-stock-market', requestType: 'rank-banner', amountField: 'starBalloons', source: 'stock' },
+  { path: 'chartBannerRequests', gameKey: 'soop-stock-market', requestType: 'chart-banner', amountField: 'starBalloons', source: 'stock' },
+  { path: 'cardBannerRequests', gameKey: 'soop-stock-market', requestType: 'card-banner', amountField: 'starBalloons', source: 'stock' },
+  { path: 'pinRequests', gameKey: 'soop-stock-market', requestType: 'pin', amountField: 'starBalloons', source: 'stock' },
+  { path: 'relayRoomRequests', gameKey: 'soop-stock-market', requestType: 'relay-room', amountField: 'starBalloons', source: 'stock' },
   { path: 'cashChargeRequests', gameKey: 'soop-stock-market', requestType: 'cash-charge', donorField: 'soopId', amountUnknown: true },
-  { path: 'unfreezeDonationRequests', gameKey: 'soop-stock-market', requestType: 'unfreeze-donation', donorField: 'soopId', fixedAmount: 50 },
+  { path: 'unfreezeDonationRequests', gameKey: 'soop-stock-market', requestType: 'unfreeze-donation', donorField: 'soopId', fixedAmount: 50, source: 'stock' },
 ];
 const OTHER_GAME_DONATION_REQUEST_WINDOW_MS = 20 * 60 * 1000;
 
@@ -5116,9 +5180,11 @@ const confirmGameDonationFromNotification = onCall(async (request) => {
     gameCandidates: [],
   };
   try {
+    const marketDb = await activeStockMarketDatabase(db);
     const [onyuSnap, ...otherGameSnaps] = await Promise.all([
       db.ref('onyuVn/streamerGameGiftRequests').get(),
-      ...OTHER_GAME_DONATION_REQUEST_SOURCES.map((source) => db.ref(source.path).orderByChild('status').equalTo('pending').get()),
+      ...OTHER_GAME_DONATION_REQUEST_SOURCES.map((source) => (source.source === 'stock' ? marketDb : db)
+        .ref(source.path).orderByChild('status').equalTo('pending').get()),
     ]);
     const onyuRequests = onyuSnap.val() || {};
     const otherGameRequestMaps = {};
@@ -5954,6 +6020,14 @@ module.exports = {
   notifyTreasureChestRequest,
   notifyCashChargeRequest,
   notifyUnfreezeDonationRequest,
+  notifyDedicatedStockBannerRequest,
+  notifyDedicatedStockChartBannerRequest,
+  notifyDedicatedStockCardBannerRequest,
+  notifyDedicatedStockPinRequest,
+  notifyDedicatedStockRelayRoomRequest,
+  notifyDedicatedStockTreasureChestRequest,
+  notifyDedicatedStockUnfreezeDonationRequest,
+  notifyDedicatedStockListingRequest,
   notifyGameSeriesWalletDonationCompleted,
   notifyMessengerReport,
   notifyListingRequest,
