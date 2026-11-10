@@ -6036,6 +6036,7 @@ const getOnyuStats = onCall(async (request) => {
 
 const trimOnyuAnalytics = onSchedule('every 24 hours', async function () {
   const db = getDatabase();
+  if (await servicePauseControl.isPaused(db, 'onyuVn')) return;
   const snap = await db.ref('onyuVn/analytics').get();
   const data = snap.val() || {};
   const now = Date.now();

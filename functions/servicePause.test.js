@@ -59,3 +59,11 @@ test('malformed stored values fall back to the default', async () => {
   assert.equal(services.find((s) => s.id === 'lifeGame').active, true);
   assert.equal(services.find((s) => s.id === 'gallery').configured, false);
 });
+
+test('isPaused follows the flag, then the default, and never throws', async () => {
+  assert.equal(await pause.isPaused(makeDb(), 'onyuVn'), true);
+  assert.equal(await pause.isPaused(makeDb(), 'streamerFanPage'), false);
+  assert.equal(await pause.isPaused(makeDb({ servicePause: { onyuVn: { active: false } } }), 'onyuVn'), false);
+  assert.equal(await pause.isPaused({ ref: () => ({ get: async () => { throw new Error('x'); } }) }, 'onyuVn'), false);
+  assert.equal(await pause.isPaused(makeDb(), 'unknown'), false);
+});
