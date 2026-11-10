@@ -2721,6 +2721,46 @@ const PURCHASE_SOURCES = [
   { path: 'lotteryPurchases', gameId: 'stockMarket', itemType: 'lottery', uidField: 'uid', labelField: null, amountField: 'chargedAmount', source: 'stock' },
 ];
 
+// 통합 캐시로 산 보물상자는 uid별 하위 경로(stockMarket/treasureChestInventory/{uid}/purchases)에
+// 저장돼 위의 평면 소스 목록으로는 읽을 수 없다. 같은 모양의 구매 항목으로 펼쳐서 돌려준다.
+async function readCashChestPurchaseEntries(marketDb, uidFilter) {
+  const root = marketDb.ref('stockMarket/treasureChestInventory');
+  const byUid = uidFilter
+    ? { [uidFilter]: (await root.child(uidFilter).get()).val() }
+    : ((await root.get()).val() || {});
+  const entries = [];
+  Object.keys(byUid).forEach(function (uid) {
+    const purchases = (byUid[uid] && byUid[uid].purchases) || {};
+    Object.keys(purchases).forEach(function (id) {
+      const rec = purchases[id] || {};
+      const paid = Number(rec.paidChestCount || 0);
+      const bonus = Number(rec.bonusChestCount || 0);
+      const cancelled = Number(rec.cancelledChestCount || 0);
+      const total = Number(rec.totalChestCount || paid + bonus);
+      const parts = [paid + '개 구매' + (bonus ? ' (+보너스 ' + bonus + '개)' : ''), Number(rec.cashAmount || 0).toLocaleString('ko-KR') + '캐시'];
+      if (cancelled) parts.push('취소 ' + cancelled + '개 · ' + Number(rec.cancelledCashAmount || 0).toLocaleString('ko-KR') + '캐시 환불');
+      entries.push({
+        id: String(rec.purchaseId || id),
+        gameId: 'stockMarket',
+        itemType: 'treasure_chest_cash',
+        uid: uid,
+        nickname: '',
+        label: parts.join(' · '),
+        amount: null,
+        paymentMethod: '통합 캐시',
+        benefitMonth: '',
+        benefitUnits: 0,
+        benefitUnit: '',
+        refundStatus: cancelled ? (cancelled >= total ? 'refunded' : 'partial') : '',
+        refundUnits: cancelled,
+        status: cancelled >= total && total > 0 ? 'cancelled' : 'purchased',
+        at: Number(rec.requestedAt || rec.purchasedAt || 0),
+      });
+    });
+  });
+  return entries;
+}
+
 const getPurchaseOverview = onCall(async (request) => {
   const uidFilter = String((request.data || {}).uid || '').trim();
   // 개인 조회와 전체/유형별 목록 모두 관리자 전용으로 유지한다.
@@ -2768,6 +2808,10 @@ const getPurchaseOverview = onCall(async (request) => {
       });
     });
   });
+
+  if (!itemTypeFilter || itemTypeFilter === 'treasure_chest_cash') {
+    entries = entries.concat(await readCashChestPurchaseEntries(marketDb, uidFilter));
+  }
 
   entries.sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
   if (!uidFilter) entries = entries.slice(0, PURCHASE_OVERVIEW_LIMIT);
