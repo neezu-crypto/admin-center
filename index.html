@@ -1096,6 +1096,24 @@
 
   <!-- 모니터링 카드는 관리자 전용 독립 래퍼다. -->
   <div id="monitoringShell" hidden>
+    <h2 class="card-group-header">서비스 일시정지</h2>
+    <div class="card" id="section-service-pause">
+      <h2>주식시장 서비스 일시정지</h2>
+      <p class="hint">
+        일시정지를 시작하면 주식시장 접속 화면이 점검 안내로 바뀌고(관리자 로그인은 계속 이용 가능),
+        아래 백그라운드 작업이 함께 중지됩니다. 재개하면 작업이 다시 켜지고 안내 화면이 사라집니다.
+        열려 있는 화면에는 최대 20초 안에 반영됩니다. 상태가 한 번도 설정된 적 없으면 일시정지로 봅니다.
+      </p>
+      <div id="servicePauseMaster" class="game-row" style="align-items:flex-start;"></div>
+      <h3 class="subhead">백그라운드 작업</h3>
+      <p class="hint">
+        서버가 정해진 간격으로 자동 실행하는 작업입니다. 끄면 그 작업은 실행될 때마다 바로 건너뛰어 데이터를
+        읽거나 쓰지 않습니다. 작업별로 따로 켜고 끌 수도 있습니다. 설정이 없으면 켜진 상태입니다.
+      </p>
+      <div id="servicePauseJobList"></div>
+      <button type="button" id="servicePauseRefreshBtn" class="perm-refresh-btn" style="margin-top:12px;">상태 새로고침</button>
+    </div>
+
     <h2 class="card-group-header">모니터링</h2>
     <div class="card" id="section-stats">
       <h2>전체 통계 요약·이상 거래 모니터링</h2>
@@ -1621,6 +1639,9 @@
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
   const getSeriesConfigFn = httpsCallable(functions, 'getSeriesConfig');
   const setSeriesConfigFn = httpsCallable(functions, 'setSeriesConfig');
+  const getStockMarketSchedulerControlFn = httpsCallable(functions, 'getStockMarketSchedulerControl');
+  const setStockMarketSchedulerControlFn = httpsCallable(functions, 'setStockMarketSchedulerControl');
+  const setStockMarketServicePauseFn = httpsCallable(functions, 'setStockMarketServicePause');
   const bootstrapAdminUidFn = httpsCallable(functions, 'bootstrapAdminUid');
   const setDiscordWebhookUrlFn = httpsCallable(functions, 'setDiscordWebhookUrl');
   const getDiscordWebhookStatusFn = httpsCallable(functions, 'getDiscordWebhookStatus');
@@ -1916,6 +1937,10 @@
       sections: ['section-adult-image-generator'],
     },
     {
+      id: 'service-pause', label: '서비스 일시정지', icon: '⏸️', role: 'admin',
+      sections: ['section-service-pause'],
+    },
+    {
       id: 'shared', label: '공용 도구', icon: '💬', role: 'admin',
       sections: ['section-chat'],
     },
@@ -2170,6 +2195,8 @@
         jobs.push(refreshDevbarLinks());
       } else if (sessionId === 'adult-image-generator') {
         jobs.push(refreshAdultImageGeneratorLinks());
+      } else if (sessionId === 'service-pause') {
+        jobs.push(refreshServicePause());
       } else if (sessionId === 'shared') {
         startAdminChatSubscription();
       }
@@ -3425,6 +3452,137 @@
       seriesConfigListEl.appendChild(row);
     });
   }
+
+  // 서비스 일시정지 — 주식시장 백그라운드(스케줄) 작업 켜기/끄기. 조회·변경 모두 단발성 호출이라
+  // 변경 성공 뒤 다시 조회해서 서버 상태를 그대로 보여준다.
+  const servicePauseJobListEl = document.getElementById('servicePauseJobList');
+  const servicePauseMasterEl = document.getElementById('servicePauseMaster');
+  let servicePauseJobs = [];
+  let servicePauseState = null;
+  let servicePauseBusy = false;
+
+  function servicePauseTime(ms) {
+    return ms ? new Date(ms).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) : '기록 없음';
+  }
+
+  async function refreshServicePause() {
+    servicePauseJobListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await getStockMarketSchedulerControlFn();
+      servicePauseJobs = Array.isArray(result.data.jobs) ? result.data.jobs : [];
+      servicePauseState = result.data.servicePause || null;
+      renderServicePause();
+    } catch (e) {
+      console.error('주식시장 백그라운드 작업 조회 실패:', e);
+      servicePauseJobListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다. 상태 새로고침으로 다시 시도해 주세요.</div>';
+    }
+  }
+
+  function renderServicePauseMaster() {
+    if (!servicePauseState) { servicePauseMasterEl.innerHTML = ''; return; }
+    const paused = servicePauseState.active;
+    const runningJobs = servicePauseJobs.filter(function (job) { return job.enabled; });
+    const notes = [];
+    if (!servicePauseState.configured) notes.push('아직 설정한 적 없어 일시정지로 간주합니다');
+    else notes.push('마지막 변경 ' + servicePauseTime(servicePauseState.updatedAt));
+    if (paused && runningJobs.length) notes.push('일시정지 중이지만 실행 중인 작업 ' + runningJobs.length + '개가 있습니다 — "일시정지 적용"으로 함께 중지하세요');
+    if (!paused && servicePauseJobs.some(function (job) { return !job.enabled; })) notes.push('서비스는 열려 있지만 중지된 작업이 있습니다 — "서비스 재개"로 함께 켜세요');
+    servicePauseMasterEl.innerHTML =
+      '<div class="game-info" style="flex-direction:column;align-items:flex-start;gap:6px;">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>서비스 상태</b>' +
+        '<span class="game-status-tag ' + (paused ? 'frozen' : 'active') + '">' + (paused ? '일시정지 중 · 점검 안내 표시' : '정상 운영') + '</span></div>' +
+        '<div class="hint" style="margin:0;">' + notes.map(escapeHtml).join(' · ') + '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">' +
+          '<button type="button" class="perm-refresh-btn" data-pause="true">⏸ ' + (paused ? '일시정지 적용' : '일시정지 시작') + '</button>' +
+          '<button type="button" class="perm-refresh-btn" data-pause="false"' + (!paused && !servicePauseJobs.some(function (job) { return !job.enabled; }) ? ' disabled' : '') + '>▶ 서비스 재개</button>' +
+        '</div>' +
+      '</div>';
+    servicePauseMasterEl.querySelectorAll('button[data-pause]').forEach(function (btn) {
+      btn.addEventListener('click', function () { changeServicePause(btn.dataset.pause === 'true'); });
+    });
+  }
+
+  async function changeServicePause(paused) {
+    if (servicePauseBusy) return;
+    const message = paused
+      ? '주식시장 서비스를 일시정지할까요?\n접속 화면이 점검 안내로 바뀌고(관리자 로그인은 이용 가능), 백그라운드 작업이 모두 중지됩니다.'
+      : '주식시장 서비스를 재개할까요?\n백그라운드 작업이 다시 켜지고(동결 중인 종목의 상장폐지 마감시간은 중지된 시간만큼 연장), 점검 안내 화면이 사라집니다.';
+    if (!window.confirm(message)) return;
+    servicePauseBusy = true;
+    servicePauseMasterEl.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
+    servicePauseJobListEl.querySelectorAll('input').forEach(function (el) { el.disabled = true; });
+    try {
+      const result = await setStockMarketServicePauseFn({ paused: paused });
+      if (!paused && result.data && result.data.shiftedCount) {
+        window.alert('서비스를 재개했습니다. 동결 중인 ' + result.data.shiftedCount + '개 종목의 마감시간을 연장했습니다.');
+      }
+    } catch (err) {
+      console.error('주식시장 서비스 일시정지 변경 실패:', err);
+      window.alert('변경에 실패했습니다: ' + (err && err.message ? err.message : err));
+    } finally {
+      servicePauseBusy = false;
+      await refreshServicePause();
+    }
+  }
+
+  function renderServicePause() {
+    renderServicePauseMaster();
+    if (!servicePauseJobs.length) {
+      servicePauseJobListEl.innerHTML = '<div class="empty-state">표시할 작업이 없습니다.</div>';
+      return;
+    }
+    servicePauseJobListEl.innerHTML = '';
+    servicePauseJobs.forEach(function (job) {
+      const meta = ['마지막 실행 ' + servicePauseTime(job.lastRunAt)];
+      if (!job.enabled) meta.push('중지 시작 ' + servicePauseTime(job.disabledAt));
+      if (job.enabled && job.lastDelistedCount != null) meta.push('최근 상장폐지 ' + job.lastDelistedCount + '건');
+      if (job.enabled && job.lastShiftedCount) meta.push('재개 시 마감 연장 ' + job.lastShiftedCount + '종목');
+      const row = document.createElement('div');
+      row.className = 'game-row';
+      row.style.alignItems = 'flex-start';
+      row.innerHTML =
+        '<div class="game-info" style="flex-direction:column;align-items:flex-start;gap:6px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>' + escapeHtml(job.label) + '</b>' +
+          '<span class="game-status-tag ' + (job.enabled ? 'active' : 'frozen') + '">' + (job.enabled ? '실행 중' : '중지됨') + '</span>' +
+          '<span class="hint" style="margin:0;">' + escapeHtml(job.schedule) + '</span></div>' +
+          '<div class="hint" style="margin:0;">' + escapeHtml(job.description) + '</div>' +
+          '<div class="hint" style="margin:0;">' + escapeHtml(job.offNote) + '</div>' +
+          '<div class="hint" style="margin:0;opacity:.8;">' + meta.map(escapeHtml).join(' · ') + '</div>' +
+        '</div>' +
+        '<label class="toggle-switch" title="' + (job.enabled ? '끄기(일시중지)' : '다시 켜기') + '">' +
+        '<input type="checkbox"' + (job.enabled ? ' checked' : '') + ' aria-label="' + escapeHtml(job.label) + ' 켜기/끄기">' +
+        '<span class="toggle-slider"></span></label>';
+      const input = row.querySelector('input');
+      input.addEventListener('change', function (e) {
+        changeServicePauseJob(job, e.target.checked, input);
+      });
+      servicePauseJobListEl.appendChild(row);
+    });
+  }
+
+  async function changeServicePauseJob(job, enabled, input) {
+    if (servicePauseBusy) { input.checked = !enabled; return; }
+    const message = enabled
+      ? '"' + job.label + '" 작업을 다시 켤까요?' + (job.id === 'checkFrozenStockDelistings'
+        ? '\n중지된 시간만큼 동결 중인 종목의 상장폐지 마감시간이 뒤로 미뤄집니다.' : '')
+      : '"' + job.label + '" 작업을 끌까요?\n' + job.offNote;
+    if (!window.confirm(message)) { input.checked = !enabled; return; }
+    servicePauseBusy = true;
+    servicePauseJobListEl.querySelectorAll('input').forEach(function (el) { el.disabled = true; });
+    try {
+      const result = await setStockMarketSchedulerControlFn({ job: job.id, enabled: enabled });
+      if (enabled && result.data && result.data.shiftedCount) {
+        window.alert('다시 켰습니다. 동결 중인 ' + result.data.shiftedCount + '개 종목의 마감시간을 연장했습니다.');
+      }
+    } catch (err) {
+      console.error('주식시장 백그라운드 작업 변경 실패:', err);
+      window.alert('변경에 실패했습니다: ' + (err && err.message ? err.message : err));
+    } finally {
+      servicePauseBusy = false;
+      await refreshServicePause();
+    }
+  }
+  document.getElementById('servicePauseRefreshBtn').addEventListener('click', refreshServicePause);
 
   // 08번 — devbar 구성. GAME_CATALOG에 종속시키지 않고 devbarLinks 노드에 실제
   // 있는 항목만으로 화면을 그린다 — 새 게임이 나오면 "새 링크 추가" 폼으로 관리자가
@@ -7087,6 +7245,7 @@
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
     { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin' },
     { id: 'section-adult-image-generator', label: '🖼️ Adult Image Generator', role: 'admin', group: '운영 도구' },
+    { id: 'section-service-pause', label: '⏸️ 주식시장 백그라운드 작업', role: 'admin', group: '서비스 일시정지' },
     { id: 'section-chat', label: '💬 채팅', role: 'shared' },
   ];
 

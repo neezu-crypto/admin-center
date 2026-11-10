@@ -6,6 +6,7 @@ const firebaseFunctionsV1 = require('firebase-functions/v1');
 const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getDatabase, getDatabaseWithUrl } = require('firebase-admin/database');
+const stockMarketScheduler = require('./stockMarketScheduler');
 const { getFunctions } = require('firebase-admin/functions');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
@@ -2872,6 +2873,61 @@ const sampleConcurrentUsers = onSchedule('every 5 minutes', async function () {
 
 // 관리 센터 UI가 호출하는 관리자 전용 조회 함수 — 앱별 최근 hours시간의 시간당
 // 최고 접속자 수 시계열을 반환한다.
+// 서비스 일시정지 세션 — 주식시장 백그라운드(스케줄) 작업 켜기/끄기. 플래그는 시장 전용 DB의
+// stockMarket/adminSchedulerControl에 두고, soop-stock-market의 스케줄 함수가 실행될 때마다 읽는다.
+function toStockMarketSchedulerHttpsError(error) {
+  if (error instanceof stockMarketScheduler.SchedulerControlError) {
+    return new HttpsError(error.code, error.message);
+  }
+  return error;
+}
+
+const getStockMarketSchedulerControl = onCall(async (request) => {
+  await requireAdmin(request);
+  const marketDb = await activeStockMarketDatabase(getDatabase());
+  return stockMarketScheduler.getStockMarketSchedulerControl(marketDb);
+});
+
+const setStockMarketSchedulerControl = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const marketDb = await activeStockMarketDatabase(db);
+  let result;
+  try {
+    result = await stockMarketScheduler.setStockMarketSchedulerControl(marketDb, request.data || {});
+  } catch (error) {
+    throw toStockMarketSchedulerHttpsError(error);
+  }
+  if (result.changed) {
+    const meta = stockMarketScheduler.STOCK_MARKET_SCHEDULER_JOBS[result.job];
+    await logToAdminAuditLog(
+      db, request,
+      result.enabled ? '주식시장 백그라운드 작업 켬' : '주식시장 백그라운드 작업 끔',
+      meta.label + (result.shiftedCount ? ' · 동결 마감 ' + result.shiftedCount + '종목 연장' : '')
+    );
+  }
+  return result;
+});
+
+const setStockMarketServicePause = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  const marketDb = await activeStockMarketDatabase(db);
+  let result;
+  try {
+    result = await stockMarketScheduler.setStockMarketServicePause(marketDb, request.data || {});
+  } catch (error) {
+    throw toStockMarketSchedulerHttpsError(error);
+  }
+  await logToAdminAuditLog(
+    db, request,
+    result.paused ? '주식시장 서비스 일시정지 시작' : '주식시장 서비스 재개',
+    '점검 안내 화면 ' + (result.paused ? '표시' : '해제') + ' · 백그라운드 작업 ' + (result.paused ? '중지' : '재개') +
+      (result.shiftedCount ? ' · 동결 마감 ' + result.shiftedCount + '종목 연장' : '')
+  );
+  return result;
+});
+
 const getVisitorAnalytics = onCall(async (request) => {
   await requireAdmin(request);
   const hours = Math.min(Math.max(parseInt((request.data || {}).hours, 10) || 24, 1), 168);
@@ -6093,6 +6149,9 @@ module.exports = {
   onyuVnLogVerifiedStreamerVisit,
   searchSeriesUser,
   getPurchaseOverview,
+  getStockMarketSchedulerControl,
+  setStockMarketSchedulerControl,
+  setStockMarketServicePause,
   sampleConcurrentUsers,
   getVisitorAnalytics,
   onyuRequestViewerAccess,
