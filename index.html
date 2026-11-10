@@ -3630,6 +3630,7 @@
           '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>' + escapeHtml(service.name) + '</b>' +
           '<span class="game-status-tag ' + (paused ? 'frozen' : 'active') + '">' + (paused ? '일시정지 중' : '정상 운영') + '</span></div>' +
           '<div class="hint" style="margin:0;">' + escapeHtml(note) + '</div>' +
+          '<div class="hint" style="margin:0;">자동 함수 · 일시정지 중 중지: ' + escapeHtml(service.stoppedJobs && service.stoppedJobs.length ? service.stoppedJobs.join(', ') : '없음') + ' / 계속 실행: ' + escapeHtml(service.keptJobs && service.keptJobs.length ? service.keptJobs.join(', ') : '없음') + '</div>' +
         '</div>' +
         '<button type="button" class="perm-refresh-btn">' + (paused ? '▶ 서비스 재개' : '⏸ 일시정지') + '</button>';
       row.querySelector('button').addEventListener('click', function () { changeServicePauseOne(service, !paused); });
