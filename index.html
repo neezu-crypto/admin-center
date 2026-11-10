@@ -1097,6 +1097,18 @@
   <!-- 모니터링 카드는 관리자 전용 독립 래퍼다. -->
   <div id="monitoringShell" hidden>
     <h2 class="card-group-header">서비스 일시정지</h2>
+    <div class="card" id="section-service-pause-all">
+      <h2>서비스별 일시정지</h2>
+      <p class="hint">
+        서비스마다 따로 일시정지하거나 재개합니다. 일시정지하면 그 서비스의 접속 화면이 점검 안내로 바뀌고(관리자 Google 로그인은
+        계속 이용 가능), 재개하면 안내 화면이 사라집니다. 열려 있는 화면에는 최대 20초 안에 반영됩니다.
+        한 번도 설정하지 않은 서비스는 배포 당시 상태(점검 중이던 서비스는 일시정지, 열려 있던 서비스는 정상 운영)를 따릅니다.
+        주식시장은 백그라운드 작업도 함께 다루므로 아래 별도 카드에서 설정합니다.
+      </p>
+      <div id="servicePauseAllList"></div>
+      <button type="button" id="servicePauseAllRefreshBtn" class="perm-refresh-btn" style="margin-top:12px;">상태 새로고침</button>
+    </div>
+
     <div class="card" id="section-service-pause">
       <h2>주식시장 서비스 일시정지</h2>
       <p class="hint">
@@ -1642,6 +1654,8 @@
   const getStockMarketSchedulerControlFn = httpsCallable(functions, 'getStockMarketSchedulerControl');
   const setStockMarketSchedulerControlFn = httpsCallable(functions, 'setStockMarketSchedulerControl');
   const setStockMarketServicePauseFn = httpsCallable(functions, 'setStockMarketServicePause');
+  const getServicePauseOverviewFn = httpsCallable(functions, 'getServicePauseOverview');
+  const setServicePauseFn = httpsCallable(functions, 'setServicePause');
   const bootstrapAdminUidFn = httpsCallable(functions, 'bootstrapAdminUid');
   const setDiscordWebhookUrlFn = httpsCallable(functions, 'setDiscordWebhookUrl');
   const getDiscordWebhookStatusFn = httpsCallable(functions, 'getDiscordWebhookStatus');
@@ -1938,7 +1952,7 @@
     },
     {
       id: 'service-pause', label: '서비스 일시정지', icon: '⏸️', role: 'admin',
-      sections: ['section-service-pause'],
+      sections: ['section-service-pause-all', 'section-service-pause'],
     },
     {
       id: 'shared', label: '공용 도구', icon: '💬', role: 'admin',
@@ -2196,6 +2210,7 @@
       } else if (sessionId === 'adult-image-generator') {
         jobs.push(refreshAdultImageGeneratorLinks());
       } else if (sessionId === 'service-pause') {
+        jobs.push(refreshServicePauseAll());
         jobs.push(refreshServicePause());
       } else if (sessionId === 'shared') {
         startAdminChatSubscription();
@@ -3472,6 +3487,7 @@
       servicePauseJobs = Array.isArray(result.data.jobs) ? result.data.jobs : [];
       servicePauseState = result.data.servicePause || null;
       renderServicePause();
+      renderServicePauseAll();
     } catch (e) {
       console.error('주식시장 백그라운드 작업 조회 실패:', e);
       servicePauseJobListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다. 상태 새로고침으로 다시 시도해 주세요.</div>';
@@ -3583,6 +3599,78 @@
     }
   }
   document.getElementById('servicePauseRefreshBtn').addEventListener('click', refreshServicePause);
+
+  // 서비스별 일시정지 — 주식시장을 뺀 서비스는 공유 기본 RTDB의 servicePause/{id}, 주식시장은 아래 카드의 상태를 그대로 보여 준다.
+  const servicePauseAllListEl = document.getElementById('servicePauseAllList');
+  let servicePauseAllServices = [];
+  let servicePauseAllBusy = false;
+
+  async function refreshServicePauseAll() {
+    servicePauseAllListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const result = await getServicePauseOverviewFn();
+      servicePauseAllServices = Array.isArray(result.data.services) ? result.data.services : [];
+      renderServicePauseAll();
+    } catch (e) {
+      console.error('서비스별 일시정지 조회 실패:', e);
+      servicePauseAllListEl.innerHTML = '<div class="empty-state">조회에 실패했습니다. 상태 새로고침으로 다시 시도해 주세요.</div>';
+    }
+  }
+
+  function renderServicePauseAll() {
+    if (!servicePauseAllServices.length) return;
+    servicePauseAllListEl.innerHTML = '';
+    servicePauseAllServices.forEach(function (service) {
+      const paused = service.active;
+      const note = service.configured ? '마지막 변경 ' + servicePauseTime(service.updatedAt) : '설정한 적 없음 · 배포 당시 상태(' + (service.defaultPaused ? '일시정지' : '정상 운영') + ')';
+      const row = document.createElement('div');
+      row.className = 'game-row';
+      row.innerHTML =
+        '<div class="game-info" style="flex-direction:column;align-items:flex-start;gap:4px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>' + escapeHtml(service.name) + '</b>' +
+          '<span class="game-status-tag ' + (paused ? 'frozen' : 'active') + '">' + (paused ? '일시정지 중' : '정상 운영') + '</span></div>' +
+          '<div class="hint" style="margin:0;">' + escapeHtml(note) + '</div>' +
+        '</div>' +
+        '<button type="button" class="perm-refresh-btn">' + (paused ? '▶ 서비스 재개' : '⏸ 일시정지') + '</button>';
+      row.querySelector('button').addEventListener('click', function () { changeServicePauseOne(service, !paused); });
+      servicePauseAllListEl.appendChild(row);
+    });
+    // 주식시장은 백그라운드 작업까지 함께 바뀌므로 상태만 보여 주고 변경은 아래 카드에서 한다.
+    if (servicePauseState) {
+      const stockPaused = servicePauseState.active;
+      const stockRow = document.createElement('div');
+      stockRow.className = 'game-row';
+      stockRow.innerHTML =
+        '<div class="game-info" style="flex-direction:column;align-items:flex-start;gap:4px;">' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>스트리머 주식시장</b>' +
+          '<span class="game-status-tag ' + (stockPaused ? 'frozen' : 'active') + '">' + (stockPaused ? '일시정지 중' : '정상 운영') + '</span></div>' +
+          '<div class="hint" style="margin:0;">백그라운드 작업도 함께 다루므로 아래 “주식시장 서비스 일시정지” 카드에서 변경합니다.</div>' +
+        '</div>';
+      servicePauseAllListEl.appendChild(stockRow);
+    }
+  }
+
+  async function changeServicePauseOne(service, paused) {
+    if (servicePauseAllBusy) return;
+    const message = paused
+      ? service.name + '을(를) 일시정지할까요?\n접속 화면이 점검 안내로 바뀝니다(관리자 로그인은 이용 가능).'
+      : service.name + '을(를) 재개할까요?\n점검 안내 화면이 사라지고 모두 이용할 수 있게 됩니다.';
+    if (!window.confirm(message)) return;
+    servicePauseAllBusy = true;
+    servicePauseAllListEl.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
+    try {
+      await setServicePauseFn({ serviceId: service.id, paused: paused });
+    } catch (err) {
+      console.error('서비스 일시정지 변경 실패:', err);
+      window.alert('변경에 실패했습니다: ' + (err && err.message ? err.message : err));
+    } finally {
+      servicePauseAllBusy = false;
+      await refreshServicePauseAll();
+    }
+  }
+
+  document.getElementById('servicePauseAllRefreshBtn').addEventListener('click', function () { refreshServicePauseAll(); refreshServicePause(); });
+
 
   // 08번 — devbar 구성. GAME_CATALOG에 종속시키지 않고 devbarLinks 노드에 실제
   // 있는 항목만으로 화면을 그린다 — 새 게임이 나오면 "새 링크 추가" 폼으로 관리자가
@@ -7245,7 +7333,8 @@
     { id: 'section-bootstrap', label: '🔑 관리자 uid 등록', role: 'admin' },
     { id: 'section-devbar', label: '🔗 devbar 구성', role: 'admin' },
     { id: 'section-adult-image-generator', label: '🖼️ Adult Image Generator', role: 'admin', group: '운영 도구' },
-    { id: 'section-service-pause', label: '⏸️ 주식시장 백그라운드 작업', role: 'admin', group: '서비스 일시정지' },
+    { id: 'section-service-pause-all', label: '⏸️ 서비스별 일시정지', role: 'admin', group: '서비스 일시정지' },
+    { id: 'section-service-pause', label: '⏸️ 주식시장 백그라운드 작업', role: 'admin' },
     { id: 'section-chat', label: '💬 채팅', role: 'shared' },
   ];
 

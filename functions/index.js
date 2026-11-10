@@ -7,6 +7,7 @@ const { initializeApp } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
 const { getDatabase, getDatabaseWithUrl } = require('firebase-admin/database');
 const stockMarketScheduler = require('./stockMarketScheduler');
+const servicePauseControl = require('./servicePause');
 const { getFunctions } = require('firebase-admin/functions');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
@@ -2906,6 +2907,35 @@ const setStockMarketSchedulerControl = onCall(async (request) => {
       meta.label + (result.shiftedCount ? ' · 동결 마감 ' + result.shiftedCount + '종목 연장' : '')
     );
   }
+  return result;
+});
+
+// 서비스별 일시정지(주식시장 제외) — 공유 기본 RTDB의 servicePause/{serviceId}. 각 서비스의 점검 안내 화면이
+// 최대 20초 안에 이 값을 따라간다. 값이 없으면 서비스별 기본 상태(servicePause.js)를 쓴다.
+function toServicePauseHttpsError(error) {
+  if (error instanceof servicePauseControl.ServicePauseError) return new HttpsError(error.code, error.message);
+  return error;
+}
+
+const getServicePauseOverview = onCall(async (request) => {
+  await requireAdmin(request);
+  return servicePauseControl.getServicePauseOverview(getDatabase());
+});
+
+const setServicePause = onCall(async (request) => {
+  await requireAdmin(request);
+  const db = getDatabase();
+  let result;
+  try {
+    result = await servicePauseControl.setServicePause(db, request.data || {});
+  } catch (error) {
+    throw toServicePauseHttpsError(error);
+  }
+  await logToAdminAuditLog(
+    db, request,
+    result.paused ? '서비스 일시정지 시작' : '서비스 재개',
+    result.name + ' · 점검 안내 화면 ' + (result.paused ? '표시' : '해제')
+  );
   return result;
 });
 
@@ -6152,6 +6182,8 @@ module.exports = {
   getStockMarketSchedulerControl,
   setStockMarketSchedulerControl,
   setStockMarketServicePause,
+  getServicePauseOverview,
+  setServicePause,
   sampleConcurrentUsers,
   getVisitorAnalytics,
   onyuRequestViewerAccess,
