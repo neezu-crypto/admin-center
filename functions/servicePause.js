@@ -14,7 +14,7 @@ const SERVICE_PAUSE_TARGETS = [
   { id: 'lifeGame', name: '스트리머 인생게임', defaultPaused: true },
   { id: 'gallery', name: '스트리머 갤러리', defaultPaused: true },
   { id: 'streamerMessenger', name: '스트리머 메신저', defaultPaused: true },
-  { id: 'streamerJurumable', name: '스트리머 주루마블', defaultPaused: true },
+  { id: 'streamerJurumable', name: '스트리머 주루마블', defaultPaused: false },
   { id: 'dontPressButton', name: '한국인은 절대 못 깨는 게임', defaultPaused: true },
   { id: 'onyuVn', name: '당신이 여기에 온 이유', defaultPaused: true },
   { id: 'streamerFanPage', name: '스트리머 팬페이지', defaultPaused: false },
