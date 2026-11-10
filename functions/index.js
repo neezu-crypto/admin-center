@@ -2719,6 +2719,7 @@ const PURCHASE_SOURCES = [
   { path: 'unfreezeDonationRequests', gameId: 'stockMarket', itemType: 'unfreeze_donation', uidField: 'requesterUid', labelField: 'stockName', amountField: null, source: 'stock' },
   { path: 'playTimePurchases', gameId: 'stockMarket', itemType: 'play_time', uidField: 'uid', labelField: null, amountField: 'chargedAmount', source: 'stock' },
   { path: 'lotteryPurchases', gameId: 'stockMarket', itemType: 'lottery', uidField: 'uid', labelField: null, amountField: 'chargedAmount', source: 'stock' },
+  { path: 'treasureChestOpens', gameId: 'stockMarket', itemType: 'treasure_chest_open', uidField: 'uid', labelField: null, amountField: 'reward', source: 'stock' },
 ];
 
 // 통합 캐시로 산 보물상자는 uid별 하위 경로(stockMarket/treasureChestInventory/{uid}/purchases)에
