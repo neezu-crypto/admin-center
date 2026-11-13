@@ -12,9 +12,6 @@ const { getFunctions } = require('firebase-admin/functions');
 const { SecretManagerServiceClient } = require('@google-cloud/secret-manager');
 const { ServerValue } = require('firebase-admin/database');
 const {
-  notificationFallsInDonationRequestWindow,
-} = require('./donation-verification');
-const {
   DONATION_CONSENT_TTL_MS,
   integrationExpiresAt,
   isIntegrationExpired,
@@ -4000,119 +3997,6 @@ const onyuCreateGiftBackgroundMonitorSession = onCall(async (request) => {
   throw new HttpsError('failed-precondition', '고점체크 후원 백그라운드 감시가 중단되어 새 모니터링 세션을 만들 수 없습니다.');
 });
 
-const onyuGiftBackgroundFeed = onRequest({ timeoutSeconds: 3600, memory: '256MiB' }, async (request, response) => {
-  const origin = String(request.get('Origin') || '');
-  const allowedOrigin = origin === 'https://neezu-crypto.github.io' || /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
-  // Extension service-worker fetches with host permissions may omit Origin.
-  // The feed is read-only and still requires a verified Firebase bearer token.
-  const originlessBackgroundGet = !origin && request.method === 'GET';
-  response.set('Vary', 'Origin');
-  if (allowedOrigin) {
-    response.set('Access-Control-Allow-Origin', origin);
-    response.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    response.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-  }
-  if (request.method === 'OPTIONS') {
-    response.status(allowedOrigin ? 204 : 403).send('');
-    return;
-  }
-  if (request.method !== 'GET' || (!allowedOrigin && !originlessBackgroundGet)) {
-    const reason = request.method === 'GET' ? 'origin-not-allowed' : 'method-not-allowed';
-    const originType = !origin ? 'missing' : origin.startsWith('chrome-extension://') ? 'unrecognized-extension' : 'other';
-    response.status(request.method === 'GET' ? 403 : 405).json({ reason, originType, message: '허용되지 않은 요청입니다.' });
-    return;
-  }
-  const bearer = String(request.get('Authorization') || '').match(/^Bearer\s+(.+)$/i);
-  if (!bearer) {
-    response.status(401).json({ reason: 'bearer-missing', message: '인증이 필요합니다.' });
-    return;
-  }
-
-  let decoded;
-  let adminUid;
-  try {
-    decoded = await getAuth().verifyIdToken(bearer[1]);
-  } catch (error) {
-    console.warn('온이유 이용권 백그라운드 인증 토큰 거부:', {
-      reason: 'id-token-invalid',
-      errorCode: String(error && error.code || 'unknown').slice(0, 80),
-    });
-    response.status(403).json({ reason: 'id-token-invalid', message: '이용권 신청 스트림 접근 권한이 없습니다.' });
-    return;
-  }
-  try {
-    if (decoded.onyuGiftMonitor === true) {
-      response.status(403).json({ reason: 'background-monitor-disabled', message: '고점체크 후원 백그라운드 감시는 중단되었습니다.' });
-      return;
-    } else if (await isAdminUid(decoded.uid)) {
-      adminUid = decoded.uid;
-    } else {
-      console.warn('온이유 이용권 백그라운드 권한 거부:', {
-        reason: 'admin-required',
-        monitorClaim: false,
-      });
-      response.status(403).json({ reason: 'admin-required', message: '이용권 신청 스트림 접근 권한이 없습니다.' });
-      return;
-    }
-  } catch (error) {
-    const reason = decoded.onyuGiftMonitor === true ? 'monitor-session-invalid' : 'admin-lookup-failed';
-    const claimedAdminUid = String(decoded.onyuGiftAdminUid || '');
-    console.warn('온이유 이용권 백그라운드 권한 거부:', {
-      reason,
-      errorCode: String(error && error.code || 'unknown').slice(0, 80),
-      monitorClaim: decoded.onyuGiftMonitor === true,
-      adminUidClaimPresent: !!claimedAdminUid,
-      monitorUidMatchesClaim: !!claimedAdminUid && decoded.uid === onyuGiftMonitorUid(claimedAdminUid),
-    });
-    response.status(403).json({ reason, message: '이용권 신청 스트림 접근 권한이 없습니다.' });
-    return;
-  }
-
-  response.status(200);
-  response.set('Content-Type', 'text/event-stream; charset=utf-8');
-  response.set('Cache-Control', 'no-cache, no-transform');
-  response.set('Connection', 'keep-alive');
-  response.set('X-Accel-Buffering', 'no');
-  response.flushHeaders();
-
-  let closed = false;
-  const db = getDatabase();
-  const adminRef = db.ref('adminCenter/adminUids/' + adminUid);
-  const writeEvent = (name, data) => {
-    if (closed || response.destroyed) return;
-    response.write('event: ' + name + '\ndata: ' + JSON.stringify(data || {}) + '\n\n');
-  };
-  const onAdminError = (error) => {
-    console.error('온이유 백그라운드 세션 관리자 권한 구독 실패:', String(error && error.message || error).slice(0, 160));
-    writeEvent('stream-error', { reason: 'database-subscription-failed' });
-    cleanup();
-  };
-  const onAdminValue = (snapshot) => {
-    if (snapshot.val() === true) return;
-    writeEvent('auth-revoked', { reason: 'admin-access-revoked' });
-    cleanup();
-  };
-  const heartbeat = setInterval(() => {
-    writeEvent('heartbeat', { at: Date.now() });
-  }, 20000);
-  const maxDuration = setTimeout(() => {
-    writeEvent('session-expiring', {});
-    cleanup();
-  }, 55 * 60 * 1000);
-  function cleanup() {
-    if (closed) return;
-    closed = true;
-    clearInterval(heartbeat);
-    clearTimeout(maxDuration);
-    adminRef.off('value', onAdminValue);
-    if (!response.destroyed) response.end();
-  }
-  response.on('close', cleanup);
-  adminRef.on('value', onAdminValue, onAdminError);
-  // 과거 신청 이력은 관리자가 필요할 때 onyuListStreamerGameGifts로 단건 조회한다.
-  // 신규 신청이 종료됐으므로 이 피드는 신청 목록을 실시간 구독하지 않는다.
-});
-
 const getLifeGameSponsorAutoVerificationDiagnostics = onCall(async (request) => {
   const adminUid = await requireAdmin(request);
   const diagnosticCode = String(request.data && request.data.diagnosticCode || '').trim().toUpperCase();
@@ -4616,48 +4500,6 @@ const onyuConfirmStreamerGameGiftFromNotification = onCall(async (request) => {
     throw error;
   }
 });
-
-// Other services also collect SOOP donations on the same admin station. Their
-// requests do not all carry a donor ID or a completion signal, so a recent
-// amount/time overlap must block automatic approval instead of being guessed.
-// These source paths and fields were checked against their callable writers.
-const OTHER_GAME_DONATION_REQUEST_SOURCES = [
-  { path: 'bannerRequests', gameKey: 'soop-stock-market', requestType: 'rank-banner', amountField: 'starBalloons', source: 'stock' },
-  { path: 'chartBannerRequests', gameKey: 'soop-stock-market', requestType: 'chart-banner', amountField: 'starBalloons', source: 'stock' },
-  { path: 'cardBannerRequests', gameKey: 'soop-stock-market', requestType: 'card-banner', amountField: 'starBalloons', source: 'stock' },
-  { path: 'pinRequests', gameKey: 'soop-stock-market', requestType: 'pin', amountField: 'starBalloons', source: 'stock' },
-  { path: 'relayRoomRequests', gameKey: 'soop-stock-market', requestType: 'relay-room', amountField: 'starBalloons', source: 'stock' },
-  { path: 'cashChargeRequests', gameKey: 'soop-stock-market', requestType: 'cash-charge', donorField: 'soopId', amountUnknown: true },
-  { path: 'unfreezeDonationRequests', gameKey: 'soop-stock-market', requestType: 'unfreeze-donation', donorField: 'soopId', fixedAmount: 50, source: 'stock' },
-];
-const OTHER_GAME_DONATION_REQUEST_WINDOW_MS = 20 * 60 * 1000;
-
-function findOtherGameDonationRequestCandidates(sourceMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax) {
-  const candidates = [];
-  OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source) => {
-    const requests = sourceMaps[source.path] || {};
-    Object.entries(requests).forEach(([requestId, item]) => {
-      if (!item || item.status !== 'pending') return;
-      const requestedAt = Number(item.requestedAt) || 0;
-      if (!requestedAt || requestedAt > observedAt || observedAt - requestedAt > 24 * 60 * 60 * 1000 ||
-          requestedAt < eventAtMin - OTHER_GAME_DONATION_REQUEST_WINDOW_MS || requestedAt > eventAtMax) return;
-      if (source.amountField && Number(item[source.amountField]) !== balloons) return;
-      if (Number.isFinite(source.fixedAmount) && source.fixedAmount !== balloons) return;
-      const donorSoopId = source.donorField ? normalizeSoopId(item[source.donorField]) : '';
-      if (donorSoopId && donorSoopId !== senderSoopId) return;
-      candidates.push({
-        gameKey: source.gameKey,
-        requestType: source.requestType,
-        requestPath: source.path,
-        requestId,
-        requestedAt,
-        expectedBalloons: source.amountUnknown ? null : Number(source.fixedAmount || item[source.amountField]) || 0,
-        donorMatch: donorSoopId ? true : 'unknown',
-      });
-    });
-  });
-  return candidates;
-}
 
 const listFanPageSponsorDonationDiagnostics = onCall(async (request) => {
   await requireAdmin(request);
@@ -5266,115 +5108,6 @@ const manageFanPageSponsorAds = onCall(async (request) => {
   }
 
   throw new HttpsError('invalid-argument', '고점체크 후원 광고 관리 동작을 확인해 주세요.');
-});
-
-const confirmGameDonationFromNotification = onCall(async (request) => {
-  const reviewer = await resolveOnyuGiftReviewActor(request);
-  const adminUid = reviewer.adminUid;
-  request = reviewer.request;
-  const senderSoopId = normalizeSoopId(request.data && request.data.senderSoopId);
-  const balloons = Number(request.data && request.data.balloons);
-  const observedAt = Number(request.data && request.data.observedAt);
-  const eventAtMin = Number(request.data && request.data.eventAtMin);
-  const eventAtMax = Number(request.data && request.data.eventAtMax);
-  const candidateFingerprint = String(request.data && request.data.candidateFingerprint || '').toLowerCase();
-  const exactTimestamp = request.data && request.data.exactTimestamp === true;
-  const now = Date.now();
-  if (!senderSoopId || !Number.isInteger(balloons) ||
-      !(balloons >= 10 && balloons <= 300 && balloons % 10 === 0) ||
-      !Number.isFinite(observedAt) || observedAt < now - 2 * 60 * 1000 || observedAt > now + 30000 ||
-      !Number.isFinite(eventAtMin) || !Number.isFinite(eventAtMax) || eventAtMin > eventAtMax ||
-      eventAtMin < observedAt - 24 * 60 * 60 * 1000 || eventAtMax > observedAt + 30000 ||
-      !/^[a-f0-9]{32,64}$/.test(candidateFingerprint)) {
-    throw new HttpsError('invalid-argument', '후원 알림 정보가 올바르지 않습니다.');
-  }
-
-  const db = getDatabase();
-  const crypto = require('node:crypto');
-  const eventKey = crypto.createHash('sha256')
-    .update(senderSoopId + '|' + balloons + '|' + candidateFingerprint).digest('hex').slice(0, 40);
-  const eventRef = db.ref('adminCenter/donationVerificationEventClaims/' + eventKey);
-  const claimToken = crypto.randomBytes(16).toString('hex');
-  const eventClaim = await eventRef.transaction((current) => {
-    if (current && (current.status !== 'processing' || now - Number(current.startedAt || now) < 2 * 60 * 1000)) return;
-    return { status: 'processing', startedAt: now, claimToken, senderSoopId, balloons };
-  }, undefined, false);
-  if (!eventClaim.committed) return { ok: false, reason: 'notification-already-processed', eventKey };
-
-  const eventDetails = {
-    senderSoopId,
-    balloons,
-    observedAt,
-    eventAtMin,
-    eventAtMax,
-    exactTimestamp,
-    gameCandidates: [],
-  };
-  try {
-    const marketDb = await activeStockMarketDatabase(db);
-    const [onyuSnap, ...otherGameSnaps] = await Promise.all([
-      db.ref('onyuVn/streamerGameGiftRequests').get(),
-      ...OTHER_GAME_DONATION_REQUEST_SOURCES.map((source) => (source.source === 'stock' ? marketDb : db)
-        .ref(source.path).orderByChild('status').equalTo('pending').get()),
-    ]);
-    const onyuRequests = onyuSnap.val() || {};
-    const otherGameRequestMaps = {};
-    OTHER_GAME_DONATION_REQUEST_SOURCES.forEach((source, index) => {
-      otherGameRequestMaps[source.path] = otherGameSnaps[index].val() || {};
-    });
-    const onyuCandidates = Object.entries(onyuRequests).filter(([, item]) =>
-      notificationFallsInDonationRequestWindow(item, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax, exactTimestamp));
-    const candidates = onyuCandidates.map(([requestId, item]) => ({ game: 'onyu-vn', requestId, item }));
-    const otherDonationCandidates = findOtherGameDonationRequestCandidates(
-      otherGameRequestMaps, senderSoopId, balloons, observedAt, eventAtMin, eventAtMax,
-    );
-    eventDetails.otherDonationCandidateCount = otherDonationCandidates.length;
-    eventDetails.otherDonationCandidates = otherDonationCandidates.slice(0, 20);
-    eventDetails.otherDonationCandidatesOmitted = Math.max(0, otherDonationCandidates.length - 20);
-    eventDetails.gameCandidateCount = candidates.length;
-    eventDetails.gameCandidates = candidates.slice(0, 20).map((candidate) => ({
-      game: candidate.game,
-      requestId: candidate.requestId,
-    }));
-    eventDetails.gameCandidatesOmitted = Math.max(0, candidates.length - 20);
-
-    if (candidates.length !== 1 || otherDonationCandidates.length > 0) {
-      const reason = candidates.length > 1 || (candidates.length === 1 && otherDonationCandidates.length > 0)
-        ? 'ambiguous-across-game-requests'
-        : 'no-matching-pending-request';
-      if (reason === 'ambiguous-across-game-requests') {
-        await eventRef.update({ status: 'ambiguous', completedAt: Date.now(), claimToken: null, reason });
-      } else {
-        await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false);
-      }
-      return { ok: false, reason, eventKey, gameCandidates: eventDetails.gameCandidates, otherDonationCandidates };
-    }
-
-    const candidate = candidates[0];
-    const verifiedAt = Date.now();
-    const verificationEventMetadata = {
-      verificationSource: 'soop-donation-notification',
-      verificationGame: candidate.game,
-      verificationSenderSoopId: senderSoopId,
-      verificationEventKey: eventKey,
-      verifiedAt,
-    };
-    const result = await processOnyuStreamerGameGiftReview(
-      request, adminUid, candidate.requestId, 'approve', verificationEventMetadata,
-    );
-    Object.assign(result, {
-      gameKey: candidate.game,
-      targetNickname: String(candidate.item.targetNickname || ''),
-    });
-    await eventRef.update({ status: 'approved', requestId: candidate.requestId, gameKey: candidate.game, claimToken: null, approvedAt: Date.now() });
-    return Object.assign({}, result, { ok: true, eventKey, verificationSource: 'soop-donation-notification' });
-  } catch (error) {
-    await eventRef.transaction((current) => current && current.claimToken === claimToken ? null : undefined, undefined, false).catch(() => null);
-    if (error instanceof HttpsError && ['failed-precondition', 'already-exists'].includes(error.code)) {
-      return { ok: false, reason: 'request-no-longer-pending', eventKey };
-    }
-    throw error;
-  }
 });
 
 // 게임 시작 직전에 호출하는 최종 서버 판정. 관리자는 설정에서 선택한 모드로
@@ -6221,9 +5954,7 @@ module.exports = {
   onyuAdminRevokeEntitlement,
   onyuReviewStreamerGameGift,
   onyuConfirmStreamerGameGiftFromNotification,
-  confirmGameDonationFromNotification,
   onyuCreateGiftBackgroundMonitorSession,
-  onyuGiftBackgroundFeed,
   onyuStartSession,
   onyuListViewerAccessRequests,
   onyuApproveViewerAccess,
