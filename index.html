@@ -1294,6 +1294,7 @@
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js';
+  import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-app-check.js';
   import {
     getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js';
@@ -1324,6 +1325,7 @@
   };
 
   const app = initializeApp(firebaseConfig);
+  try { initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider('6Ld0AfAtAAAAABcCio4_5AoiCdrjfM7_4riWiYXR'), isTokenAutoRefreshEnabled: true }); } catch (error) { console.warn('App Check 초기화 실패', error); }
   const auth = getAuth(app);
   const functions = getFunctions(app, 'us-central1');
   const db = getDatabase(app);
