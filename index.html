@@ -46,7 +46,7 @@
   #authArea { display: flex; align-items: center; gap: 10px; font-size: 13px; }
   #authArea button {
     background: linear-gradient(180deg, #20252d 0%, #171a20 100%); border: 1px solid #262b33; color: #eef0f2;
-    padding: 7px 13px; border-radius: 14px; font-size: 12.5px; cursor: pointer;
+    padding: 7px 13px; border-radius: 14.26px; font-size: 12.5px; cursor: pointer;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
   }
   #authArea button:hover { border-color: var(--accent); }
@@ -91,7 +91,7 @@
   }
   [hidden] { display: none !important; }
   h3.subhead { font-size: 12.5px; color: var(--ink-soft); margin: 18px 0 8px; text-transform: uppercase; letter-spacing: .04em; }
-  /* 23번 — 카드 19개 시대의 페이지 구조. 카드(h2)보다 한 단계 위, 문서 전체
+  /*  23번 — 카드 19개 시대의 페이지 구조. 카드(h2)보다 한 단계 위, 문서 전체
      내비게이션 역할의 그룹 제목 — subhead(카드 안 소제목)와 확실히 구분되도록
      코랄 점(eyebrow dot) + 밑줄로 표시한다. */
   h2.card-group-header {
@@ -217,7 +217,7 @@
     .lifegame-sponsor-actions { display: grid; grid-template-columns: 1fr 1fr; }
     .lifegame-sponsor-actions .sponsor-save-btn { grid-column: 1 / -1; }
   }
-  /* 1줄당 3명씩 보이는 그리드(StreamBet-Market 관리 탭의 "인증된 스트리머" 그리드와
+  /*  1줄당 3명씩 보이는 그리드(StreamBet-Market 관리 탭의 "인증된 스트리머" 그리드와
      동일한 패턴). 대기 신청·인증된 스트리머 목록 둘 다 같은 카드형 레이아웃을 쓴다. */
   #verificationPendingList, #verificationVerifiedList {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
@@ -257,7 +257,7 @@
   .onyu-review-actions button.danger { border-color: rgba(226,85,79,.5); color: #b3433e; }
   .onyu-review-actions button:disabled { opacity: .45; cursor: wait; }
   @media (max-width: 640px) { .onyu-review-row { grid-template-columns: 1fr; } }
-  /* 1줄당 2건씩, 스크롤 한 화면엔 6줄(=12건)까지만 보이는 스크롤박스 */
+  /*  1줄당 2건씩, 스크롤 한 화면엔 6줄(=12건)까지만 보이는 스크롤박스 */
   #auditLogList {
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
     max-height: 460px; overflow-y: auto; padding-right: 4px;
@@ -295,7 +295,7 @@
   /* 통계 섹션 공용 — "이름 + 지표 여러 개" 목록(갤러리 통계 등)을 verif-row와
      같은 카드 행 언어로 표현 */
   .stat-row-list { display: flex; flex-direction: column; gap: 6px; }
-  /* 항목이 많아질 수 있는 목록(인생게임 엔딩·선택지 로그 등)용 - #auditLogList와
+  /*  항목이 많아질 수 있는 목록(인생게임 엔딩·선택지 로그 등)용 - #auditLogList와
      같은 스크롤박스 관례. 항목이 적을 땐 그냥 안 넘쳐서 스크롤이 안 생긴다. */
   .stat-row-list-scroll { max-height: 400px; overflow-y: auto; padding-right: 4px; }
   .stat-row-item {
@@ -312,7 +312,7 @@
   .stat-metric .unit { display: block; font-size: 10px; color: var(--ink-mute); margin-top: 1px; }
   .stat-row-item .date { flex-shrink: 0; min-width: 68px; text-align: right; font-size: 11px; color: var(--ink-mute); }
 
-  /* 10번 — 페이지별 접속자 분석. 시간대별 최고 접속자 수를 표 대신
+  /*  10번 — 페이지별 접속자 분석. 시간대별 최고 접속자 수를 표 대신
      앱별 스파크라인 카드로 보여준다(추세를 표보다 한눈에 파악하기 위함) */
   .sparkline-card {
     border: 1px solid var(--sub-border); border-radius: 14px; background: var(--sub); box-shadow: var(--sub-hi);
@@ -325,7 +325,7 @@
   .sparkline-head .peak b { color: #e8462c; font-size: 13.5px; font-weight: 700; }
   .sparkline-svg { display: block; width: 100%; height: 46px; }
 
-  /* 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market 관리 탭과 동일하게
+  /*  17번 — 관리자·인증 스트리머 채팅. StreamBet-Market 관리 탭과 동일하게
      최신 메시지가 아래에 오도록 column-reverse를 쓴다. */
   .admin-chat-list {
     display: flex; flex-direction: column-reverse; gap: 10px;
@@ -396,7 +396,7 @@
   .promo-generate-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .promo-generate-row .hint { margin: 0; }
 
-  /* 21번 — 배팅시장 마켓 관리 */
+  /*  21번 — 배팅시장 마켓 관리 */
   /* .verif-info span { display:block } 규칙이 명시성(0,1,1)에서 이 규칙(0,1,0)을
      이겨서 상태 태그가 알약이 아니라 풀너비 막대로 렌더링되던 버그 — 조상 클래스를
      붙여 명시성을 맞춘다 */
@@ -453,7 +453,7 @@
   .game-status-tag.active { background: rgba(63,182,137,0.14); color: #3fb689; border: 1px solid rgba(63,182,137,0.35); }
   .game-status-tag.frozen { background: rgba(226,85,79,0.14); color: #e2554f; border: 1px solid rgba(226,85,79,0.4); }
 
-  /* 토글 스위치 - 체크박스를 시각적으로 슬라이딩 필 모양으로 감싼다 */
+  /*  토글 스위치 - 체크박스를 시각적으로 슬라이딩 필 모양으로 감싼다 */
   .toggle-switch { position: relative; display: inline-block; width: 42px; height: 24px; flex-shrink: 0; }
   .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
   .toggle-slider {
@@ -635,7 +635,7 @@
   }
 </style>
 </head>
-<body>
+<body data-ss-series="admincenter-2026" data-ssroom="skftod2-adm">
 
 <!-- 19번 — 세션 빠른 이동. soop-stock-market의 #admin-quicknav 패턴을 그대로
      이식(고정 위치, 넓은 화면에서만 노출, 클릭 시 스크롤). -->
@@ -670,7 +670,7 @@
     <div id="sessionLauncherStatus" class="session-launcher-status" role="status" aria-live="polite"></div>
   </section>
 
-  <!-- 관리자 전용 화면 -->
+  <!--  관리자 전용 화면 -->
   <div id="adminShell" hidden>
     <h2 class="card-group-header">신원·권한</h2>
     <div class="card" id="section-user-search">
@@ -1094,7 +1094,7 @@
     </div>
   </div>
 
-  <!-- 모니터링 카드는 관리자 전용 독립 래퍼다. -->
+  <!--  모니터링 카드는 관리자 전용 독립 래퍼다. -->
   <div id="monitoringShell" hidden>
     <h2 class="card-group-header">서비스 일시정지</h2>
     <div class="card" id="section-service-pause-all">
@@ -1306,11 +1306,11 @@
     getDatabase, ref, onValue, onChildAdded, onChildRemoved, get, query, limitToLast, orderByChild, equalTo,
   } from 'https://www.gstatic.com/firebasejs/12.16.0/firebase-database.js';
 
-  // 07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
+  //  07번 — 주식시장·배팅시장과 동일한 soop-stock-market 프로젝트를 그대로 공유한다
   // (Auth·인증 스트리머 판별 전부 이 프로젝트 기준). 이 페이지 전용 Web App을 새로
-  // 등록하지 않고 기존 config를 재사용해도 기능상 문제 없음(analytics 식별용 appId만
+  //  등록하지 않고 기존 config를 재사용해도 기능상 문제 없음(analytics 식별용 appId만
   // 다르면 되는데, 이 페이지는 내부 운영툴이라 굳이 분리하지 않았다).
-  // RTDB는 클라이언트에서 직접 읽고 쓰지 않는다 - 역할 판별(관리자/인증 스트리머)과
+  //  RTDB는 클라이언트에서 직접 읽고 쓰지 않는다 - 역할 판별(관리자/인증 스트리머)과
   // 위임 권한 조회/변경 전부 functions/index.js(admincenter 코드베이스)의 Cloud
   // Functions를 통해서만 이루어진다.
   const firebaseConfig = {
@@ -1327,8 +1327,8 @@
   const auth = getAuth(app);
   const functions = getFunctions(app, 'us-central1');
   const db = getDatabase(app);
-  // 전용 주식시장 DB를 실제 primary로 전환하는 배포에서만 true로 바꾼다.
-  // adminCenter/stockMarketDatabaseMigration은 브라우저에 비공개이므로, 관리자
+  //  전용 주식시장 DB를 실제 primary로 전환하는 배포에서만 true로 바꾼다.
+  //  adminCenter/stockMarketDatabaseMigration은 브라우저에 비공개이므로, 관리자
   // 페이지가 그 경로를 직접 읽어 임의 전환하지 않는다.
   const STOCK_MARKET_DATABASE_PRIMARY = true;
   const stockDb = getDatabase(app, 'https://soop-stock-market-rtdb.firebaseio.com');
@@ -1433,8 +1433,8 @@
   document.getElementById('viewerBugReportsMore').addEventListener('click', () => refreshViewerBugReports(true));
   const getAdminSessionSummaryFn = httpsCallable(functions, 'getAdminSessionSummary');
   // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market이 이미 배포한 함수를 그대로
-  // httpsCallable로 부른다(06번 원칙 — codebase가 달라도 같은 프로젝트 안에서는
-  // 함수 이름만 맞으면 호출 가능, 24번에서 재확인된 사실).
+  //  httpsCallable로 부른다(06번 원칙 — codebase가 달라도 같은 프로젝트 안에서는
+  //  함수 이름만 맞으면 호출 가능, 24번에서 재확인된 사실).
   const sendAdminChatMessageFn = httpsCallable(functions, 'sendAdminChatMessage');
   const streamerFanPageAdminViewerSubscriptionRequestsFn = httpsCallable(functions, 'streamerFanPageAdminViewerSubscriptionRequests');
   const setDevbarLinkFn = httpsCallable(functions, 'setDevbarLink');
@@ -1627,7 +1627,7 @@
     });
   });
   const clearAllStreamerPromoCompletionFn = httpsCallable(functions, 'clearAllStreamerPromoCompletion');
-  // 21번 — 배팅시장 마켓 관리. StreamBet-Market이 이미 배포한 함수를 그대로 호출한다
+  //  21번 — 배팅시장 마켓 관리. StreamBet-Market이 이미 배포한 함수를 그대로 호출한다
   // (17번 채팅·22번 게시글 홍보 현황과 동일한 "codebase가 달라도 함수 이름만 맞으면
   // 호출 가능" 패턴).
   const reviewProposalFn = httpsCallable(functions, 'reviewProposal');
@@ -1664,19 +1664,19 @@
   // 인증 스트리머 관리 1단계 — 새 승인/거절/해제 로직을 만들지 않고, 같은 프로젝트에
   // 이미 배포돼 있는 각 게임의 기존 Cloud Functions를 그대로 호출한다(같은
   // soop-stock-market 프로젝트를 공유하므로 어느 저장소가 배포했든 이름만 알면 호출 가능).
-  // 배팅시장: 기능별로 이름 붙은 함수. 주식시장: adminAction 하나가 action 문자열로 분기.
+  //  배팅시장: 기능별로 이름 붙은 함수. 주식시장: adminAction 하나가 action 문자열로 분기.
   const bmApproveVerificationFn = httpsCallable(functions, 'approveVerification');
   const bmConfirmVerificationByNoteFn = httpsCallable(functions, 'confirmBettingVerificationByNote');
   const bmRejectVerificationFn = httpsCallable(functions, 'rejectVerification');
   const bmRevokeVerificationFn = httpsCallable(functions, 'revokeVerification');
   const smAdminActionFn = httpsCallable(functions, 'adminAction');
-  // 07번 4단계 — adminAction 디스패처 전체를 여는 대신, 위임 권한(viewMonitoring)
+  //  07번 4단계 — adminAction 디스패처 전체를 여는 대신, 위임 권한(viewMonitoring)
   // 으로 통계 조회만 열어주는 soop-stock-market의 전용 함수를 따로 호출한다.
   const smGetOverviewStatsForMonitoringFn = httpsCallable(functions, 'getOverviewStatsForMonitoring');
-  // 16번/20번 — 유저 검색/상세조회/정지. adminLookupUser·banAccount·unbanAccount는
-  // StreamBet-Market이 이미 배포한 함수를 그대로 호출한다(새 로직 아님).
+  //  16번/20번 — 유저 검색/상세조회/정지. adminLookupUser·banAccount·unbanAccount는
+  //  StreamBet-Market이 이미 배포한 함수를 그대로 호출한다(새 로직 아님).
   const bmAdminLookupUserFn = httpsCallable(functions, 'adminLookupUser');
-  // 11번 — 전체 통계 요약. StreamBet-Market이 이미 배포한 함수를 그대로
+  //  11번 — 전체 통계 요약. StreamBet-Market이 이미 배포한 함수를 그대로
   // 호출한다(새 계산 없음). soop-stock-market은 adminAction의 getOverviewStats
   // 액션으로 이미 있는 smAdminActionFn을 그대로 재사용.
   const bmGetAdminDashboardStatsFn = httpsCallable(functions, 'getAdminDashboardStats');
@@ -1993,8 +1993,8 @@
   // 역할 판별(관리자/인증 스트리머)과 위임 권한 조회를 한 번의 서버 함수 호출로 처리한다
   // (getAdminCenterState가 role까지 함께 반환 - 클라이언트는 streamerVerifications를
   // 직접 조회하지 않는다). 실시간 구독(onValue) 대신 단발성 호출 방식이라, 권한을
-  // 바꾼 뒤에는 다시 이 함수를 불러 최신 상태를 반영한다(의도된 트레이드오프 - 이
-  // 페이지는 실시간 동기화가 꼭 필요하진 않다).
+  //  바꾼 뒤에는 다시 이 함수를 불러 최신 상태를 반영한다(의도된 트레이드오프 - 이
+  //  페이지는 실시간 동기화가 꼭 필요하진 않다).
   async function refreshAdminCenterState() {
     try {
       const result = await getAdminCenterStateFn();
@@ -2159,8 +2159,8 @@
       console.warn('세션 대기 요약 조회 실패:', e);
       sessionSummary = {};
     }
-    // Lightweight listeners may have received their initial snapshots while
-    // the callable was in flight. Prefer their live value once all are ready.
+    //  Lightweight listeners may have received their initial snapshots while
+    //  the callable was in flight. Prefer their live value once all are ready.
     applyReviewSummarySnapshotIfReady();
     renderSessionLauncher();
   }
@@ -2691,7 +2691,7 @@
       if (streamerVerificationRequestSignature === signature) return;
       const hadPreviousSnapshot = streamerVerificationRequestSignature !== null;
       streamerVerificationRequestSignature = signature;
-      // The initial overview is loaded when its session is opened. After this
+      //  The initial overview is loaded when its session is opened. After this
       // listener's initial snapshot, refresh the combined view on later changes
       // without periodic full-list polling.
       if (hadPreviousSnapshot) refreshVerificationOverview(true);
@@ -2731,7 +2731,7 @@
     postStreamerVerificationInboxWatch([]);
   }
 
-  // 인증 스트리머 관리 1단계 — 조회는 admin-center 전용 함수 하나로 모아서 받고,
+  //  인증 스트리머 관리 1단계 — 조회는 admin-center 전용 함수 하나로 모아서 받고,
   // 승인/거절/해제는 각 게임의 기존 함수를 source 태그로 그대로 라우팅한다.
   async function refreshVerificationOverview(silent) {
     if (!silent) {
@@ -2754,7 +2754,7 @@
     renderPendingList();
     renderVerifiedList();
     // 로그인 시 한 번 조회한 요약 배지는 실제 인증 목록이 갱신될 때 함께 동기화한다.
-    // 신청 승인/거절·실시간 변경 뒤에도 완료된 대기 알림이 남지 않게 한다.
+    //  신청 승인/거절·실시간 변경 뒤에도 완료된 대기 알림이 남지 않게 한다.
     sessionSummary.identity = pendingRequests.length > 0;
     renderSessionLauncher();
   }
@@ -3292,11 +3292,11 @@
     verifiedStreamers.forEach(function (v) {
       const row = document.createElement('div');
       row.className = 'verif-row';
-      // 해제는 이제 두 경로를 전부 시도한다: soopId가 있으면 배팅시장 함수(공유
-      // streamerVerifications + 배팅시장 미러 인덱스 정리)도 같이 부르고,
+      //  해제는 이제 두 경로를 전부 시도한다: soopId가 있으면 배팅시장 함수(공유
+      //  streamerVerifications + 배팅시장 미러 인덱스 정리)도 같이 부르고,
       // 주식시장 쪽 자체 플래그(users/{uid}/streamerVerified)는 soopId 유무와
       // 무관하게 항상 정리한다 - 배팅시장에서만 해제하면 주식시장 쪽 플래그가
-      // 남아 "보호된 계정" 대우가 계속되던 문제를 여기서 같이 해결한다.
+      //  남아 "보호된 계정" 대우가 계속되던 문제를 여기서 같이 해결한다.
       const soopIdText = v.soopId ? 'SOOP: ' + escapeHtml(v.soopId) : 'SOOP 아이디 미기재(주식시장 쪽 인증)';
       row.innerHTML =
         '<div class="verif-info"><b>' + escapeHtml(v.nickname) + '</b>' +
@@ -3329,10 +3329,10 @@
     });
   }
 
-  // 해제는 두 시스템에 걸쳐 있을 수 있는 상태를 전부 정리해야 한다: soopId가 있으면
-  // 배팅시장 함수(공유 streamerVerifications + 배팅시장 미러 인덱스)를 부르고,
+  //  해제는 두 시스템에 걸쳐 있을 수 있는 상태를 전부 정리해야 한다: soopId가 있으면
+  //  배팅시장 함수(공유 streamerVerifications + 배팅시장 미러 인덱스)를 부르고,
   // 주식시장 자체 플래그(users/{uid}/streamerVerified)는 항상 별도로 정리한다.
-  // 한쪽이 실패해도(예: 그 uid가 주식시장 계정이 아예 없는 경우) 나머지 정리는
+  //  한쪽이 실패해도(예: 그 uid가 주식시장 계정이 아예 없는 경우) 나머지 정리는
   // 계속 진행하고, 둘 다 실패했을 때만 사용자에게 에러를 보여준다.
   function revokeStreamer(v) {
     if (!window.confirm('"' + v.nickname + '" 인증을 해제할까요?')) return;
@@ -3352,7 +3352,7 @@
   }
 
   // 감사 로그 통합 — 배팅시장 bettingMarket/auditLog + 주식시장 adminAuditLog(이번에
-  // 처음 만든 것, 아직 스트리머 인증 관련 액션만 기록)를 서버에서 합쳐 받아 그대로
+  //  처음 만든 것, 아직 스트리머 인증 관련 액션만 기록)를 서버에서 합쳐 받아 그대로
   // 표시한다. 실시간 구독이 아니라 새로고침 버튼으로 다시 불러오는 방식(다른 카드와
   // 동일한 트레이드오프).
   async function refreshAuditLog() {
@@ -3388,7 +3388,7 @@
   }
 
   // 배팅시장 스킨 구매 내역 - 12번 유저 상세 조회가 쓰는 getPurchaseOverview를
-  // itemType='skin'으로 필터링해 그대로 재사용한다(새 계산 없음, 06번 원칙).
+  //  itemType='skin'으로 필터링해 그대로 재사용한다(새 계산 없음, 06번 원칙).
   async function refreshSkinPurchases() {
     skinPurchasesListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     try {
@@ -3421,7 +3421,7 @@
   }
 
   // 게임 콘텐츠 동결 상태 — 서비스 점검(다운)이 아니라 "신규 콘텐츠 개발을 잠시
-  // 멈췄다"는 라벨. 토글 변경도 조회처럼 단발성 호출 방식(실시간 구독 없음)이라
+  //  멈췄다"는 라벨. 토글 변경도 조회처럼 단발성 호출 방식(실시간 구독 없음)이라
   // 성공 후 다시 조회해서 최신 상태를 반영한다.
   async function refreshSeriesConfig() {
     seriesConfigListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
@@ -3636,7 +3636,7 @@
       row.querySelector('button').addEventListener('click', function () { changeServicePauseOne(service, !paused); });
       servicePauseAllListEl.appendChild(row);
     });
-    // 주식시장은 백그라운드 작업까지 함께 바뀌므로 상태만 보여 주고 변경은 아래 카드에서 한다.
+    //  주식시장은 백그라운드 작업까지 함께 바뀌므로 상태만 보여 주고 변경은 아래 카드에서 한다.
     if (servicePauseState) {
       const stockPaused = servicePauseState.active;
       const stockRow = document.createElement('div');
@@ -3674,9 +3674,9 @@
 
 
   // 08번 — devbar 구성. GAME_CATALOG에 종속시키지 않고 devbarLinks 노드에 실제
-  // 있는 항목만으로 화면을 그린다 — 새 게임이 나오면 "새 링크 추가" 폼으로 관리자가
+  //  있는 항목만으로 화면을 그린다 — 새 게임이 나오면 "새 링크 추가" 폼으로 관리자가
   // 바로 항목을 늘릴 수 있어야 하기 때문(코드 배포 없이 계속 추가 가능). devbarLinks
-  // 노드는 .read:true라 Cloud Function 없이 클라이언트가 직접 조회한다(쓰기/삭제만
+  //  노드는 .read:true라 Cloud Function 없이 클라이언트가 직접 조회한다(쓰기/삭제만
   // setDevbarLink/deleteDevbarLink를 거침).
   let devbarLinksData = {};
 
@@ -3775,8 +3775,8 @@
     devbarLinksListEl.appendChild(addRow);
   }
 
-  // Adult Image Generator 링크는 관리자 전용 callable을 통해서만 저장한다.
-  // 링크 자체와 메모·정렬 순서를 한 번에 저장해 드래그 중 일부 항목만 반영되는
+  //  Adult Image Generator 링크는 관리자 전용 callable을 통해서만 저장한다.
+  //  링크 자체와 메모·정렬 순서를 한 번에 저장해 드래그 중 일부 항목만 반영되는
   // 상태를 피한다. 새 세션을 처음 열면 서버가 기본 목록을 자동으로 준비한다.
   let adultImageGeneratorLinks = [];
 
@@ -3888,7 +3888,7 @@
   });
 
   // 22번 — 게시글 홍보 현황(게임 전체로 확장). 단발성 조회(실시간 구독 없음) —
-  // 08번 콘텐츠 동결 카드와 동일한 트레이드오프(변경 후 다시 조회해서 반영).
+  //  08번 콘텐츠 동결 카드와 동일한 트레이드오프(변경 후 다시 조회해서 반영).
   async function refreshPromotedContent() {
     promotedContentListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     try {
@@ -5246,8 +5246,8 @@
     });
   });
 
-  // 24번 — 디스코드 웹훅 URL 설정. RTDB가 아니라 Secret Manager에 저장되며(서버
-  // 쪽 setDiscordWebhookUrl 참고), 값 자체는 여기서도 절대 다시 조회하지 않는다 —
+  //  24번 — 디스코드 웹훅 URL 설정. RTDB가 아니라 Secret Manager에 저장되며(서버
+  //  쪽 setDiscordWebhookUrl 참고), 값 자체는 여기서도 절대 다시 조회하지 않는다 —
   // "설정됨/설정 안 됨" 상태만 보여준다.
   async function refreshDiscordWebhookStatus() {
     discordWebhookStatusEl.textContent = '확인 중...';
@@ -5349,7 +5349,7 @@
 
   // 세 게임의 기존 조회 함수를 병렬로 호출해서 화면 하나에 모은다(06번 원칙 -
   // 새 계산 없이 기존 함수를 그대로 라우팅). 하나가 실패해도(예: 그 uid가
-  // 주식시장 계정이 없는 경우) 나머지는 그대로 보여준다.
+  //  주식시장 계정이 없는 경우) 나머지는 그대로 보여준다.
   async function loadUserDetail(uid) {
     userDetailViewEl.hidden = false;
     userDetailBasicEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
@@ -5368,10 +5368,10 @@
     renderUserDetailPurchases(purchaseResult);
   }
 
-  // 20번 2단계 — 두 게임의 banned 필드(둘 다 같은 공유 원장을 보고 있으므로 all
+  //  20번 2단계 — 두 게임의 banned 필드(둘 다 같은 공유 원장을 보고 있으므로 all
   // 여부는 어느 쪽에서 왔든 동일하다)를 합쳐 "전체 게임 정지" 여부만 따로 보여주고,
-  // 그 격상/해제 버튼을 제공한다. 게임별 정지/해제는 각 게임 섹션(배팅시장/주식시장)
-  // 자체 버튼이 담당 - 여긴 all 스코프만 다룬다.
+  //  그 격상/해제 버튼을 제공한다. 게임별 정지/해제는 각 게임 섹션(배팅시장/주식시장)
+  //  자체 버튼이 담당 - 여긴 all 스코프만 다룬다.
   function renderUserDetailBanStatus(uid, bmResult, smResult) {
     const bmBanned = bmResult.status === 'fulfilled' ? (bmResult.value.data || {}).banned : null;
     const smBanned = smResult.status === 'fulfilled' ? (smResult.value.data || {}).banned : null;
@@ -5513,7 +5513,7 @@
     card_banner: '카드 배너 신청', pin: '고정노출 신청', relay_room: '중계방 신청', treasure_chest: '보물상자 구매', treasure_chest_cash: '보물상자 구매(통합 캐시)', treasure_chest_open: '보물상자 개봉', cash_charge: '자산 충전 신청',
     play_time: '플레이타임 충전', lottery: '복권 구매', unfreeze_donation: '동결 해제(후원) 신청',
   };
-  // 배너 5종(2026-09-09부터 방송 후원 확인 방식)은 amount 단위가 별풍선 개수라 "원"이 아니다.
+  //  배너 5종(2026-09-09부터 방송 후원 확인 방식)은 amount 단위가 별풍선 개수라 "원"이 아니다.
   const PURCHASE_ITEM_DONATION_TYPES = new Set(['banner', 'chart_banner', 'card_banner', 'pin', 'relay_room']);
   function renderUserDetailPurchases(purchaseResult) {
     if (purchaseResult.status !== 'fulfilled') {
@@ -5717,8 +5717,8 @@
   // ENDINGS 배열 + index.js의 INSTANT_ENDING_BUILDERS(재산·인기·행복·관계
   // 0이 되면 즉시 종료되는 collapse/bankruptcy/obscurity/despair/isolation
   // 5종, ENDINGS 배열 밖에 따로 있음)와 맞춰둔 표시용 매핑이라, 그쪽에서
-  // 엔딩을 추가·개명하면 여기도 같이 갱신해야 한다 - 2026-08 한 세션에서만
-  // 6종 → 16종으로 늘어난 적이 있어 "드물다"고 방심하면 안 된다. 매핑에
+  //  엔딩을 추가·개명하면 여기도 같이 갱신해야 한다 - 2026-08 한 세션에서만
+  //  6종 → 16종으로 늘어난 적이 있어 "드물다"고 방심하면 안 된다. 매핑에
   // 없는 id는 화면에 원본 id가 그대로 노출되니(예: "bankruptcy"), 이 목록에
   // 없는 이름이 보이면 누락 신호로 보고 game-data.js를 다시 대조할 것.
   const LIFEGAME_ENDING_LABELS = {
@@ -6282,12 +6282,12 @@
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════
-  // 13·14·15·18번 — 실시간 검수 큐 + 통합 배지
+  //  ═══════════════════════════════════════════════════════════════
+  //  13·14·15·18번 — 실시간 검수 큐 + 통합 배지
   //
   // 13/14/15의 큐 노드는 09번 관례대로 관리자 uid 기준으로 .read가 열려
   // 있으므로, 여기서만 예외적으로 RTDB를 직접 onValue 구독한다(쓰기는
-  // 여전히 전부 기존 Cloud Functions를 통해서만 한다).
+  //  여전히 전부 기존 Cloud Functions를 통해서만 한다).
   // ═══════════════════════════════════════════════════════════════
   let marketReports = {};
   let nicknameReports = {};
@@ -6297,7 +6297,7 @@
   const purchaseQueueStatusData = {}; // path -> status -> RTDB raw object
 
   // 신규 배너/카드배너/차트배너/고정/중계방 신청은 통합 구독 이용권이며,
-  // 과거 별풍선 신청도 같은 큐에서 결제 방식과 함께 검수한다.
+  //  과거 별풍선 신청도 같은 큐에서 결제 방식과 함께 검수한다.
   const PURCHASE_QUEUE_SOURCES = [
     { path: 'bettingMarket/chestPurchaseRequests', label: '보물상자 구매(배팅시장)', kind: 'bmChest' },
     { path: 'chartBannerRequests', label: '차트 배너 신청', kind: 'chartBanner', source: 'stock' },
@@ -6402,8 +6402,8 @@
     else stopReviewSummaryMonitoring();
   }
 
-  // 17번 — 관리자·인증 스트리머 채팅. StreamBet-Market의 js/admin-chat.js와 동일한
-  // 패턴(limitToLast(200) 구독, column-reverse로 최신이 아래)을 그대로 재사용한다.
+  //  17번 — 관리자·인증 스트리머 채팅. StreamBet-Market의 js/admin-chat.js와 동일한
+  //  패턴(limitToLast(200) 구독, column-reverse로 최신이 아래)을 그대로 재사용한다.
   let adminChatSubscribed = false;
   function startAdminChatSubscription() {
     if (adminChatSubscribed) return;
@@ -6460,7 +6460,7 @@
     if (e.key === 'Enter') { e.preventDefault(); sendAdminChatMessage(); }
   });
 
-  // 21번 — 배팅시장 마켓 관리. bettingMarket/markets는 이미 인증된 유저 전원에게
+  //  21번 — 배팅시장 마켓 관리. bettingMarket/markets는 이미 인증된 유저 전원에게
   // .read가 열려 있고(공개 피드용), stocks도 이미 .read:true라 새 RTDB 규칙이
   // 전혀 필요 없다 - StreamBet-Market의 기존 함수만 그대로 호출한다.
   let marketManagementSubscribed = false;
@@ -6580,11 +6580,11 @@
     });
   }
 
-  // 판정 대상 outcome은 실시간 갱신(totalPool 등) 때마다 목록 전체를 다시 그리면 안 된다
-  // (선택 중이던 라디오·열려있던 사유 선택창이 날아감) — status/pendingSettlement/
-  // minParticipantsOverride처럼 실제 의사결정에 영향을 주는 필드만으로 서명을 만들어
+  //  판정 대상 outcome은 실시간 갱신(totalPool 등) 때마다 목록 전체를 다시 그리면 안 된다
+  //  (선택 중이던 라디오·열려있던 사유 선택창이 날아감) — status/pendingSettlement/
+  //  minParticipantsOverride처럼 실제 의사결정에 영향을 주는 필드만으로 서명을 만들어
   // 그게 바뀔 때만 다시 그린다. 그래서 이 화면은 의도적으로 실시간 배당/풀 금액을
-  // 보여주지 않는다(판정에는 "실제로 누가 이겼는가"만 필요하고 배당은 필요 없음).
+  //  보여주지 않는다(판정에는 "실제로 누가 이겼는가"만 필요하고 배당은 필요 없음).
   function renderMarketManageList() {
     const entries = Object.keys(marketsCache)
       .filter(function (id) { return ['open', 'closed', 'pendingSettlement'].indexOf(marketsCache[id].status) > -1; })
@@ -6812,7 +6812,7 @@
     activateSession('review', { scrollTarget: targetId });
   });
 
-  // ─── 마켓 신고 ───
+  //  ─── 마켓 신고 ───
   function renderMarketReportList() {
     const entries = Object.keys(marketReports)
       .map(function (id) { return Object.assign({ id: id }, marketReports[id]); })
@@ -7263,7 +7263,7 @@
     });
   }
 
-  // ─── 종목 상장 신청 관리 ───
+  //  ─── 종목 상장 신청 관리 ───
   function renderListingRequestList() {
     const entries = Object.keys(listingRequests)
       .map(function (id) { return Object.assign({ id: id }, listingRequests[id]); })
@@ -7300,7 +7300,7 @@
   }
 
   // 19번 — 세션 빠른 이동. soop-stock-market의 QUICKNAV_ITEMS/renderQuickNav
-  // 패턴을 그대로 이식했다 - 카드가 추가/제거될 때마다 이 배열도 사람이 같이
+  //  패턴을 그대로 이식했다 - 카드가 추가/제거될 때마다 이 배열도 사람이 같이
   // 고쳐야 한다(자동으로 늘어나지 않음, soop-stock-market도 동일한 한계).
   // 23번 — 카드 그룹(신원·권한/모니터링/검수·승인/콘텐츠·현황/사이트 설정)과 목차
   // 순서를 일치시킨다. group이 있는 항목은 목차에서도 그룹 제목을 겸해 보여준다
@@ -7363,9 +7363,9 @@
     quicknavEl.classList.add('visible');
   }
 
-  // 참고 디자인(CodePen GSAP 랜딩 템플릿)의 스크롤 등장 연출을 세션 카드에 이식.
+  //  참고 디자인(CodePen GSAP 랜딩 템플릿)의 스크롤 등장 연출을 세션 카드에 이식.
   // hidden 셸이 열릴 때마다(render()가 여러 번 호출될 수 있음) 아직 초기화 안 된
-  // 카드만 골라 1회성으로 애니메이션을 붙이고, 방금 보이게 된 카드의 위치를
+  //  카드만 골라 1회성으로 애니메이션을 붙이고, 방금 보이게 된 카드의 위치를
   // ScrollTrigger가 다시 잴 수 있도록 매번 refresh()한다.
   function revealCardsOnScroll() {
     if (typeof gsap === 'undefined' || typeof ScrollTrigger === 'undefined') return;
@@ -7415,7 +7415,7 @@
     revealCardsOnScroll();
   }
 
-  // 24번 — 디스코드 알림에 담긴 딥링크(URL 프래그먼트, 19번 앵커 id 재사용) 처리.
+  //  24번 — 디스코드 알림에 담긴 딥링크(URL 프래그먼트, 19번 앵커 id 재사용) 처리.
   // 로그인 전에는 카드가 전부 hidden이라 브라우저 기본 앵커 스크롤이 못 먹으므로,
   // 역할이 정해져 해당 셸이 보이게 된 시점에 직접 한 번만 스크롤한다.
   function handleDeepLink() {
@@ -7427,8 +7427,8 @@
     activateSession(sessionId, { skipHistory: true, scrollTarget: targetId });
   }
 
-  // 이 페이지는 공개 서비스가 아니라 내부 운영툴이므로, 다른 게임들과 달리 익명
-  // 자동 로그인을 하지 않는다 - 실제 Google 계정 로그인 전에는 아무것도 보여주지 않는다.
+  //  이 페이지는 공개 서비스가 아니라 내부 운영툴이므로, 다른 게임들과 달리 익명
+  //  자동 로그인을 하지 않는다 - 실제 Google 계정 로그인 전에는 아무것도 보여주지 않는다.
   onAuthStateChanged(auth, async function (user) {
     const nextUser = (user && !user.isAnonymous) ? user : null;
     if (currentUser && (!nextUser || currentUser.uid !== nextUser.uid)) {
