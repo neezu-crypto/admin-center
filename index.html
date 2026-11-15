@@ -4790,11 +4790,10 @@
     if (promoGoalRun !== goalRun) return;
     goalRun.phase = 'refreshing';
     renderPromoBatchStatus({ status: 'goal-refreshing' });
-    const refreshed = await listStreamerPromoLinksFn();
+    const refreshed = await listStreamerPromoLinksFn({ lite: true });
     if (promoGoalRun !== goalRun) return;
     const freshStreamers = Array.isArray(refreshed.data && refreshed.data.streamers) ? refreshed.data.streamers : [];
     renderStreamerPromoLinksList(freshStreamers, refreshed.data.recentOpened || null);
-    renderStreamerPromoUnlistedList(refreshed.data.unlistedStreamers || [], refreshed.data.unlistedNicknameUnavailableCount || 0);
 
     const completedCount = countCompletedStreamerPromoItems(freshStreamers);
     const completedThisBatch = Math.max(0, Number(completedBatchState && completedBatchState.completedCount) || 0);
@@ -4871,7 +4870,7 @@
     streamerPromoBatchStartBtn.disabled = true;
     streamerPromoBatchStatusEl.textContent = '최신 목록과 완료 상태를 확인하는 중…';
     try {
-      const refreshed = await listStreamerPromoLinksFn();
+      const refreshed = await listStreamerPromoLinksFn({ lite: true });
       const freshStreamers = Array.isArray(refreshed.data && refreshed.data.streamers) ? refreshed.data.streamers : [];
       renderStreamerPromoLinksList(freshStreamers, refreshed.data.recentOpened || null);
       const candidates = getStreamerPromoBatchCandidates(freshStreamers);
