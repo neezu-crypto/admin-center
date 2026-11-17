@@ -2830,44 +2830,48 @@
       reply({ ok: false, reason: 'no-matching-pending-request', cached: true, diagnosticReasons: [] });
       return;
     }
-    smAdminActionFn({
-      action: 'confirmStreamerVerificationByNote',
-      payload: { senderId: senderId, code: code, noteNo: noteNo },
-    }).then(function (result) {
-      const first = result && result.data || {};
-      if (!first.ok && first.reason === 'no-matching-pending-request') {
-        const diagnosticReasons = [{ service: 'soop-stock-market', reason: String(first.diagnosticReason || 'unknown') }];
-        return bmConfirmVerificationByNoteFn({ senderId: senderId, code: code, noteNo: noteNo }).then(function (bettingResult) {
-          const second = bettingResult && bettingResult.data || {};
-          if (!second.ok && second.reason === 'no-matching-pending-request') {
-            diagnosticReasons.push({ service: 'streambet-market', reason: String(second.diagnosticReason || 'unknown') });
-            console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({
-              stage: 'server-rejected',
-              at: new Date().toISOString(),
-              details: { diagnosticReasons: diagnosticReasons },
-            }));
-            return Object.assign({}, second, { diagnosticReasons: diagnosticReasons });
-          }
-          if (!second.ok) {
-            diagnosticReasons.push({ service: 'streambet-market', reason: String(second.reason || 'unknown') });
-            console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({
-              stage: 'server-rejected',
-              at: new Date().toISOString(),
-              details: { diagnosticReasons: diagnosticReasons },
-            }));
-            return Object.assign({}, second, { diagnosticReasons: diagnosticReasons });
-          }
-          return second;
-        });
+    //  보낸 사람이 신청자인 서비스에만 묻는다(2026-11-18). 서버 판정 규칙과 같게, 계정 전환 신청은
+    // 보낸 사람이 달라도 코드로 맞출 수 있으므로 그런 신청이 있으면 그 서비스는 항상 묻는다.
+    //  화면 쪽 판정은 서버보다 넓게(놓치지 않게) 잡고, 최종 판정은 서버가 한다.
+    const now = Date.now();
+    const mayMatch = function (request, extra) {
+      if (request.status && request.status !== 'pending') return false;
+      if (!request.noteVerificationCodeHash || Number(request.noteVerificationCodeExpiresAt) <= now) return false;
+      if (extra && !extra(request)) return false;
+      return request.isSwitch === true || String(request.soopId || '').trim().toLowerCase() === senderId;
+    };
+    const askStock = stockNoteRequests.some(function (request) { return mayMatch(request); });
+    const askBetting = bettingNoteRequests.some(function (request) { return mayMatch(request, function (r) { return r.noteEligible === true; }); });
+    const skipped = { ok: false, reason: 'no-matching-pending-request', skippedWithoutServer: true };
+    const diagnosticReasons = [];
+    Promise.resolve().then(function () {
+      if (!askStock) return skipped;
+      return smAdminActionFn({
+        action: 'confirmStreamerVerificationByNote',
+        payload: { senderId: senderId, code: code, noteNo: noteNo },
+      }).then(function (result) { return result && result.data || {}; });
+    }).then(function (first) {
+      if (first.ok) return first;
+      if (askStock) diagnosticReasons.push({ service: 'soop-stock-market', reason: String(first.diagnosticReason || first.reason || 'unknown') });
+      if (first.reason && first.reason !== 'no-matching-pending-request') return Object.assign({}, first, { diagnosticReasons: diagnosticReasons });
+      if (!askBetting) {
+        if (!askStock) diagnosticReasons.push({ service: 'all', reason: 'sender-has-no-pending-request' });
+        return Object.assign({}, first, { diagnosticReasons: diagnosticReasons });
       }
-      if (!first.ok) {
+      return bmConfirmVerificationByNoteFn({ senderId: senderId, code: code, noteNo: noteNo }).then(function (bettingResult) {
+        const second = bettingResult && bettingResult.data || {};
+        if (!second.ok) diagnosticReasons.push({ service: 'streambet-market', reason: String(second.diagnosticReason || second.reason || 'unknown') });
+        return second.ok ? second : Object.assign({}, second, { diagnosticReasons: diagnosticReasons });
+      });
+    }).then(function (data) {
+      if (!data.ok && !data.skippedWithoutServer) {
         console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({
           stage: 'server-rejected',
           at: new Date().toISOString(),
-          details: { diagnosticReasons: [{ service: 'soop-stock-market', reason: String(first.diagnosticReason || first.reason || 'unknown') }] },
+          details: { diagnosticReasons: data.diagnosticReasons || [] },
         }));
       }
-      return first;
+      return data;
     }).then(function (data) {
       if (data.ok) {
         console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({ stage: 'server-approved', at: new Date().toISOString(), details: { senderId: senderId, noteNo: noteNo } }));
