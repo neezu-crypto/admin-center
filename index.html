@@ -1897,13 +1897,7 @@
     if (event.source !== window || event.origin !== location.origin || !data) return;
     if (data.__soopPromoExtensionReady === true) {
       postStreamerVerificationInboxWatch(stockNoteRequests.concat(bettingNoteRequests));
-      // Clear any feed/watch left by an older Admin Center or extension version.
-      window.postMessage({ __onyuGiftBackgroundMonitorStop: true }, location.origin);
-      return;
     }
-    if (data.__onyuGiftBackgroundMonitorStatus !== true) return;
-    const statusEl = document.getElementById('onyuGiftAutoWatchStatus');
-    if (statusEl) statusEl.textContent = '고점체크 후원 자동 감시·자동 승인이 중단되었습니다.';
   });
   window.postMessage({ __soopPromoExtensionProbe: true }, location.origin);
 
@@ -1985,6 +1979,42 @@
   let sessionSummary = {};
 
   const SOURCE_LABEL = { bettingMarket: '배팅시장', stockMarket: '주식시장' };
+  //  인증 신청 출처(예: life-game) 표시 이름: 디스코드 알림(admin-center 함수)과 같은 규칙.
+  //  devbar에 등록한 이름 → 아래 이름표 → 받은 값 그대로. devbar 목록은 처음 한 번만 읽는다.
+  const VERIFY_SOURCE_FALLBACK = {
+    'stock-market': '주식시장', 'life-game': '인생게임', 'streamer-fanpage': '팬페이지', 'streamer-gallery': '갤러리',
+    'streamer-messenger': '스트리머 메신저', 'streamer-webtoon': '스트리머 웹툰', 'onyu-vn': '온 이유', 'game-series-shop': '통합 상점·분양소',
+  };
+  let verifySourceDevbar = null;
+  let verifySourceDevbarLoading = null;
+  function loadVerifySourceDevbar() {
+    if (verifySourceDevbar || verifySourceDevbarLoading) return verifySourceDevbarLoading;
+    verifySourceDevbarLoading = get(ref(db, 'devbarLinks')).then(function (snap) {
+      verifySourceDevbar = snap.val() || {};
+    }).catch(function (error) {
+      console.warn('devbar 이름 조회 실패:', error);
+      verifySourceDevbar = {};
+    });
+    return verifySourceDevbarLoading;
+  }
+  function devbarRepoOf(url) {
+    try {
+      const parts = new URL(String(url || '')).pathname.split('/').filter(Boolean);
+      return { repo: (parts[0] || '').toLowerCase(), isRoot: parts.length <= 1 || /^index\.html?$/i.test(parts[1] || '') };
+    } catch (error) { return { repo: '', isRoot: false }; }
+  }
+  function verifySourceLabel(source) {
+    if (SOURCE_LABEL[source]) return SOURCE_LABEL[source];
+    const key = String(source || '').trim().toLowerCase() || 'stock-market';
+    const links = Object.values(verifySourceDevbar || {});
+    const matches = links.filter(function (link) {
+      const repo = devbarRepoOf(link && link.url).repo;
+      return repo && (repo === key || repo.endsWith('-' + key)) && String(link.label || '').trim();
+    });
+    const pick = matches.find(function (link) { return devbarRepoOf(link.url).isRoot; }) || matches[0];
+    if (pick) return String(pick.label).trim().slice(0, 40);
+    return VERIFY_SOURCE_FALLBACK[key] || ('알 수 없는 앱: ' + key.slice(0, 40));
+  }
 
   function signIn() {
     signInWithPopup(auth, new GoogleAuthProvider()).catch(function (err) {
@@ -1995,7 +2025,6 @@
   }
   authBtnEl.addEventListener('click', function () {
     if (currentUser) {
-      window.postMessage({ __onyuGiftBackgroundMonitorStop: true }, location.origin);
       signOut(auth);
       return;
     }
@@ -2773,6 +2802,12 @@
   }
   verificationRefreshBtn.addEventListener('click', refreshVerificationOverview);
 
+  const rejectedVerificationNotes = new Map();
+  function verificationNotePendingSignature() {
+    return stockNoteRequests.concat(bettingNoteRequests).map(function (request) {
+      return [request.id, request.requestedAt || 0, request.noteVerificationCodeExpiresAt || 0].join(':');
+    }).sort().join('|');
+  }
   window.addEventListener('message', function (event) {
     const data = event.data;
     if (event.source !== window || event.origin !== location.origin || !data ||
@@ -2785,6 +2820,14 @@
     const noteNo = String(data.noteNo || '').trim();
     if (!/^[a-z0-9]{2,20}$/.test(senderId) || !/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(code) || !/^\d{1,20}$/.test(noteNo)) {
       reply({ ok: false, reason: 'invalid-note-candidate' });
+      return;
+    }
+    //  이미 "맞는 신청 없음"으로 끝난 쪽지는 대기 신청 목록이 그대로면 서버에 다시 묻지 않는다(2026-11-18,
+    // 확장이 약 33초마다 같은 쪽지를 다시 보내 신청 하나에 서버 확인이 수십 번 생기던 문제).
+    const candidateKey = noteNo + ':' + code + ':' + senderId;
+    const pendingSignature = verificationNotePendingSignature();
+    if (rejectedVerificationNotes.get(candidateKey) === pendingSignature) {
+      reply({ ok: false, reason: 'no-matching-pending-request', cached: true, diagnosticReasons: [] });
       return;
     }
     smAdminActionFn({
@@ -2829,6 +2872,10 @@
       if (data.ok) {
         console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({ stage: 'server-approved', at: new Date().toISOString(), details: { senderId: senderId, noteNo: noteNo } }));
         refreshVerificationOverview(true);
+      }
+      if (!data.ok && data.reason === 'no-matching-pending-request') {
+        if (rejectedVerificationNotes.size > 200) rejectedVerificationNotes.clear();
+        rejectedVerificationNotes.set(candidateKey, pendingSignature);
       }
       reply({ ok: data.ok === true, reason: String(data.reason || ''), nickname: String(data.nickname || ''), isSwitch: data.isSwitch === true, diagnosticReasons: Array.isArray(data.diagnosticReasons) ? data.diagnosticReasons : [] });
     }).catch(function (error) {
@@ -3269,6 +3316,10 @@
   });
 
   function renderPendingList() {
+    if (pendingRequests.length && !verifySourceDevbar) {
+      const loading = loadVerifySourceDevbar();
+      if (loading) loading.then(renderPendingList);
+    }
     if (!pendingRequests.length) {
       verificationPendingListEl.innerHTML = '<div class="empty-state">대기 중인 신청이 없습니다.</div>';
       return;
@@ -3277,14 +3328,14 @@
     pendingRequests.forEach(function (r) {
       const row = document.createElement('div');
       row.className = 'verif-row';
-      const sourceLabel = SOURCE_LABEL[r.source] || r.source;
+      const sourceLabel = escapeHtml(verifySourceLabel(r.source));
       const soopIdText = r.soopId ? ' · SOOP: ' + escapeHtml(r.soopId) : '';
       const switchText = r.isSwitch ? ' · 계정 전환 요청' : '';
       const applicantUid = r.isSwitch && r.requesterUid ? r.requesterUid : r.uid;
       const existingUidText = r.isSwitch && r.existingUid ? ' · 기존 UID: ' + escapeHtml(String(r.existingUid).slice(0, 10)) : '';
       row.innerHTML =
         '<div class="verif-info"><b>' + escapeHtml(r.nickname) +
-        '<span class="source-tag ' + r.source + '">' + sourceLabel + '</span></b>' +
+        '<span class="source-tag ' + escapeHtml(String(r.source || '').replace(/[^A-Za-z0-9_-]/g, '')) + '">' + sourceLabel + '</span></b>' +
         '<span>uid: ' + escapeHtml(String(applicantUid || '').slice(0, 10)) + existingUidText + soopIdText + switchText + '</span></div>' +
         '<div class="verif-actions">' +
         '<button class="approve" type="button">승인</button>' +
@@ -7476,7 +7527,6 @@
   onAuthStateChanged(auth, async function (user) {
     const nextUser = (user && !user.isAnonymous) ? user : null;
     if (currentUser && (!nextUser || currentUser.uid !== nextUser.uid)) {
-      window.postMessage({ __onyuGiftBackgroundMonitorStop: true }, location.origin);
       stopStreamerVerificationRequestSubscription();
       stopFanpageSubscriptionSignalSubscription();
       resetSessionRuntime();
