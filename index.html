@@ -232,6 +232,10 @@
   }
   .verif-info b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .verif-info span { display: block; font-size: 11.5px; color: var(--ink-mute); margin-top: 2px; }
+  .verif-info .verif-hold { margin-top: 6px; padding: 7px 9px; border-radius: 8px; background: #fff6e0; border: 1px solid #f0d48a; color: #6b4e00; font-size: 12px; }
+  .verif-info .verif-hold b { white-space: normal; font-size: 12px; }
+  .verif-info .verif-hold ul { margin: 4px 0 4px 16px; padding: 0; }
+  .verif-info .verif-hold a { color: #8a5a00; font-weight: 700; }
   .source-tag {
     font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 20px;
     margin-left: 6px; vertical-align: middle;
@@ -2726,7 +2730,7 @@
         requests.push(Object.assign({ id: child.key }, child.val() || {}));
       });
       const signature = requests.map(function (request) {
-        return [request.id, request.source || '', request.requestedAt || 0, request.noteVerificationCodeExpiresAt || 0].join(':');
+        return [request.id, request.source || '', request.requestedAt || 0, request.noteVerificationCodeExpiresAt || 0, request.autoApprovalHold ? request.autoApprovalHold.at || 1 : 0].join(':');
       }).sort().join('|');
       stockNoteRequests = requests;
       postStreamerVerificationInboxWatch(stockNoteRequests.concat(bettingNoteRequests));
@@ -2873,6 +2877,7 @@
       }
       return data;
     }).then(function (data) {
+      if (!data.ok && data.held === true) refreshVerificationOverview(true); // 보류 이유가 대기 목록에 바로 보이게
       if (data.ok) {
         console.info('[SOOP 스트리머 인증 쪽지]', JSON.stringify({ stage: 'server-approved', at: new Date().toISOString(), details: { senderId: senderId, noteNo: noteNo } }));
         refreshVerificationOverview(true);
@@ -3337,10 +3342,18 @@
       const switchText = r.isSwitch ? ' · 계정 전환 요청' : '';
       const applicantUid = r.isSwitch && r.requesterUid ? r.requesterUid : r.uid;
       const existingUidText = r.isSwitch && r.existingUid ? ' · 기존 UID: ' + escapeHtml(String(r.existingUid).slice(0, 10)) : '';
+      //  2026-11-19: 쪽지로 본인 확인은 됐지만 자동 승인 기준(상장 또는 SOOP 방송 활동)에 못 미친 신청은 보류 이유를 보여 준다.
+      const hold = r.autoApprovalHold && Array.isArray(r.autoApprovalHold.reasons) ? r.autoApprovalHold : null;
+      const holdHtml = hold
+        ? '<div class="verif-hold"><b>✉️ 쪽지 본인 확인 완료 · 자동 승인 보류</b><ul>' +
+          hold.reasons.map(function (reason) { return '<li>' + escapeHtml(String(reason)) + '</li>'; }).join('') +
+          '</ul><a href="https://www.sooplive.com/station/' + encodeURIComponent(String(r.noteVerifiedBySoopId || r.soopId || '')) +
+          '" target="_blank" rel="noopener noreferrer">SOOP 방송국 확인 ↗</a></div>'
+        : '';
       row.innerHTML =
         '<div class="verif-info"><b>' + escapeHtml(r.nickname) +
         '<span class="source-tag ' + escapeHtml(String(r.source || '').replace(/[^A-Za-z0-9_-]/g, '')) + '">' + sourceLabel + '</span></b>' +
-        '<span>uid: ' + escapeHtml(String(applicantUid || '').slice(0, 10)) + existingUidText + soopIdText + switchText + '</span></div>' +
+        '<span>uid: ' + escapeHtml(String(applicantUid || '').slice(0, 10)) + existingUidText + soopIdText + switchText + '</span>' + holdHtml + '</div>' +
         '<div class="verif-actions">' +
         '<button class="approve" type="button">승인</button>' +
         '<button class="reject" type="button">거절</button>' +
