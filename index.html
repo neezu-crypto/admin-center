@@ -2248,7 +2248,7 @@
       } else if (sessionId === 'lifegame-player-uids') {
         jobs.push(refreshLifeGamePlayerUidList());
       } else if (sessionId === 'promotions') {
-        jobs.push(refreshStreamerPromoLinks(), watchStreamerPromoJobs());
+        jobs.push(refreshStreamerPromoLinks({ fresh: true }), watchStreamerPromoJobs());
       } else if (sessionId === 'settings') {
         jobs.push(refreshDiscordWebhookStatus());
       } else if (sessionId === 'devbar') {
@@ -4349,14 +4349,16 @@
     watchStreamerPromoJobs();
   }
 
-  async function refreshStreamerPromoLinks() {
+  //  fresh: 홍보 화면을 열 때·"명단 새로고침"을 누를 때만 종목 이름을 새로 대조한다(저장·체크 뒤 새로고침은 서버 10분 기억 사용).
+  async function refreshStreamerPromoLinks(options) {
+    const fresh = !!(options && options.fresh === true);
     streamerPromoLinksListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
     streamerPromoLinksStatusEl.textContent = '';
     streamerPromoUnlistedRefreshBtn.disabled = true;
     streamerPromoUnlistedCountEl.textContent = '종목 대조 중…';
     streamerPromoUnlistedListEl.textContent = '홍보 목록과 주식시장 종목을 대조하고 있습니다…';
     try {
-      const result = await listStreamerPromoLinksFn();
+      const result = await listStreamerPromoLinksFn(fresh ? { fresh: true } : undefined);
       renderStreamerPromoLinksList(result.data.streamers || [], result.data.recentOpened || null);
       renderStreamerPromoUnlistedList(result.data.unlistedStreamers || [], result.data.unlistedNicknameUnavailableCount || 0);
       const seedMigration = result.data.seedMigration || null;
@@ -5304,7 +5306,7 @@
   }
 
   streamerPromoLinksRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
-  streamerPromoUnlistedRefreshBtn.addEventListener('click', refreshStreamerPromoLinks);
+  streamerPromoUnlistedRefreshBtn.addEventListener('click', function () { refreshStreamerPromoLinks({ fresh: true }); });
   streamerPromoJobRefreshBtn.addEventListener('click', watchStreamerPromoJobs);
   streamerPromoJobsDeleteAllBtn.addEventListener('click', async function () {
     if (!window.confirm('완료 또는 실패한 홍보 백그라운드 작업 기록을 전부 삭제할까요? 서버 접수·처리 중 작업은 보존됩니다.')) return;
