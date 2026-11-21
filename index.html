@@ -1205,8 +1205,8 @@
   <!-- 페이지별 검수 카드는 관리자 전용 독립 래퍼다. -->
   <div id="reviewQueueShell" hidden>
     <div class="card" id="section-game-series-wallet">
-      <h2>통합 캐시 별풍선 충전·반환 검수</h2>
-      <p class="hint">후원 완료 알림을 보낸 신청만 실제 SOOP 후원 내역과 대조하세요. 후원자 닉네임·아이디와 별풍선 수량이 일치할 때만 1개당 1캐시를 지급합니다. 완료 알림은 자동 확인이 아닙니다. 미사용 캐시의 SOOP 반환 신청은 검수 중 잠기며, SOOP을 통한 반환이 실제로 확인된 뒤에만 완료 처리하세요. SOOP 반환 조건과 기간은 확정되지 않았으므로 보장하거나 기한을 안내하지 않습니다. 전환 전 현금 충전 기록은 보존되며 새 충전·반환 절차에는 사용하지 않습니다.</p>
+      <h2>통합 캐시 충전·환불 검수</h2>
+      <p class="hint">계좌이체 신청은 이체 완료 알림을 보낸 건만 실제 입금 내역의 입금자명·금액과 대조하고, 일치할 때만 100원당 1캐시를 지급합니다. 계좌이체 환불은 미사용 1캐시당 100원을 보낸 계좌로 직접 이체한 뒤 완료 처리하세요. 예전 별풍선 신청은 SOOP 후원 내역(후원자 닉네임·아이디·수량)과 대조합니다. 완료 알림은 자동 확인이 아닙니다. 미사용 캐시의 SOOP 반환 신청은 검수 중 잠기며, SOOP을 통한 반환이 실제로 확인된 뒤에만 완료 처리하세요. SOOP 반환 조건과 기간은 확정되지 않았으므로 보장하거나 기한을 안내하지 않습니다. 전환 전 현금 충전 기록은 보존되며 새 충전·반환 절차에는 사용하지 않습니다.</p>
       <div id="gameSeriesWalletAdminStatus" class="hint" role="status" aria-live="polite">검수 세션을 열면 신청 목록을 불러옵니다.</div>
       <button id="gameSeriesWalletAdminRefresh" class="perm-refresh-btn" type="button" style="margin-top:10px;">신청 새로고침</button>
       <h3 class="subhead">별풍선 충전·반환 신청</h3>
@@ -2498,7 +2498,7 @@
       const charges = Array.isArray(data.chargeRequests) ? data.chargeRequests : [];
       const support = Array.isArray(data.supportRequests) ? data.supportRequests : [];
       const pendingCount = charges.filter((item) => ['donationCompleted', 'refundRequested', 'processing', 'refundProcessing'].includes(item.status)).length;
-      gameSeriesWalletAdminStatusEl.textContent = `검수할 별풍선 충전·반환 ${pendingCount}건 · 최근 신청 ${charges.length}건 · 고객센터 문의 ${support.length}건`;
+      gameSeriesWalletAdminStatusEl.textContent = `검수할 충전·환불 ${pendingCount}건 · 최근 신청 ${charges.length}건 · 고객센터 문의 ${support.length}건`;
       renderGameSeriesWalletCharges(charges);
       renderGameSeriesWalletSupport(support);
     } catch (error) {
@@ -2516,28 +2516,38 @@
       rejected: '신청 거절', cancelled: '신청 취소', refundRequested: 'SOOP 반환 검수 대기',
       refundProcessing: 'SOOP 반환 처리 중', refundRejecting: 'SOOP 반환 거절 처리 중', refunded: 'SOOP 반환 완료',
     };
-    const visible = items.filter((item) => !['rejected', 'cancelled'].includes(item.status) && item.paymentMethod === 'starBalloon');
+    const visible = items.filter((item) => !['rejected', 'cancelled'].includes(item.status) && ['starBalloon', 'bankTransfer'].includes(item.paymentMethod));
     if (!visible.length) {
-      gameSeriesWalletChargeListEl.innerHTML = '<div class="empty-state">별풍선 충전·반환 신청이 없습니다.</div>';
+      gameSeriesWalletChargeListEl.innerHTML = '<div class="empty-state">충전·환불 신청이 없습니다.</div>';
       return;
     }
     gameSeriesWalletChargeListEl.innerHTML = visible.map((item) => {
+      const isBank = item.paymentMethod === 'bankTransfer';
       const stars = (Number(item.starCount) || 0).toLocaleString('ko-KR');
+      const won = (Number(item.amountKrw) || 0).toLocaleString('ko-KR');
       const cash = (Number(item.cashAmount) || 0).toLocaleString('ko-KR');
       const showRefund = ['refundRequested', 'refundProcessing', 'refundRejecting', 'refunded'].includes(item.status);
       const refundCashAmount = showRefund ? Number(item.refundCashAmount) || (item.status === 'refunded' ? Number(item.cashAmount) || 0 : 0) : 0;
       const refundStarCount = showRefund ? Number(item.refundStarCount) || refundCashAmount : 0;
       const refundDetail = refundCashAmount > 0
-        ? ' · SOOP 반환 요청 ' + refundStarCount.toLocaleString('ko-KR') + '개 (' + refundCashAmount.toLocaleString('ko-KR') + '캐시)' : '';
+        ? (isBank
+          ? ' · 환불 요청 ' + (refundCashAmount * 100).toLocaleString('ko-KR') + '원 (' + refundCashAmount.toLocaleString('ko-KR') + '캐시)'
+          : ' · SOOP 반환 요청 ' + refundStarCount.toLocaleString('ko-KR') + '개 (' + refundCashAmount.toLocaleString('ko-KR') + '캐시)') : '';
+      const viewer = item.chargeType === 'selfCharge' ? '' : '시청자 SOOP ' + escapeHtml(item.soopDonorNickname || '-') + ' (' + escapeHtml(item.soopDonorId || '-') + ') · ';
+      const headline = isBank
+        ? '계좌이체 · ' + viewer + '입금자 ' + escapeHtml(item.depositorName || '-') + ' · ' + won + '원 → ' + cash + '캐시'
+        : 'SOOP ' + escapeHtml(item.soopDonorNickname || '-') + ' (' + escapeHtml(item.soopDonorId || '-') + ') · 별풍선 ' + stars + '개 → ' + cash + '캐시';
       const status = labels[item.status] || item.status || '상태 확인 필요';
       const note = item.reviewNote || item.refundReason || item.refundAdminNote || '';
       let buttons = '';
-      if (item.status === 'donationCompleted') buttons = '<button class="approve" type="button" data-wallet-action="approve">후원 내역 확인 후 승인</button><button class="reject" type="button" data-wallet-action="reject">거절</button>';
+      if (item.status === 'donationCompleted') buttons = '<button class="approve" type="button" data-wallet-action="approve">' + (isBank ? '입금 확인 후 승인' : '후원 내역 확인 후 승인') + '</button><button class="reject" type="button" data-wallet-action="reject">거절</button>';
       if (item.status === 'processing' && item.reviewAction === 'approve') buttons = '<button class="approve" type="button" data-wallet-action="approve">지급 처리 재개</button>';
-      if (item.status === 'refundRequested') buttons = '<button class="approve" type="button" data-wallet-action="completeRefund">SOOP 반환 확인 후 완료</button><button class="reject" type="button" data-wallet-action="rejectRefund">반환 거절</button>';
+      if (item.status === 'refundRequested') buttons = isBank
+        ? '<button class="approve" type="button" data-wallet-action="completeRefund">환불 이체 후 완료</button><button class="reject" type="button" data-wallet-action="rejectRefund">환불 거절</button>'
+        : '<button class="approve" type="button" data-wallet-action="completeRefund">SOOP 반환 확인 후 완료</button><button class="reject" type="button" data-wallet-action="rejectRefund">반환 거절</button>';
       if (item.status === 'refundProcessing' && item.refundAction === 'completeRefund') buttons = '<button class="approve" type="button" data-wallet-action="completeRefund">SOOP 반환 처리 재개</button>';
       if (item.status === 'refundRejecting' && item.refundAction === 'rejectRefund') buttons = '<button class="reject" type="button" data-wallet-action="rejectRefund">SOOP 반환 거절 처리 재개</button>';
-      return '<article class="verif-row" data-wallet-charge-id="' + escapeHtml(item.requestId || '') + '" data-wallet-refund-stars="' + refundStarCount + '" data-wallet-refund-cash="' + refundCashAmount + '"><div class="verif-info"><b>SOOP ' + escapeHtml(item.soopDonorNickname || '-') + ' (' + escapeHtml(item.soopDonorId || '-') + ') · 별풍선 ' + stars + '개 → ' + cash + '캐시</b><span>' + escapeHtml(status) + refundDetail + ' · UID ' + escapeHtml(item.ownerUid || '-') + ' · ' + escapeHtml(formatWalletAdminDate(item.createdAt)) + (note ? ' · ' + escapeHtml(note) : '') + '</span><span>요청 번호 ' + escapeHtml(item.requestId || '-') + '</span></div><div class="verif-actions">' + buttons + '</div></article>';
+      return '<article class="verif-row" data-wallet-charge-id="' + escapeHtml(item.requestId || '') + '" data-wallet-bank="' + (isBank ? '1' : '') + '" data-wallet-refund-stars="' + refundStarCount + '" data-wallet-refund-cash="' + refundCashAmount + '"><div class="verif-info"><b>' + headline + '</b><span>' + escapeHtml(status) + refundDetail + ' · UID ' + escapeHtml(item.ownerUid || '-') + ' · ' + escapeHtml(formatWalletAdminDate(item.createdAt)) + (note ? ' · ' + escapeHtml(note) : '') + '</span><span>요청 번호 ' + escapeHtml(item.requestId || '-') + '</span></div><div class="verif-actions">' + buttons + '</div></article>';
     }).join('');
     gameSeriesWalletChargeListEl.querySelectorAll('button[data-wallet-action]').forEach((button) => {
       button.addEventListener('click', async () => {
@@ -2553,7 +2563,14 @@
         };
         const refundStarCount = Number(row.dataset.walletRefundStars) || 0;
         const refundCashAmount = Number(row.dataset.walletRefundCash) || 0;
-        const confirmation = action === 'completeRefund' && refundStarCount > 0
+        const isBankRow = row.dataset.walletBank === '1';
+        const bankMessages = {
+          approve: '실제 입금 내역의 입금자명과 금액이 신청과 같은지 확인했나요? 승인하면 캐시가 지급됩니다.',
+          completeRefund: `보낸 계좌로 ${(refundCashAmount * 100).toLocaleString('ko-KR')}원을 실제로 이체했나요? 확인 후 ${refundCashAmount.toLocaleString('ko-KR')}캐시를 회수하고 환불 완료로 기록합니다.`,
+          rejectRefund: '이 환불 신청을 거절할까요?',
+        };
+        const confirmation = isBankRow ? (bankMessages[action] || messages[action] || '이 신청을 처리할까요?')
+          : action === 'completeRefund' && refundStarCount > 0
           ? `SOOP에서 별풍선 ${refundStarCount.toLocaleString('ko-KR')}개 반환 처리가 실제로 확인됐나요? 확인 후 ${refundCashAmount.toLocaleString('ko-KR')}캐시를 회수합니다.`
           : messages[action] || '이 신청을 처리할까요?';
         if (!window.confirm(confirmation)) return;
@@ -7094,7 +7111,7 @@
     { id: 'section-onyu-stats', label: '💜 온 이유 통계', role: 'admin' },
     { id: 'section-audit-log', label: '📜 감사 로그', role: 'admin' },
     { id: 'section-skin-purchases', label: '🎨 스킨 구매 내역', role: 'admin' },
-    { id: 'section-game-series-wallet', label: '💳 통합 캐시 별풍선 충전·반환', role: 'admin', group: '검수·승인' },
+    { id: 'section-game-series-wallet', label: '💳 통합 캐시 충전·환불', role: 'admin', group: '검수·승인' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin' },
     { id: 'section-onyu-reviews', label: '💬 온 이유 플레이 후기', role: 'admin' },
     { id: 'section-onyu-production-inquiries', label: '🎬 온 이유 미연시 제작 문의', role: 'admin' },
