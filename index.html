@@ -871,7 +871,7 @@
     </div>
 
     <div class="card" id="section-viewer-bug-reports">
-      <h2>고점체크 버그 제보</h2>
+      <h2>버그 제보 (고점체크·팬페이지·갤러리·상점)</h2>
       <p class="hint">제출된 제보는 관리자만 확인하고 처리하거나 삭제할 수 있습니다.</p>
       <button id="viewerBugReportsRefresh" class="perm-refresh-btn" type="button">새로고침</button>
       <p id="viewerBugReportsStatus" class="hint" role="status"></p>
@@ -1391,7 +1391,8 @@
         const content = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = (item.title || '제목 없음') + ' · ' + (item.status === 'resolved' ? '처리 완료' : '미처리');
         const body = document.createElement('p'); body.textContent = item.content; body.style.whiteSpace = 'pre-wrap';
-        const meta = document.createElement('small'); meta.textContent = new Date(item.createdAt).toLocaleString('ko-KR') + ' · ' + item.id;
+        const serviceLabel = { fanpage: '팬페이지', gallery: '갤러리', shop: '게임시리즈 상점' }[item.service] || '고점체크';
+        const meta = document.createElement('small'); meta.textContent = '[' + serviceLabel + '] ' + new Date(item.createdAt).toLocaleString('ko-KR') + (item.page ? ' · ' + item.page : '') + ' · ' + item.id;
         content.append(title, body, meta); row.append(content);
         const actions = document.createElement('div'); actions.className = 'fanpage-sponsor-admin-actions';
         for (const [label, action] of [[item.status === 'resolved' ? '미처리로 변경' : '처리 완료', item.status === 'resolved' ? 'reopen' : 'resolve'], ['삭제', 'delete']]) {
