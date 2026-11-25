@@ -720,6 +720,12 @@
     <div class="card" id="section-onyu-access">
       <h2>온이유 과거 이용권 기록</h2>
       <p class="hint">온이유는 2026-10-18부터 로그인 사용자와 인증 스트리머에게 무료로 제공되며 새 이용권 구매·선물 신청은 종료됐습니다. 아래는 종료 전에 접수된 기록을 확인·마무리하기 위한 관리자 전용 화면이며, 이용권 기록은 현재 게임 접근 권한에 영향을 주지 않습니다.</p>
+      <h3 class="subhead" style="margin-top:20px;">후원 연동 점검 로그</h3>
+      <p class="hint">실제 후원 테스트 중 스트리머 게임 화면에서 일어난 연동 단계(상태 조회·채팅 연결·후원 수신·의상 확정 결과)입니다. 스트리머별 최근 200건, 7일 보관. 시청자 아이디·닉네임·채팅 원문은 남기지 않습니다.</p>
+      <button id="onyuDonationDiagRefreshBtn" class="perm-refresh-btn" type="button">점검 로그 새로고침</button>
+      <label class="hint" style="margin-left:8px;"><input type="checkbox" id="onyuDonationDiagAuto"> 10초마다 자동 새로고침</label>
+      <div id="onyuDonationDiagStatus" class="hint" role="status" aria-live="polite" style="margin-top:8px;"></div>
+      <div id="onyuDonationDiagList"></div>
       <h3 class="subhead" style="margin-top:20px;">자동 삭제 실패 처리</h3>
       <p class="hint">만료 데이터 삭제에 실패하면 Discord로 즉시 알리고 자동 재시도를 진행합니다. 끝내 삭제되지 않은 항목은 아래 목록에서 확인하고 수동 재시도할 수 있습니다.</p>
       <button id="onyuDonationCleanupRefreshBtn" class="perm-refresh-btn" type="button">실패 목록 새로고침</button>
@@ -1621,6 +1627,7 @@
   const cancelPendingJudgmentFn = httpsCallable(functions, 'cancelPendingJudgment');
   const listStreamerVerificationOverviewFn = httpsCallable(functions, 'listStreamerVerificationOverview');
   const onyuAdminListDonationCleanupFailuresFn = httpsCallable(functions, 'onyuAdminListDonationCleanupFailures');
+  const onyuAdminListDonationDiagnosticsFn = httpsCallable(functions, 'onyuAdminListDonationDiagnostics');
   const onyuAdminRetryDonationCleanupFn = httpsCallable(functions, 'onyuAdminRetryDonationCleanup');
   const onyuAdminLookupEntitlementFn = httpsCallable(functions, 'onyuAdminLookupEntitlement');
   const onyuAdminRevokeEntitlementFn = httpsCallable(functions, 'onyuAdminRevokeEntitlement');
@@ -2909,6 +2916,58 @@
     }
   }
   onyuDonationCleanupRefreshBtn.addEventListener('click', refreshOnyuDonationCleanupFailures);
+
+  // 온이유 후원 연동 점검 로그(2026-11-26)
+  const ONYU_DIAG_LABELS = {
+    'integration-status': '연동 상태 조회', 'chat-connect-start': '채팅 연결 시작', 'chat-connected': '채팅 연결됨',
+    'chat-connect-failed': '채팅 연결 실패', 'chat-offline': '방송 꺼짐(채팅 연결 불가)', 'chat-error': '채팅 오류', 'chat-state': '채팅 상태 변경',
+    'chat-token-missing': '토큰 없음', 'token-refresh': '토큰 갱신', 'donation-received': '🎈 별풍선 수신',
+    'picker-session-open': '의상 선택 화면 열림', 'picker-session-ready': '의상 후원 대기 시작', 'picker-session-failed': '의상 후원 대기 실패',
+    'picker-session-close': '의상 선택 화면 닫힘', 'outfit-donation-result': '👗 의상 확정 판정', 'outfit-donation-failed': '의상 확정 요청 실패',
+    'consent-open': 'SOOP 동의 화면 열기', 'consent-connected': 'SOOP 동의 완료',
+  };
+  const onyuDonationDiagRefreshBtn = document.getElementById('onyuDonationDiagRefreshBtn');
+  const onyuDonationDiagStatusEl = document.getElementById('onyuDonationDiagStatus');
+  const onyuDonationDiagListEl = document.getElementById('onyuDonationDiagList');
+  const onyuDonationDiagAutoEl = document.getElementById('onyuDonationDiagAuto');
+  let onyuDonationDiagTimer = null;
+  async function refreshOnyuDonationDiagnostics() {
+    onyuDonationDiagRefreshBtn.disabled = true;
+    try {
+      const result = await onyuAdminListDonationDiagnosticsFn();
+      const streamers = result.data && Array.isArray(result.data.streamers) ? result.data.streamers : [];
+      onyuDonationDiagListEl.innerHTML = '';
+      onyuDonationDiagStatusEl.textContent = streamers.length ? '마지막 조회: ' + new Date().toLocaleTimeString('ko-KR') : '최근 7일 점검 로그가 없습니다.';
+      streamers.forEach(function (item) {
+        const box = document.createElement('div');
+        box.className = 'verif-row';
+        box.style.display = 'block';
+        const rows = item.logs.slice(0, 60).map(function (log) {
+          const detail = log.detail ? Object.keys(log.detail).map(function (k) { return k + '=' + log.detail[k]; }).join(' · ') : '';
+          const bad = /failed|error|missing/.test(log.event) || (log.detail && log.detail.accepted === false);
+          return '<div style="font-size:12px;padding:2px 0;' + (bad ? 'color:#c0392b;' : '') + '">' +
+            escapeHtml(new Date(log.at).toLocaleTimeString('ko-KR')) + ' <b>' + escapeHtml(ONYU_DIAG_LABELS[log.event] || log.event) + '</b>' +
+            (detail ? ' <span style="opacity:.75">' + escapeHtml(detail) + '</span>' : '') + '</div>';
+        }).join('');
+        box.innerHTML = '<div class="verif-info"><b>' + escapeHtml(item.nickname) + ' (' + escapeHtml(item.soopId) + ')</b>' +
+          '<span>마지막 기록: ' + (item.updatedAt ? new Date(item.updatedAt).toLocaleString('ko-KR') : '-') + ' · ' + item.logs.length + '건</span></div>' +
+          '<div style="max-height:320px;overflow:auto;margin-top:6px;">' + rows + '</div>';
+        onyuDonationDiagListEl.appendChild(box);
+      });
+    } catch (error) {
+      onyuDonationDiagStatusEl.textContent = '점검 로그 조회 실패: ' + (error && error.message || '알 수 없는 오류');
+    } finally {
+      onyuDonationDiagRefreshBtn.disabled = false;
+    }
+  }
+  onyuDonationDiagRefreshBtn.addEventListener('click', refreshOnyuDonationDiagnostics);
+  onyuDonationDiagAutoEl.addEventListener('change', function () {
+    if (onyuDonationDiagTimer) { clearInterval(onyuDonationDiagTimer); onyuDonationDiagTimer = null; }
+    if (onyuDonationDiagAutoEl.checked) {
+      refreshOnyuDonationDiagnostics();
+      onyuDonationDiagTimer = setInterval(function () { if (!document.hidden) refreshOnyuDonationDiagnostics(); }, 10000);
+    }
+  });
 
   function renderOnyuEntitlementLookupResults(data) {
     onyuEntitlementLookupResultsEl.innerHTML = '';
