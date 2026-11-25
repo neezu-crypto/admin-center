@@ -1261,8 +1261,8 @@
       <button id="onyuReviewsMoreBtn" class="perm-refresh-btn" type="button" hidden>이전 후기 더 보기</button>
     </div>
     <div class="card" id="section-onyu-production-inquiries">
-      <h2>온 이유 미연시 제작 문의</h2>
-      <p class="hint">인증 스트리머가 본인 미연시 제작을 문의한 내용입니다. 신청자 방송국 정보와 기획 내용을 확인할 수 있습니다. 최신 100건을 표시합니다.</p>
+      <h2>온 이유 미연시 제작 신청</h2>
+      <p class="hint">엔딩·설정에서 받은 미연시 제작 신청입니다(2026-11-26부터 견적 금액을 통합 캐시로 결제). 시청자 신청은 대상 스트리머가 운영자에게 SOOP 쪽지(신청 번호 6자리)로 동의를 보내면 [동의 확인]을 누르세요. 종료하면 단계에 맞는 비율로 캐시가 신청자에게 돌아갑니다(제작 전 100%, 기획 90%, 그림 50%, 조립 20%). 최신 100건을 표시합니다.</p>
       <button id="onyuProductionInquiriesRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
       <div id="onyuProductionInquiriesStatus" class="hint" style="margin-top:10px;"></div>
       <div id="onyuProductionInquiriesList" style="margin-top:8px;"></div>
@@ -1643,6 +1643,7 @@
   const onyuAdminRevokeEntitlementFn = httpsCallable(functions, 'onyuAdminRevokeEntitlement');
   const onyuAdminListPlayerReviewsFn = httpsCallable(functions, 'onyuAdminListPlayerReviews');
   const onyuAdminListProductionInquiriesFn = httpsCallable(functions, 'onyuAdminListProductionInquiries');
+  const onyuAdminUpdateProductionInquiryFn = httpsCallable(functions, 'onyuAdminUpdateProductionInquiry');
   const onyuAdminSetPlayerReviewVisibilityFn = httpsCallable(functions, 'onyuAdminSetPlayerReviewVisibility');
   const onyuAdminDeletePlayerReviewFn = httpsCallable(functions, 'onyuAdminDeletePlayerReview');
   const listAuditLogOverviewFn = httpsCallable(functions, 'listAuditLogOverview');
@@ -3183,33 +3184,69 @@
     try {
       const result = await onyuAdminListProductionInquiriesFn({});
       const inquiries = Array.isArray(result.data && result.data.inquiries) ? result.data.inquiries : [];
+      const statusLabels = { new: '검토 대기(스트리머 본인)', awaiting_streamer: '스트리머 쪽지 동의 대기', in_review: '검토 중', in_production: '제작 중', completed: '완성 전달', closed: '종료' };
+      const stageLabels = { planning: '기획·대본', artwork: '그림 작업', assembly: '조립·검수', delivered: '완성' };
+      const formatMinutes = function (m) { const h = Math.floor(m / 60), r = m % 60; return '약 ' + (h ? h + '시간' + (r ? ' ' + r + '분' : '') : r + '분'); };
       inquiries.forEach(function (inquiry) {
         const row = document.createElement('article');
         row.className = 'onyu-review-row';
+        row.dataset.inquiryId = inquiry.id;
         const content = document.createElement('div');
         const meta = document.createElement('div');
         meta.className = 'onyu-review-meta';
+        const kind = document.createElement('span');
+        kind.className = 'onyu-review-status';
+        kind.textContent = inquiry.applicantType === 'viewer' ? '시청자 신청' : '스트리머 신청';
+        const code = document.createElement('b');
+        code.textContent = '#' + (inquiry.shortCode || '');
         const name = document.createElement('b');
         name.textContent = inquiry.nickname || '닉네임 미등록';
-        meta.appendChild(name);
+        meta.append(kind, code, name);
         if (inquiry.soopId && /^[a-z0-9]{2,20}$/.test(inquiry.soopId)) {
           const station = document.createElement('a');
           station.href = 'https://www.sooplive.com/station/' + encodeURIComponent(inquiry.soopId);
           station.target = '_blank';
           station.rel = 'noopener noreferrer';
-          station.textContent = '@' + inquiry.soopId;
+          station.textContent = '@' + inquiry.soopId + (inquiry.isVerifiedStreamer ? ' ✓인증' : '');
           meta.appendChild(station);
         }
         const status = document.createElement('span');
         status.className = 'onyu-review-status';
-        status.textContent = inquiry.status === 'new' ? '신규 접수' : String(inquiry.status || '접수');
+        status.textContent = (statusLabels[inquiry.status] || inquiry.status || '접수') + (inquiry.status === 'in_production' && inquiry.stage ? ' · ' + (stageLabels[inquiry.stage] || inquiry.stage) : '');
         const date = document.createElement('time');
         date.textContent = new Date(inquiry.requestedAt || Date.now()).toLocaleString('ko-KR');
         meta.append(status, date);
+        const estimate = document.createElement('p');
+        estimate.className = 'hint';
+        estimate.textContent = inquiry.fundingKrw
+          ? '견적 ' + (inquiry.fundingKrw / 10000) + '만 원 · ' + Number(inquiry.paidCash || 0).toLocaleString('ko-KR') + '캐시 결제 · ' + formatMinutes(inquiry.minutes) + ' · 홍보 ' + inquiry.promoSpots + '곳'
+            + (inquiry.consentDeadlineAt ? ' · 쪽지 동의 기한 ' + new Date(inquiry.consentDeadlineAt).toLocaleDateString('ko-KR') : '')
+            + (inquiry.status === 'closed' ? ' · 반환 ' + inquiry.refundCash + '캐시' + (inquiry.closeReason ? ' (' + inquiry.closeReason + ')' : '') : '')
+          : '캐시 결제 도입 전 문의(결제 없음)';
         const body = document.createElement('p');
         body.className = 'onyu-review-body';
         body.textContent = inquiry.description || '';
-        content.append(meta, body);
+        const actions = document.createElement('div');
+        actions.className = 'onyu-review-actions';
+        const addAction = function (label, action, extra) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = label;
+          button.dataset.inquiryAction = action;
+          if (extra) button.dataset.stage = extra;
+          actions.appendChild(button);
+        };
+        if (inquiry.status === 'awaiting_streamer') addAction('쪽지 동의 확인', 'confirmConsent');
+        if (inquiry.status === 'new' || inquiry.status === 'in_review') addAction('제작 시작', 'startProduction');
+        if (inquiry.status === 'in_production') {
+          if (inquiry.stage !== 'artwork' && inquiry.stage !== 'assembly') addAction('→ 그림 작업', 'setStage', 'artwork');
+          if (inquiry.stage !== 'assembly') addAction('→ 조립·검수', 'setStage', 'assembly');
+          addAction('완성 전달', 'complete');
+        }
+        if (inquiry.status !== 'closed' && inquiry.status !== 'completed') {
+          addAction('종료' + (inquiry.paidCash ? '(캐시 ' + Math.round(inquiry.nextRefundRate * 100) + '% 반환)' : ''), 'close');
+        }
+        content.append(meta, estimate, body, actions);
         row.appendChild(content);
         onyuProductionInquiriesListEl.appendChild(row);
       });
@@ -3224,6 +3261,32 @@
     }
   }
   onyuProductionInquiriesRefreshBtn.addEventListener('click', refreshOnyuProductionInquiries);
+  onyuProductionInquiriesListEl.addEventListener('click', async function (event) {
+    const button = event.target.closest('button[data-inquiry-action]');
+    if (!button) return;
+    const row = button.closest('.onyu-review-row');
+    const id = row && row.dataset.inquiryId;
+    if (!id) return;
+    const action = button.dataset.inquiryAction;
+    const payload = { id: id, action: action };
+    if (action === 'setStage') payload.stage = button.dataset.stage;
+    if (action === 'close') {
+      const reason = window.prompt('종료 사유를 적어 주세요(예: 쪽지 동의 없음 14일 경과, 신청자 취소). ' + button.textContent, '');
+      if (reason === null) return;
+      payload.reason = reason;
+    } else if (action === 'complete' && !window.confirm('완성 전달로 처리할까요? 이후에는 환불되지 않습니다.')) {
+      return;
+    }
+    row.querySelectorAll('button').forEach(function (item) { item.disabled = true; });
+    try {
+      const result = await onyuAdminUpdateProductionInquiryFn(payload);
+      if (action === 'close' && result.data) onyuProductionInquiriesStatusEl.textContent = '종료 처리 완료 · 반환 ' + (result.data.refundCash || 0) + '캐시';
+      await refreshOnyuProductionInquiries();
+    } catch (error) {
+      window.alert('처리 실패: ' + (error && error.message ? error.message : error));
+      row.querySelectorAll('button').forEach(function (item) { item.disabled = false; });
+    }
+  });
   onyuReviewsListEl.addEventListener('click', async function (event) {
     const button = event.target.closest('button[data-action]');
     if (!button) return;
@@ -7097,7 +7160,7 @@
     { id: 'section-game-series-wallet', label: '💳 통합 캐시 충전·환불', role: 'admin', group: '검수·승인' },
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin' },
     { id: 'section-onyu-reviews', label: '💬 온 이유 플레이 후기', role: 'admin' },
-    { id: 'section-onyu-production-inquiries', label: '🎬 온 이유 미연시 제작 문의', role: 'admin' },
+    { id: 'section-onyu-production-inquiries', label: '🎬 온 이유 미연시 제작 신청', role: 'admin' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
