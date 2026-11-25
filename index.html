@@ -714,6 +714,16 @@
       <h3 class="subhead">대기 중인 신청</h3>
       <div id="verificationPendingList"></div>
       <h3 class="subhead">인증된 스트리머</h3>
+      <div style="display:flex;align-items:center;gap:8px;margin:0 0 10px;">
+        <label for="verificationVerifiedSort" class="hint" style="margin:0;">정렬</label>
+        <select id="verificationVerifiedSort" style="background:#f5f1e8;border:1px solid rgba(20,20,22,0.12);color:#1c1a17;padding:6px 10px;border-radius:12px;font-size:12.5px;">
+          <option value="recent">최근 인증순</option>
+          <option value="oldest">오래된 인증순</option>
+          <option value="nickname">닉네임 가나다순</option>
+          <option value="soopId">SOOP 아이디순</option>
+        </select>
+        <span id="verificationVerifiedCount" class="hint" style="margin:0;"></span>
+      </div>
       <div id="verificationVerifiedList"></div>
     </div>
 
@@ -3274,13 +3284,34 @@
     });
   }
 
+  // 인증된 스트리머 목록 정렬(2026-11-26): 선택은 이 브라우저에만 기억한다.
+  const VERIFIED_SORT_KEY = 'adminCenter.verifiedSort';
+  const verificationVerifiedSortEl = document.getElementById('verificationVerifiedSort');
+  const verificationVerifiedCountEl = document.getElementById('verificationVerifiedCount');
+  try { const saved = localStorage.getItem(VERIFIED_SORT_KEY); if (saved && verificationVerifiedSortEl.querySelector('option[value="' + saved + '"]')) verificationVerifiedSortEl.value = saved; } catch (_) {}
+  verificationVerifiedSortEl.addEventListener('change', function () {
+    try { localStorage.setItem(VERIFIED_SORT_KEY, verificationVerifiedSortEl.value); } catch (_) {}
+    renderVerifiedList();
+  });
+  function sortedVerifiedStreamers() {
+    const mode = verificationVerifiedSortEl.value;
+    const text = function (value) { return String(value || '').toLowerCase(); };
+    return verifiedStreamers.slice().sort(function (a, b) {
+      if (mode === 'nickname') return text(a.nickname).localeCompare(text(b.nickname), 'ko');
+      if (mode === 'soopId') return text(a.soopId).localeCompare(text(b.soopId), 'en');
+      const diff = (Number(a.verifiedAt) || 0) - (Number(b.verifiedAt) || 0);
+      return mode === 'oldest' ? diff : -diff;
+    });
+  }
+
   function renderVerifiedList() {
+    verificationVerifiedCountEl.textContent = verifiedStreamers.length ? verifiedStreamers.length + '명' : '';
     if (!verifiedStreamers.length) {
       verificationVerifiedListEl.innerHTML = '<div class="empty-state">인증된 스트리머가 없습니다.</div>';
       return;
     }
     verificationVerifiedListEl.innerHTML = '';
-    verifiedStreamers.forEach(function (v) {
+    sortedVerifiedStreamers().forEach(function (v) {
       const row = document.createElement('div');
       row.className = 'verif-row';
       //  해제는 이제 두 경로를 전부 시도한다: soopId가 있으면 배팅시장 함수(공유
@@ -3291,7 +3322,8 @@
       const soopIdText = v.soopId ? 'SOOP: ' + escapeHtml(v.soopId) : 'SOOP 아이디 미기재(주식시장 쪽 인증)';
       row.innerHTML =
         '<div class="verif-info"><b>' + escapeHtml(v.nickname) + '</b>' +
-        '<span>uid: ' + escapeHtml(String(v.uid || '').slice(0, 10)) + ' · ' + soopIdText + '</span></div>' +
+        '<span>uid: ' + escapeHtml(String(v.uid || '').slice(0, 10)) + ' · ' + soopIdText + '</span>' +
+        (v.verifiedAt ? '<span>인증일: ' + new Date(Number(v.verifiedAt)).toLocaleDateString('ko-KR') + '</span>' : '') + '</div>' +
         '<div class="verif-actions">' +
         '<button class="revoke" type="button">인증 해제</button>' +
         '</div>';
