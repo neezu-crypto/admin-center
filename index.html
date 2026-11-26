@@ -3803,6 +3803,8 @@
   // 서비스별 일시정지 — 주식시장을 뺀 서비스는 공유 기본 RTDB의 servicePause/{id}, 주식시장은 아래 카드의 상태를 그대로 보여 준다.
   const servicePauseAllListEl = document.getElementById('servicePauseAllList');
   let servicePauseAllServices = [];
+  // 메인만 보기(preview)를 화면·서버에 적용한 서비스만 전환 버튼을 보인다(서비스별로 적용하며 늘린다).
+  const PREVIEW_READY_SERVICES = ['streamerJurumable'];
   let servicePauseAllBusy = false;
 
   async function refreshServicePauseAll() {
@@ -3828,12 +3830,18 @@
       row.innerHTML =
         '<div class="game-info" style="flex-direction:column;align-items:flex-start;gap:4px;">' +
           '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>' + escapeHtml(service.name) + '</b>' +
-          '<span class="game-status-tag ' + (paused ? 'frozen' : 'active') + '">' + (paused ? '일시정지 중' : '정상 운영') + '</span></div>' +
+          '<span class="game-status-tag ' + (paused ? 'frozen' : 'active') + '">' + (paused ? '일시정지 중' : '정상 운영') + '</span>' +
+          (paused ? '<span class="game-status-tag">' + (service.mode === 'preview' ? '메인만 보기' : '점검 안내 화면') + '</span>' : '') + '</div>' +
           '<div class="hint" style="margin:0;">' + escapeHtml(note) + '</div>' +
           '<div class="hint" style="margin:0;">자동 함수 · 일시정지 중 중지: ' + escapeHtml(service.stoppedJobs && service.stoppedJobs.length ? service.stoppedJobs.join(', ') : '없음') + ' / 계속 실행: ' + escapeHtml(service.keptJobs && service.keptJobs.length ? service.keptJobs.join(', ') : '없음') + '</div>' +
         '</div>' +
-        '<button type="button" class="perm-refresh-btn">' + (paused ? '▶ 서비스 재개' : '⏸ 일시정지') + '</button>';
-      row.querySelector('button').addEventListener('click', function () { changeServicePauseOne(service, !paused); });
+        '<div style="display:flex;flex-direction:column;gap:6px;">' +
+          '<button type="button" class="perm-refresh-btn" data-pause-toggle>' + (paused ? '▶ 서비스 재개' : '⏸ 일시정지') + '</button>' +
+          (paused && PREVIEW_READY_SERVICES.includes(service.id) ? '<button type="button" class="perm-refresh-btn" data-pause-mode>' + (service.mode === 'preview' ? '점검 안내 화면으로' : '메인만 보기로') + '</button>' : '') +
+        '</div>';
+      row.querySelector('[data-pause-toggle]').addEventListener('click', function () { changeServicePauseOne(service, !paused); });
+      const modeBtn = row.querySelector('[data-pause-mode]');
+      if (modeBtn) modeBtn.addEventListener('click', function () { changeServicePauseOne(service, true, service.mode === 'preview' ? 'gate' : 'preview'); });
       servicePauseAllListEl.appendChild(row);
     });
     //  주식시장은 백그라운드 작업까지 함께 바뀌므로 상태만 보여 주고 변경은 아래 카드에서 한다.
@@ -3851,16 +3859,18 @@
     }
   }
 
-  async function changeServicePauseOne(service, paused) {
+  async function changeServicePauseOne(service, paused, mode) {
     if (servicePauseAllBusy) return;
-    const message = paused
+    const message = mode
+      ? service.name + ' 표시 방식을 ' + (mode === 'preview' ? '“메인만 보기”(메인 화면만 둘러보기, 모든 기능 차단)' : '“점검 안내 화면”') + '으로 바꿀까요?'
+      : paused
       ? service.name + '을(를) 일시정지할까요?\n접속 화면이 점검 안내로 바뀝니다(관리자 로그인은 이용 가능).'
       : service.name + '을(를) 재개할까요?\n점검 안내 화면이 사라지고 모두 이용할 수 있게 됩니다.';
     if (!window.confirm(message)) return;
     servicePauseAllBusy = true;
     servicePauseAllListEl.querySelectorAll('button').forEach(function (el) { el.disabled = true; });
     try {
-      await setServicePauseFn({ serviceId: service.id, paused: paused });
+      await setServicePauseFn(mode ? { serviceId: service.id, paused: paused, mode: mode } : { serviceId: service.id, paused: paused });
     } catch (err) {
       console.error('서비스 일시정지 변경 실패:', err);
       window.alert('변경에 실패했습니다: ' + (err && err.message ? err.message : err));
