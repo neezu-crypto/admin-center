@@ -3287,6 +3287,7 @@
         const row = document.createElement('article');
         row.className = 'onyu-review-row';
         row.dataset.commissionId = item.id;
+        row.dataset.promoUnits = item.promoUnits || 0;
         const content = document.createElement('div');
         const meta = document.createElement('div');
         meta.className = 'onyu-review-meta';
@@ -3305,8 +3306,8 @@
         add('time', new Date(item.createdAt).toLocaleString('ko-KR'));
         const info = document.createElement('p');
         info.className = 'hint';
-        info.textContent = (item.priceKrw / 10000) + '만 원(' + item.priceCash + '캐시)' + (item.isPromo ? ' 오픈 특가' : '') + ' · 옵션 ' + item.units + (item.donation ? ' · 후원 연동' : '') + (item.ownAvatar ? ' · 본인 아바타' : '')
-          + ' · 기간 ' + item.days + '일 · 홍보 ' + item.promoSpots + '곳 · 모금 ' + item.raisedCash + '/' + item.priceCash + '캐시(' + item.donorCount + '명)'
+        info.textContent = '합계 ' + (item.priceKrw / 10000) + '만 원(' + item.priceCash + '캐시) = 제작 ' + (item.productionKrw / 10000) + '만' + (item.promoKrw ? ' + 홍보 ' + (item.promoKrw / 10000) + '만(' + item.promoSpots + '곳·최대 ' + item.promoDays + '일)' : '') + (item.isPromo ? ' · 오픈 특가' : '') + ' · 옵션 ' + item.units + (item.multi ? ' · 멀티 ' + item.players + '명' : '') + (item.donation ? ' · 후원 연동' : '') + (item.ownAvatar ? ' · 본인 아바타' : '')
+          + ' · 기간 ' + item.days + '일' + (item.promoStatus ? ' · 홍보 ' + ({ pending: '진행 대기', done: '완료', refunded: '일부 반환' }[item.promoStatus] || item.promoStatus) : '') + ' · 모금 ' + item.raisedCash + '/' + item.priceCash + '캐시(' + item.donorCount + '명)'
           + (item.fundingDeadlineAt && item.status === 'funding' ? ' · 모금 마감 ' + new Date(item.fundingDeadlineAt).toLocaleDateString('ko-KR') : '')
           + (item.dueAt ? ' · 전달 기한 ' + new Date(item.dueAt).toLocaleDateString('ko-KR') : '')
           + (item.closeReason ? ' · ' + item.closeReason + ' · 반환 ' + item.refundedCash + '캐시' : '');
@@ -3327,6 +3328,7 @@
           btn('완성 전달', 'complete');
           btn('기한 초과 취소(전액 반환)', 'cancelOverdue');
         }
+        if (item.status === 'completed' && item.promoStatus === 'pending') { btn('홍보 완료(정산)', 'finishPromo'); btn('홍보 일부 못 함(남은 곳 반환)', 'refundPromo'); }
         if (['awaiting_streamer', 'funding', 'queued', 'in_production'].includes(item.status)) btn('취소(' + Math.round(item.nextRefundRate * 100) + '% 반환)', 'cancel');
         content.append(meta, info, style, body, actions);
         row.appendChild(content);
@@ -3353,14 +3355,20 @@
       const reason = window.prompt('취소 사유를 적어 주세요. ' + button.textContent, action === 'cancelOverdue' ? '운영자 기한 초과' : '');
       if (reason === null) return;
       payload.action = 'cancel'; payload.reason = reason; payload.overdue = action === 'cancelOverdue';
-    } else if (action === 'complete' && !window.confirm('완성 전달로 처리할까요? 이후에는 반환되지 않습니다.')) {
+    } else if (action === 'refundPromo') {
+      const left = window.prompt('진행하지 못한 홍보 단위를 적어 주세요(100곳 = 1, 최대 ' + Math.round((Number(row.dataset.promoUnits) || 0)) + ').', '1');
+      if (left === null) return;
+      payload.remainingUnits = Number(left);
+    } else if (action === 'finishPromo' && !window.confirm('대신 홍보를 모두 마쳤나요? 정산하면 홍보비는 반환되지 않습니다.')) {
+      return;
+    } else if (action === 'complete' && !window.confirm('완성 전달로 처리할까요? 제작비는 이후 반환되지 않습니다(대신 홍보가 있으면 홍보 단계로 넘어갑니다).')) {
       return;
     }
     row.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
     try {
       const result = await gameCommissionAdminFn(payload);
       await refreshGameCommissions();
-      if (payload.action === 'cancel' && result.data) gameCommissionsStatusEl.textContent = '취소 완료 · 반환 ' + (result.data.refundedCash || 0) + '캐시';
+      if ((payload.action === 'cancel' || payload.action === 'refundPromo' || payload.action === 'finishPromo') && result.data) gameCommissionsStatusEl.textContent = '처리 완료 · 반환 ' + (result.data.refundedCash || 0) + '캐시';
     } catch (error) {
       window.alert('처리 실패: ' + (error && error.message ? error.message : error));
       row.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
