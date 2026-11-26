@@ -3332,7 +3332,7 @@
         row.appendChild(content);
         gameCommissionsListEl.appendChild(row);
       });
-      gameCommissionsStatusEl.textContent = (items.length ? items.length + '건 · 최신순' : '접수된 의뢰가 없습니다.') + ' · 오픈 특가 남은 자리 ' + (result.data.promoLeft || 0);
+      gameCommissionsStatusEl.textContent = (items.length ? items.length + '건 · 최신순' : '접수된 의뢰가 없습니다.') + ' · ' + (result.data.round || 1) + '차 모집 남은 신청 ' + (result.data.roundLeft || 0) + ' · 오픈 특가 남은 자리 ' + (result.data.promoLeft || 0);
     } catch (error) {
       console.error('게임 제작 의뢰 조회 실패:', error);
       gameCommissionsStatusEl.textContent = '불러오지 못했습니다. ' + (error && error.message ? error.message : '');
