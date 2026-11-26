@@ -1267,6 +1267,12 @@
       <div id="gameCommissionsStatus" class="hint" style="margin-top:10px;"></div>
       <div id="gameCommissionsList" style="margin-top:8px;"></div>
     </div>
+    <div class="card" id="section-onyu-broadcast-plays">
+      <h2>온이유 방송 플레이 기록</h2>
+      <p class="hint">인증 스트리머가 SOOP 방송 중에 온이유를 시작한 기록입니다(2026-11-27). 하루 1번 다시보기와 연결해 플레이 시작 시점 링크를 만듭니다(방송 종료 3시간 뒤~7일). 최대 2주 보관 후 자동 삭제, Discord 알림 없음.</p>
+      <button id="onyuBroadcastPlaysRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="onyuBroadcastPlaysList" style="margin-top:8px;"></div>
+    </div>
     <div class="card" id="section-onyu-production-inquiries">
       <h2>온 이유 미연시 제작 신청</h2>
       <p class="hint">엔딩·설정에서 받은 미연시 제작 신청입니다(2026-11-26부터 견적 금액을 통합 캐시로 결제). 시청자 신청은 대상 스트리머가 운영자에게 SOOP 쪽지(신청 번호 6자리)로 동의를 보내면 [동의 확인]을 누르세요. 종료하면 단계에 맞는 비율로 캐시가 신청자에게 돌아갑니다(제작 전 100%, 기획 90%, 그림 50%, 조립 20%). 최신 100건을 표시합니다.</p>
@@ -3343,6 +3349,50 @@
     }
   }
   gameCommissionsRefreshBtn.addEventListener('click', refreshGameCommissions);
+
+  // 온이유 방송 플레이 기록(관리자만, 삭제는 기록 단위).
+  const onyuBroadcastPlaysListFn = httpsCallable(functions, 'onyuAdminListBroadcastPlays');
+  const onyuBroadcastPlayDeleteFn = httpsCallable(functions, 'onyuAdminDeleteBroadcastPlay');
+  const onyuBroadcastPlaysListEl = document.getElementById('onyuBroadcastPlaysList');
+  function onyuBroadcastDuration(ms) {
+    const min = Math.max(0, Math.round(ms / 60000));
+    return (min >= 60 ? Math.floor(min / 60) + '시간 ' : '') + (min % 60) + '분';
+  }
+  async function refreshOnyuBroadcastPlays() {
+    onyuBroadcastPlaysListEl.innerHTML = '<div class="empty-state">불러오는 중...</div>';
+    try {
+      const items = (await onyuBroadcastPlaysListFn()).data.items || [];
+      if (!items.length) { onyuBroadcastPlaysListEl.innerHTML = '<div class="empty-state">기록이 없습니다.</div>'; return; }
+      onyuBroadcastPlaysListEl.innerHTML = '';
+      items.forEach(function (item) {
+        const vod = item.vod || null;
+        const sinceStart = vod && vod.broadcastStartAt ? ' · 방송 시작 후 ' + onyuBroadcastDuration(item.playStartAt - vod.broadcastStartAt) : '';
+        const vodHtml = !vod ? '<span class="hint" style="margin:0;">다시보기 연결 대기</span>'
+          : vod.url ? '<a href="' + escapeHtml(vod.url) + '" target="_blank" rel="noopener">다시보기 해당 시점 ▶</a>' + (vod.part > 1 ? ' (' + vod.part + '파트)' : '')
+          : '<span class="hint" style="margin:0;">다시보기를 찾지 못함(비공개·삭제 등)</span>';
+        const row = document.createElement('div');
+        row.className = 'game-row';
+        row.innerHTML = '<div class="game-info" style="flex-direction:column;align-items:flex-start;gap:4px;">'
+          + '<b>' + escapeHtml(item.soopId) + '</b>'
+          + '<div class="hint" style="margin:0;">' + escapeHtml(new Date(item.playStartAt).toLocaleString('ko-KR')) + ' 시작' + escapeHtml(sinceStart)
+          + ' · 플레이 약 ' + escapeHtml(onyuBroadcastDuration((item.lastSeenAt || item.playStartAt) - item.playStartAt))
+          + (item.startChapter ? ' · 시작 ' + escapeHtml(item.startChapter) : '') + (item.endChapter ? ' · 마지막 ' + escapeHtml(item.endChapter) : '')
+          + (item.ending ? ' · 엔딩 ' + escapeHtml(item.ending) : '') + '</div>'
+          + '<div>' + vodHtml + '</div></div>'
+          + '<button type="button" class="perm-refresh-btn" data-bp-delete>삭제</button>';
+        row.querySelector('[data-bp-delete]').addEventListener('click', async function (event) {
+          if (!window.confirm(item.soopId + ' 방송 플레이 기록 1건을 삭제할까요? 되돌릴 수 없습니다.')) return;
+          event.target.disabled = true;
+          try { await onyuBroadcastPlayDeleteFn({ soopId: item.soopId, sessionId: item.sessionId }); await refreshOnyuBroadcastPlays(); }
+          catch (error) { window.alert('삭제 실패: ' + (error && error.message ? error.message : error)); event.target.disabled = false; }
+        });
+        onyuBroadcastPlaysListEl.appendChild(row);
+      });
+    } catch (error) {
+      onyuBroadcastPlaysListEl.innerHTML = '<div class="empty-state">조회 실패: ' + escapeHtml(error && error.message ? error.message : String(error)) + '</div>';
+    }
+  }
+  document.getElementById('onyuBroadcastPlaysRefreshBtn').addEventListener('click', refreshOnyuBroadcastPlays);
   gameCommissionsListEl.addEventListener('click', async function (event) {
     const button = event.target.closest('button[data-commission-action]');
     if (!button) return;
