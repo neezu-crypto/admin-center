@@ -1260,6 +1260,13 @@
       <div id="onyuReviewsList" style="margin-top:8px;"></div>
       <button id="onyuReviewsMoreBtn" class="perm-refresh-btn" type="button" hidden>이전 후기 더 보기</button>
     </div>
+    <div class="card" id="section-game-commissions">
+      <h2>게임 제작 의뢰(모금형)</h2>
+      <p class="hint">통합상점 [게임 제작 의뢰]에서 받은 신청입니다(2026-11-26). 시청자 신청은 대상 스트리머가 SOOP 쪽지(신청 번호 6자리)로 동의하면 [쪽지 동의 확인] → 30일 모금이 열립니다. 목표를 채우면 제작 대기, 제작은 한 번에 1건입니다. 취소 시 제작 전 100%, 기획 90%, 그림 50%, 조립 20%를 후원자마다 반환합니다. 기한 초과 취소는 전액 반환.</p>
+      <button id="gameCommissionsRefreshBtn" class="perm-refresh-btn" type="button">새로고침</button>
+      <div id="gameCommissionsStatus" class="hint" style="margin-top:10px;"></div>
+      <div id="gameCommissionsList" style="margin-top:8px;"></div>
+    </div>
     <div class="card" id="section-onyu-production-inquiries">
       <h2>온 이유 미연시 제작 신청</h2>
       <p class="hint">엔딩·설정에서 받은 미연시 제작 신청입니다(2026-11-26부터 견적 금액을 통합 캐시로 결제). 시청자 신청은 대상 스트리머가 운영자에게 SOOP 쪽지(신청 번호 6자리)로 동의를 보내면 [동의 확인]을 누르세요. 종료하면 단계에 맞는 비율로 캐시가 신청자에게 돌아갑니다(제작 전 100%, 기획 90%, 그림 50%, 조립 20%). 최신 100건을 표시합니다.</p>
@@ -1894,7 +1901,7 @@
     },
     {
       id: 'review', label: '검수·승인', icon: '🔎', role: 'admin',
-      sections: ['section-fanpage-subscriptions', 'section-review-queue', 'section-onyu-reviews', 'section-onyu-production-inquiries', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
+      sections: ['section-fanpage-subscriptions', 'section-review-queue', 'section-onyu-reviews', 'section-onyu-production-inquiries', 'section-game-commissions', 'section-purchase-approval', 'section-listing-request', 'section-market-management'],
     },
     {
       id: 'cash-store', label: '통합 캐시 상점', icon: '💳', role: 'admin',
@@ -2204,7 +2211,7 @@
       } else if (sessionId === 'review') {
         if (role === 'admin') startMarketManagementSubscription();
         startReviewQueueSubscriptions();
-        jobs.push(refreshFanpageSubscriptionRequests(), refreshOnyuPlayerReviews(true), refreshOnyuProductionInquiries(), refreshTamagotchiFailures());
+        jobs.push(refreshFanpageSubscriptionRequests(), refreshOnyuPlayerReviews(true), refreshOnyuProductionInquiries(), refreshGameCommissions(), refreshTamagotchiFailures());
       } else if (sessionId === 'cash-store') {
         jobs.push(refreshGameSeriesWalletAdmin());
       } else if (sessionId === 'content') {
@@ -3260,6 +3267,105 @@
       onyuProductionInquiriesRefreshBtn.disabled = false;
     }
   }
+
+  // 게임 제작 의뢰(모금형, 2026-11-26). 서버: 통합상점 codebase gameSeriesCommissionAdmin.
+  const gameCommissionAdminFn = httpsCallable(functions, 'gameSeriesCommissionAdmin');
+  const gameCommissionsListEl = document.getElementById('gameCommissionsList');
+  const gameCommissionsStatusEl = document.getElementById('gameCommissionsStatus');
+  const gameCommissionsRefreshBtn = document.getElementById('gameCommissionsRefreshBtn');
+  async function refreshGameCommissions() {
+    if (!gameCommissionsListEl) return;
+    gameCommissionsStatusEl.textContent = '제작 의뢰를 불러오는 중...';
+    gameCommissionsRefreshBtn.disabled = true;
+    gameCommissionsListEl.innerHTML = '';
+    try {
+      const result = await gameCommissionAdminFn({ action: 'list' });
+      const items = (result.data && result.data.items) || [];
+      const statusLabels = { awaiting_streamer: '스트리머 쪽지 동의 대기', funding: '모금 중', queued: '제작 대기', in_production: '제작 중', completed: '완성', failed: '모금 실패(반환)', cancelled: '취소(반환)' };
+      const stageLabels = { planning: '기획·대본', artwork: '그림 작업', assembly: '조립·검수', delivered: '전달' };
+      items.forEach(function (item) {
+        const row = document.createElement('article');
+        row.className = 'onyu-review-row';
+        row.dataset.commissionId = item.id;
+        const content = document.createElement('div');
+        const meta = document.createElement('div');
+        meta.className = 'onyu-review-meta';
+        const add = function (tag, text, cls) { const el = document.createElement(tag); if (cls) el.className = cls; el.textContent = text; meta.appendChild(el); return el; };
+        add('span', item.applicantType === 'viewer' ? '시청자 신청' : '스트리머 신청', 'onyu-review-status');
+        add('b', '#' + item.shortCode);
+        add('b', item.genreLabel + ' · ' + item.title);
+        if (/^[a-z0-9]{2,20}$/.test(item.target.soopId)) {
+          const a = document.createElement('a');
+          a.href = 'https://www.sooplive.com/station/' + encodeURIComponent(item.target.soopId);
+          a.target = '_blank'; a.rel = 'noopener noreferrer';
+          a.textContent = item.target.nickname + ' @' + item.target.soopId + (item.isVerifiedStreamer ? ' ✓인증' : '');
+          meta.appendChild(a);
+        }
+        add('span', (statusLabels[item.status] || item.status) + (item.status === 'in_production' ? ' · ' + (stageLabels[item.stage] || '') : '') + (item.queuePos ? ' · 대기 ' + item.queuePos + '번' : ''), 'onyu-review-status');
+        add('time', new Date(item.createdAt).toLocaleString('ko-KR'));
+        const info = document.createElement('p');
+        info.className = 'hint';
+        info.textContent = (item.priceKrw / 10000) + '만 원(' + item.priceCash + '캐시)' + (item.isPromo ? ' 오픈 특가' : '') + ' · 옵션 ' + item.units + (item.donation ? ' · 후원 연동' : '') + (item.ownAvatar ? ' · 본인 아바타' : '')
+          + ' · 기간 ' + item.days + '일 · 홍보 ' + item.promoSpots + '곳 · 모금 ' + item.raisedCash + '/' + item.priceCash + '캐시(' + item.donorCount + '명)'
+          + (item.fundingDeadlineAt && item.status === 'funding' ? ' · 모금 마감 ' + new Date(item.fundingDeadlineAt).toLocaleDateString('ko-KR') : '')
+          + (item.dueAt ? ' · 전달 기한 ' + new Date(item.dueAt).toLocaleDateString('ko-KR') : '')
+          + (item.closeReason ? ' · ' + item.closeReason + ' · 반환 ' + item.refundedCash + '캐시' : '');
+        const style = document.createElement('p');
+        style.className = 'hint';
+        style.textContent = '그림체 ' + (item.style.art || '') + ' · 분위기 ' + (item.style.mood || '') + ' · 소개: ' + item.pitch;
+        const body = document.createElement('p');
+        body.className = 'onyu-review-body';
+        body.textContent = item.description;
+        const actions = document.createElement('div');
+        actions.className = 'onyu-review-actions';
+        const btn = function (label, action, extra) { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.dataset.commissionAction = action; if (extra) b.dataset.stage = extra; actions.appendChild(b); };
+        if (item.status === 'awaiting_streamer') btn('쪽지 동의 확인(모금 열기)', 'confirmConsent');
+        if (item.status === 'queued') btn('제작 시작', 'start');
+        if (item.status === 'in_production') {
+          if (item.stage === 'planning') btn('→ 그림 작업', 'setStage', 'artwork');
+          if (item.stage !== 'assembly') btn('→ 조립·검수', 'setStage', 'assembly');
+          btn('완성 전달', 'complete');
+          btn('기한 초과 취소(전액 반환)', 'cancelOverdue');
+        }
+        if (['awaiting_streamer', 'funding', 'queued', 'in_production'].includes(item.status)) btn('취소(' + Math.round(item.nextRefundRate * 100) + '% 반환)', 'cancel');
+        content.append(meta, info, style, body, actions);
+        row.appendChild(content);
+        gameCommissionsListEl.appendChild(row);
+      });
+      gameCommissionsStatusEl.textContent = (items.length ? items.length + '건 · 최신순' : '접수된 의뢰가 없습니다.') + ' · 오픈 특가 남은 자리 ' + (result.data.promoLeft || 0);
+    } catch (error) {
+      console.error('게임 제작 의뢰 조회 실패:', error);
+      gameCommissionsStatusEl.textContent = '불러오지 못했습니다. ' + (error && error.message ? error.message : '');
+    } finally {
+      gameCommissionsRefreshBtn.disabled = false;
+    }
+  }
+  gameCommissionsRefreshBtn.addEventListener('click', refreshGameCommissions);
+  gameCommissionsListEl.addEventListener('click', async function (event) {
+    const button = event.target.closest('button[data-commission-action]');
+    if (!button) return;
+    const row = button.closest('.onyu-review-row');
+    const id = row && row.dataset.commissionId;
+    let action = button.dataset.commissionAction;
+    const payload = { id: id, action: action };
+    if (action === 'setStage') payload.stage = button.dataset.stage;
+    if (action === 'cancel' || action === 'cancelOverdue') {
+      const reason = window.prompt('취소 사유를 적어 주세요. ' + button.textContent, action === 'cancelOverdue' ? '운영자 기한 초과' : '');
+      if (reason === null) return;
+      payload.action = 'cancel'; payload.reason = reason; payload.overdue = action === 'cancelOverdue';
+    } else if (action === 'complete' && !window.confirm('완성 전달로 처리할까요? 이후에는 반환되지 않습니다.')) {
+      return;
+    }
+    row.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    try {
+      const result = await gameCommissionAdminFn(payload);
+      await refreshGameCommissions();
+      if (payload.action === 'cancel' && result.data) gameCommissionsStatusEl.textContent = '취소 완료 · 반환 ' + (result.data.refundedCash || 0) + '캐시';
+    } catch (error) {
+      window.alert('처리 실패: ' + (error && error.message ? error.message : error));
+      row.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
+    }
+  });
   onyuProductionInquiriesRefreshBtn.addEventListener('click', refreshOnyuProductionInquiries);
   onyuProductionInquiriesListEl.addEventListener('click', async function (event) {
     const button = event.target.closest('button[data-inquiry-action]');
@@ -7161,6 +7267,7 @@
     { id: 'section-review-queue', label: '🔎 페이지별 검수', role: 'admin' },
     { id: 'section-onyu-reviews', label: '💬 온 이유 플레이 후기', role: 'admin' },
     { id: 'section-onyu-production-inquiries', label: '🎬 온 이유 미연시 제작 신청', role: 'admin' },
+    { id: 'section-game-commissions', label: '🎮 게임 제작 의뢰(모금)', role: 'admin' },
     { id: 'section-purchase-approval', label: '🧾 구매 승인 검수', role: 'admin' },
     { id: 'section-listing-request', label: '🏷 상장 신청 관리', role: 'admin' },
     { id: 'section-market-management', label: '🎲 배팅시장 마켓 관리', role: 'admin' },
