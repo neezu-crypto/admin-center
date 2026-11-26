@@ -3756,15 +3756,26 @@
     servicePauseMasterEl.innerHTML =
       '<div class="game-info" style="flex-direction:column;align-items:flex-start;gap:6px;">' +
         '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><b>서비스 상태</b>' +
-        '<span class="game-status-tag ' + (paused ? 'frozen' : 'active') + '">' + (paused ? '일시정지 중 · 점검 안내 표시' : '정상 운영') + '</span></div>' +
+        '<span class="game-status-tag ' + (paused ? 'frozen' : 'active') + '">' + (paused ? (servicePauseState.mode === 'preview' ? '일시정지 중 · 메인만 보기' : '일시정지 중 · 점검 안내 표시') : '정상 운영') + '</span></div>' +
         '<div class="hint" style="margin:0;">' + notes.map(escapeHtml).join(' · ') + '</div>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">' +
           '<button type="button" class="perm-refresh-btn" data-pause="true">⏸ ' + (paused ? '일시정지 적용' : '일시정지 시작') + '</button>' +
           '<button type="button" class="perm-refresh-btn" data-pause="false"' + (!paused && !servicePauseJobs.some(function (job) { return !job.enabled; }) ? ' disabled' : '') + '>▶ 서비스 재개</button>' +
+          (paused ? '<button type="button" class="perm-refresh-btn" data-stock-pause-mode>' + (servicePauseState.mode === 'preview' ? '점검 안내 화면으로' : '메인만 보기로') + '</button>' : '') +
         '</div>' +
       '</div>';
     servicePauseMasterEl.querySelectorAll('button[data-pause]').forEach(function (btn) {
       btn.addEventListener('click', function () { changeServicePause(btn.dataset.pause === 'true'); });
+    });
+    const stockModeBtn = servicePauseMasterEl.querySelector('[data-stock-pause-mode]');
+    if (stockModeBtn) stockModeBtn.addEventListener('click', async function () {
+      const next = servicePauseState.mode === 'preview' ? 'gate' : 'preview';
+      if (servicePauseBusy || !window.confirm('주식시장 표시 방식을 ' + (next === 'preview' ? '“메인만 보기”(메인 화면만 둘러보기, 모든 기능 차단)' : '“점검 안내 화면”') + '으로 바꿀까요?\n백그라운드 작업은 그대로 멈춰 있습니다.')) return;
+      servicePauseBusy = true;
+      stockModeBtn.disabled = true;
+      try { await setStockMarketServicePauseFn({ paused: true, mode: next }); }
+      catch (err) { window.alert('변경에 실패했습니다: ' + (err && err.message ? err.message : err)); }
+      finally { servicePauseBusy = false; await refreshServicePause(); }
     });
   }
 
@@ -3854,7 +3865,7 @@
   const servicePauseAllListEl = document.getElementById('servicePauseAllList');
   let servicePauseAllServices = [];
   // 메인만 보기(preview)를 화면·서버에 적용한 서비스만 전환 버튼을 보인다(서비스별로 적용하며 늘린다).
-  const PREVIEW_READY_SERVICES = ['streamerJurumable'];
+  const PREVIEW_READY_SERVICES = ['streamerJurumable', 'bettingMarket', 'backgroundMarket', 'lifeGame'];
   let servicePauseAllBusy = false;
 
   async function refreshServicePauseAll() {
