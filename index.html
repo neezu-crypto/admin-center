@@ -3312,7 +3312,7 @@
           + (item.closeReason ? ' · ' + item.closeReason + ' · 반환 ' + item.refundedCash + '캐시' : '');
         const style = document.createElement('p');
         style.className = 'hint';
-        style.textContent = '그림체 ' + (item.style.art || '') + ' · 분위기 ' + (item.style.mood || '') + ' · 소개: ' + item.pitch;
+        style.textContent = (item.styleLabel || ('그림체 ' + (item.style.art || '') + ' · 분위기 ' + (item.style.mood || ''))) + ' · 소개: ' + item.pitch;
         const body = document.createElement('p');
         body.className = 'onyu-review-body';
         body.textContent = item.description;
