@@ -4867,7 +4867,7 @@
     streamerPromoBatchStatusEl.textContent = orderPrefix + (labels[status] || String(state && state.message || '자동 게시 상태 확인 중…'));
     promoBatchUnresolvedPublish = state.unresolvedPublish === true;
     streamerPromoBatchStartBtn.disabled = promoBatchIsActive || promoBatchUnresolvedPublish || promoPermissionCheckIsActive;
-    streamerPromoBatchStopBtn.disabled = !promoBatchIsActive;
+    streamerPromoBatchStopBtn.disabled = !(promoBatchIsActive || promoBatchUnresolvedPublish);
     streamerPromoBatchCountEl.disabled = promoBatchIsActive;
     streamerPromoGoalCountEl.disabled = promoBatchIsActive;
     streamerPromoBatchDelayEl.disabled = promoBatchIsActive;
